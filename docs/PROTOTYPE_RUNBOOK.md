@@ -5,8 +5,9 @@ End-to-end local prototype: **hotkey hold → audio capture → stub STT → tex
 ## Prerequisites
 
 - macOS 14+ with Xcode Command Line Tools installed
-- Accessibility permission granted to Terminal (System Settings → Privacy & Security → Accessibility)
-- Microphone permission granted to Terminal (System Settings → Privacy & Security → Microphone)
+- Accessibility permission granted to the process that runs the app (Terminal if launching from Terminal) in System Settings → Privacy & Security → Accessibility
+- Input Monitoring permission granted to the same process in System Settings → Privacy & Security → Input Monitoring
+- Microphone permission granted to the same process in System Settings → Privacy & Security → Microphone
 
 ## Type-Check
 
@@ -36,8 +37,8 @@ The app starts as a menu-bar-only process (no Dock icon).
 - [ ] Menu bar shows a microphone icon
 - [ ] Floating bubble appears in the top-right corner, state "Ready"
 
-### 2. Hotkey Hold (Right Command)
-- [ ] Hold Right Command for > 0.3 s
+### 2. Hotkey Hold (Command)
+- [ ] Hold either Command key for > 0.3 s
 - [ ] Bubble transitions to "Listening…" (blue, pulsing ring)
 - [ ] Menu bar icon changes to waveform
 
