@@ -413,8 +413,9 @@ private extension ModelDownloaderService {
             return "Downloaded model file is unreadable. Check disk permissions and retry."
         }
 
-        guard fileSize >= variant.minimumValidBytes else {
-            return "Downloaded model file is too small (\(fileSize / 1_000_000) MB). Minimum expected is \(variant.minimumValidBytes / 1_000_000) MB."
+        let minimumModelBytes = variant.minimumValidModelBytes(using: source)
+        guard fileSize >= minimumModelBytes else {
+            return "Downloaded model file is too small (\(fileSize / 1_000_000) MB). Minimum expected is \(minimumModelBytes / 1_000_000) MB."
         }
 
         if source.tokenizerURL != nil {

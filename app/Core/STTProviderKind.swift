@@ -145,12 +145,20 @@ struct ModelVariant: Equatable, Identifiable {
             return false
         }
 
-        if fileSize < minimumValidBytes {
-            logger.warning("Model file too small (\(fileSize) bytes < \(self.minimumValidBytes) min), treating as incomplete")
+        let source = configuredSource
+        let minimumModelBytes = minimumValidModelBytes(using: source)
+        if fileSize < minimumModelBytes {
+            logger.warning("Model file too small (\(fileSize) bytes < \(minimumModelBytes) min), treating as incomplete")
             return false
         }
 
-        if let tokenizerStatus = tokenizerValidationStatus(using: configuredSource),
+        if let sidecarStatus = modelDataValidationStatus(using: source),
+           sidecarStatus.isReady == false {
+            logger.warning("Model sidecar not ready for \(self.id): \(sidecarStatus.detail)")
+            return false
+        }
+
+        if let tokenizerStatus = tokenizerValidationStatus(using: source),
            tokenizerStatus.isReady == false {
             logger.warning("Tokenizer not ready for \(self.id): \(tokenizerStatus.detail)")
             return false
@@ -172,16 +180,56 @@ struct ModelVariant: Equatable, Identifiable {
             return "Cannot read file"
         }
 
-        if fileSize < minimumValidBytes {
-            return "Incomplete (\(fileSize / 1_000_000) MB / \(sizeBytes / 1_000_000) MB expected)"
+        let source = configuredSource
+        let minimumModelBytes = minimumValidModelBytes(using: source)
+        if fileSize < minimumModelBytes {
+            return "Incomplete (\(fileSize / 1_000_000) MB / \(minimumModelBytes / 1_000_000) MB minimum expected)"
         }
 
-        if let tokenizerStatus = tokenizerValidationStatus(using: configuredSource),
+        if let sidecarStatus = modelDataValidationStatus(using: source),
+           sidecarStatus.isReady == false {
+            return sidecarStatus.detail
+        }
+
+        if let tokenizerStatus = tokenizerValidationStatus(using: source),
            tokenizerStatus.isReady == false {
             return tokenizerStatus.detail
         }
 
         return "Ready (\(fileSize / 1_000_000) MB)"
+    }
+
+    func minimumValidModelBytes(using source: ParakeetResolvedModelSource?) -> Int64 {
+        // Some ONNX exports store most tensor weights in a sidecar file
+        // (e.g. model.onnx.data). In that case the model graph file itself
+        // can be relatively small (~tens of MB).
+        if source?.modelDataURL != nil {
+            return 5_000_000
+        }
+        return minimumValidBytes
+    }
+
+    func modelDataValidationStatus(using source: ParakeetResolvedModelSource?) -> (isReady: Bool, detail: String)? {
+        guard let source, source.modelDataURL != nil else { return nil }
+        guard let modelURL = localURL else {
+            return (false, "Model path unavailable while checking ONNX sidecar data file.")
+        }
+
+        let sidecarURL = modelURL.appendingPathExtension("data")
+        guard FileManager.default.fileExists(atPath: sidecarURL.path) else {
+            return (false, "ONNX sidecar data file is missing (model.onnx.data). Re-download model artifacts.")
+        }
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: sidecarURL.path),
+              let fileSize = attrs[.size] as? Int64 else {
+            return (false, "ONNX sidecar data file cannot be read. Re-download model artifacts.")
+        }
+
+        guard fileSize >= 200_000_000 else {
+            return (false, "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB). Re-download model artifacts.")
+        }
+
+        return (true, "ONNX sidecar ready (\(sidecarURL.lastPathComponent), \(fileSize / 1_000_000) MB)")
     }
 
     func tokenizerValidationStatus(using source: ParakeetResolvedModelSource?) -> (isReady: Bool, detail: String)? {
