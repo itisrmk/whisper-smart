@@ -218,6 +218,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 logger.error("No model variant available for \(kind.rawValue) — falling back to Apple Speech")
                 return AppleSpeechSTTProvider()
             }
+            if !variant.isDownloaded {
+                logger.warning("Parakeet selected but model not ready (\(variant.validationStatus)) — falling back to Apple Speech")
+                return AppleSpeechSTTProvider()
+            }
             logger.info("Creating ParakeetSTTProvider (experimental), model status: \(variant.validationStatus)")
             return ParakeetSTTProvider(variant: variant)
         case .whisper:
