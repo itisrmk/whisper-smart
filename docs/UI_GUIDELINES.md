@@ -22,6 +22,12 @@ token enums (`VFColor`, `VFFont`, `VFSpacing`, `VFRadius`, `VFSize`,
 | `VFColor.error` | Red — failure state |
 | `VFColor.surfaceOverlay` | Semi-transparent black for floating chrome |
 | `VFColor.textOnOverlay` | White text on dark overlays |
+| `VFColor.glass0` – `glass3` | Layered dark surfaces (0.06 → 0.18 white) |
+| `VFColor.glassBorder` | 1-px white-8% separator between glass layers |
+| `VFColor.glassHighlight` | White-12% top-edge shine on cards |
+| `VFColor.textTertiary` | White-35% for captions and hints |
+| `VFColor.accentGradient` | Blue-to-purple brand gradient |
+| `VFColor.*Gradient` | Per-state two-stop vertical gradients |
 
 ### Typography
 
@@ -30,8 +36,11 @@ the bubble status label, and the default design elsewhere. Sizes:
 
 - Bubble status: 11pt medium rounded
 - Menu items: 13pt regular
-- Settings title: 15pt semibold
+- Settings heading: 20pt bold rounded
+- Settings title: 15pt semibold rounded
 - Settings body/caption: 13pt / 11pt regular
+- Pill label: 12pt medium rounded
+- Segment label: 13pt medium rounded
 
 ### Spacing
 
@@ -43,8 +52,11 @@ A 4-point grid: `xxs(2) xs(4) sm(8) md(12) lg(16) xl(24) xxl(32)`.
 |---|---|
 | `springSnappy` | Quick spring for state transitions |
 | `springGentle` | Softer spring for larger movements |
+| `springBounce` | Bouncy spring for interactive feedback |
 | `fadeFast / fadeMedium` | Opacity crossfades |
 | `pulseLoop` | Infinite breathing pulse for listening ring |
+| `glowPulse` | Slow breathing for ambient glow (1.6s) |
+| `shimmer` | Continuous linear loop for sheen effects |
 
 ---
 
@@ -99,16 +111,20 @@ Transitions are animated with `springSnappy`. The pulsing ring uses
 
 ## 4. Settings Window
 
-The settings window uses a native `TabView` with three tabs:
+The settings window uses a custom glass segmented tab bar (not the
+native `TabView`) with three tabs:
 
-1. **General** — Launch at login, show/hide bubble.
-2. **Hotkey** — Placeholder for a key-recording control. Currently
-   displays a static `⌥ Space` badge.
-3. **Provider** — Placeholder dropdown for transcription provider
+1. **General** — Launch at login, show/hide bubble. Uses `GlassToggleRow`
+   with pill toggles inside a `GlassSection` card.
+2. **Hotkey** — Shortcut preset picker with pill badge and dropdown.
+3. **Provider** — Glass pill dropdown for transcription provider
    selection. Lists Whisper (local), OpenAI API, Deepgram, AssemblyAI.
 
-Settings persist via `@AppStorage` for general toggles. Provider and
-hotkey persistence will be added when the core layer is connected.
+The window forces dark appearance (`NSAppearance.darkAqua`) and
+`fullSizeContentView` with transparent titlebar so the `glass0`
+background runs edge-to-edge.
+
+Settings persist via `@AppStorage` for general toggles.
 
 ---
 
@@ -136,3 +152,73 @@ hotkey persistence will be added when the core layer is connected.
 4. Wire it into `AppDelegate` via a callback or direct reference.
 5. Do **not** put business logic in UI files — that belongs in
    `app/Core/`.
+
+---
+
+## 7. iOS-inspired dark glass theme
+
+The visual language draws from iOS-style dark glassmorphism while
+staying macOS-native.
+
+### Layered dark surfaces
+
+Four tonal steps (`glass0` – `glass3`) create perceived depth without
+translucency blur. Each step is a solid dark grey; higher numbers are
+brighter:
+
+| Layer | White value | Role |
+|---|---|---|
+| `glass0` | 6% | Window / deepest background |
+| `glass1` | 10% | Card fill |
+| `glass2` | 14% | Elevated card / hover / selected segment |
+| `glass3` | 18% | Pill control fill, input backgrounds |
+
+### Glass card treatment
+
+The reusable `.glassCard()` modifier applies:
+
+1. **Fill** — `glass1` (or custom via parameter).
+2. **Border** — 1-px `glassBorder` (white 8%).
+3. **Top-edge highlight** — A gradient stroke from `glassHighlight`
+   (white 12%) to clear, giving the card a subtle light-from-above
+   shine.
+4. **Depth shadow** — `VFShadow.cardColor` at 16-pt radius, offset
+   6-pt down.
+
+### Accent gradients & glow
+
+Each bubble state has a two-stop vertical gradient (`*Gradient`).
+The floating bubble adds an outer glow circle (`tintColor` at 15–35%
+opacity, blurred 20-pt) that breathes with `glowPulse` during
+`listening`.
+
+### Pill controls
+
+Interactive controls — toggles, shortcut badges, provider dropdown —
+use fully-rounded capsule shapes with `glass3` fill and `glassBorder`
+stroke. The custom `GlassPillToggle` mimics the iOS toggle with a
+white knob, accent fill when on, and `springSnappy` animation.
+
+### Segmented tab bar
+
+`GlassSegmentedControl` replaces the native `TabView` tabs.
+It is a `glass1` pill containing items; the selected item slides a
+`glass2` rounded-rect indicator using `matchedGeometryEffect` and
+`springSnappy` animation.
+
+### Typography
+
+Headings and labels use SF Pro Rounded (`.design(.rounded)`) at
+heavier weights. Body text uses the default system design for
+readability. A three-tier text colour hierarchy
+(`textPrimary` / `textSecondary` / `textTertiary`) ensures WCAG-AA
+contrast on the dark glass surfaces.
+
+### Accessibility
+
+- `textPrimary` (white) on `glass0` (6% white) yields ~18:1 contrast.
+- `textSecondary` (55% white) on `glass0` yields ~9:1 contrast.
+- `textTertiary` (35% white) on `glass0` yields ~5.5:1, used for
+  hints only where AA-large (3:1) suffices.
+- Pill toggles include a visible state difference (accent vs grey fill)
+  plus a positional knob indicator, so colour is not the only cue.

@@ -42,7 +42,7 @@ final class BubblePanelController {
         .environmentObject(stateSubject)
 
         let hostingView = NSHostingView(rootView: content)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 80, height: 80)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 120, height: 120)
 
         let p = NSPanel(
             contentRect: hostingView.frame,

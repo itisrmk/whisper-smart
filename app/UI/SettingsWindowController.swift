@@ -18,7 +18,10 @@ final class SettingsWindowController {
 
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Visperflow Settings"
-        window.styleMask = [.titled, .closable]
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(white: 0.06, alpha: 1.0)
         window.setContentSize(NSSize(width: VFSize.settingsWidth, height: VFSize.settingsHeight))
         window.center()
 
