@@ -3,9 +3,9 @@ import SwiftUI
 /// Floating overlay bubble that visualises dictation state.
 ///
 /// The bubble is designed to be hosted inside a borderless, transparent
-/// `NSPanel` so it appears to float above all other windows.  The dark
-/// glass design uses layered gradients, glow rings, and depth shadows
-/// inspired by iOS-style glassmorphism.
+/// `NSPanel` so it appears to float above all other windows. The dark
+/// neumorphic design uses layered gradients, soft shadow edges, and
+/// glow rings inspired by modern Apple dark controls.
 struct FloatingBubbleView: View {
     let state: BubbleState
     var onTap: (() -> Void)?
@@ -17,10 +17,10 @@ struct FloatingBubbleView: View {
         ZStack {
             // ── Outer glow (always present, intensifies when listening) ──
             Circle()
-                .fill(state.tintColor.opacity(state.isPulsing ? 0.35 : 0.15))
-                .frame(width: VFSize.bubbleDiameter + 40,
-                       height: VFSize.bubbleDiameter + 40)
-                .blur(radius: 20)
+                .fill(state.tintColor.opacity(state.isPulsing ? 0.30 : 0.12))
+                .frame(width: VFSize.bubbleDiameter + 44,
+                       height: VFSize.bubbleDiameter + 44)
+                .blur(radius: 22)
                 .opacity(glowOpacity)
                 .onAppear {
                     if state.isPulsing {
@@ -45,9 +45,9 @@ struct FloatingBubbleView: View {
             // ── Pulsing ring (listening state only) ──
             if state.isPulsing {
                 Circle()
-                    .stroke(state.tintColor.opacity(0.45), lineWidth: 2)
-                    .frame(width: VFSize.bubbleDiameter + 16,
-                           height: VFSize.bubbleDiameter + 16)
+                    .stroke(state.tintColor.opacity(0.35), lineWidth: 1.5)
+                    .frame(width: VFSize.bubbleDiameter + 18,
+                           height: VFSize.bubbleDiameter + 18)
                     .scaleEffect(pulseScale)
                     .onAppear {
                         pulseScale = 1.0
@@ -58,41 +58,67 @@ struct FloatingBubbleView: View {
                     .onDisappear { pulseScale = 1.0 }
             }
 
-            // ── Glass backdrop circle ──
+            // ── Neumorphic backdrop circle ──
             Circle()
-                .fill(VFColor.glass1)
+                .fill(
+                    LinearGradient(
+                        stops: [
+                            .init(color: VFColor.glass1.opacity(1.0), location: 0.0),
+                            .init(color: VFColor.glass1.opacity(0.85), location: 1.0),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .frame(width: VFSize.bubbleDiameter,
                        height: VFSize.bubbleDiameter)
-                .overlay(
-                    Circle()
-                        .stroke(VFColor.glassBorder, lineWidth: 1)
-                )
+                // Neumorphic shadow pair
+                .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
+                .shadow(color: VFColor.neuDark, radius: 8, x: 4, y: 4)
                 .overlay(
                     // Top-edge shine
                     Circle()
                         .stroke(
                             LinearGradient(
-                                colors: [VFColor.glassHighlight, .clear],
+                                stops: [
+                                    .init(color: Color.white.opacity(0.12), location: 0.0),
+                                    .init(color: .clear, location: 0.4),
+                                ],
                                 startPoint: .top,
-                                endPoint: .center
+                                endPoint: .bottom
                             ),
-                            lineWidth: 1
+                            lineWidth: 0.5
                         )
                 )
 
-            // ── Tinted gradient fill ──
+            // ── Tinted gradient fill (inner disc) ──
             Circle()
                 .fill(state.tintColor.gradient)
-                .frame(width: VFSize.bubbleDiameter - 6,
-                       height: VFSize.bubbleDiameter - 6)
-                .shadow(color: state.tintColor.opacity(0.5), radius: 12, y: 4)
+                .frame(width: VFSize.bubbleDiameter - 8,
+                       height: VFSize.bubbleDiameter - 8)
+                .shadow(color: state.tintColor.opacity(0.40), radius: 10, y: 3)
+                .overlay(
+                    // Subtle top-edge highlight on tinted disc
+                    Circle()
+                        .stroke(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: Color.white.opacity(0.18), location: 0.0),
+                                    .init(color: .clear, location: 0.35),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.5
+                        )
+                )
 
             // ── Icon ──
             Image(systemName: state.sfSymbol)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
                 .foregroundStyle(VFColor.textOnOverlay)
                 .contentTransition(.symbolEffect(.replace))
-                .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
         }
         .frame(width: VFSize.bubbleDiameter + 48,
                height: VFSize.bubbleDiameter + 48)
@@ -111,21 +137,33 @@ struct FloatingBubbleWithLabel: View {
         VStack(spacing: VFSpacing.sm) {
             FloatingBubbleView(state: state, onTap: onTap)
 
-            // ── Glass pill label ──
+            // ── Neumorphic pill label ──
             Text(state.label)
                 .font(VFFont.bubbleStatus)
                 .foregroundStyle(VFColor.textOnOverlay)
                 .padding(.horizontal, VFSpacing.md)
-                .padding(.vertical, VFSpacing.xs)
+                .padding(.vertical, VFSpacing.xs + 1)
                 .background(
                     Capsule()
                         .fill(VFColor.glass2)
+                        .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                        .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
                         .overlay(
                             Capsule()
-                                .stroke(VFColor.glassBorder, lineWidth: 0.5)
+                                .stroke(
+                                    LinearGradient(
+                                        stops: [
+                                            .init(color: Color.white.opacity(0.10), location: 0),
+                                            .init(color: .clear, location: 0.4),
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ),
+                                    lineWidth: 0.5
+                                )
                         )
                 )
-                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
         }
         .animation(VFAnimation.fadeMedium, value: state)
     }

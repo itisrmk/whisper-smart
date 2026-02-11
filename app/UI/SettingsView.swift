@@ -2,29 +2,34 @@ import SwiftUI
 import Carbon.HIToolbox
 
 /// Root settings view hosted in its own `NSWindow`.
-/// Uses a dark glass theme with a custom segmented tab bar
-/// and card-based sections.
+/// Dark neumorphic design with soft raised cards, inset controls,
+/// and an iOS-like rounded aesthetic.
 struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .general
 
     var body: some View {
         VStack(spacing: 0) {
             // ── Header ──
-            Text("Settings")
-                .font(VFFont.settingsHeading)
-                .foregroundStyle(VFColor.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, VFSpacing.xl)
-                .padding(.top, VFSpacing.xl)
-                .padding(.bottom, VFSpacing.lg)
+            VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                Text("Settings")
+                    .font(VFFont.settingsHeading)
+                    .foregroundStyle(VFColor.textPrimary)
+                Text("Configure Visperflow to your liking")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textTertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, VFSpacing.xxl)
+            .padding(.top, VFSpacing.xxl)
+            .padding(.bottom, VFSpacing.lg)
 
             // ── Segmented tab bar ──
             GlassSegmentedControl(
                 selection: $selectedTab,
                 items: SettingsTab.allCases
             )
-            .padding(.horizontal, VFSpacing.xl)
-            .padding(.bottom, VFSpacing.lg)
+            .padding(.horizontal, VFSpacing.xxl)
+            .padding(.bottom, VFSpacing.xl)
 
             // ── Tab content ──
             Group {
@@ -35,8 +40,8 @@ struct SettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.horizontal, VFSpacing.xl)
-            .padding(.bottom, VFSpacing.xl)
+            .padding(.horizontal, VFSpacing.xxl)
+            .padding(.bottom, VFSpacing.xxl)
         }
         .frame(width: VFSize.settingsWidth, height: VFSize.settingsHeight)
         .layeredDepthBackground()
@@ -70,8 +75,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
 
 // MARK: - Glass Segmented Control
 
-/// A custom segmented control styled as a glass pill bar with
-/// a sliding selection indicator.
+/// A custom segmented control styled as a neumorphic pill bar with
+/// a soft sliding selection indicator.
 private struct GlassSegmentedControl: View {
     @Binding var selection: SettingsTab
     let items: [SettingsTab]
@@ -79,7 +84,7 @@ private struct GlassSegmentedControl: View {
     @Namespace private var segmentNS
 
     var body: some View {
-        HStack(spacing: VFSpacing.xs) {
+        HStack(spacing: VFSpacing.xxs) {
             ForEach(items) { item in
                 let isSelected = (selection == item)
                 Button {
@@ -87,50 +92,87 @@ private struct GlassSegmentedControl: View {
                         selection = item
                     }
                 } label: {
-                    HStack(spacing: VFSpacing.xs) {
+                    HStack(spacing: VFSpacing.sm) {
                         Image(systemName: item.icon)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 11, weight: .semibold))
                         Text(item.label)
                             .font(VFFont.segmentLabel)
                     }
                     .foregroundStyle(isSelected ? VFColor.textPrimary : VFColor.textSecondary)
-                    .padding(.horizontal, VFSpacing.md)
-                    .padding(.vertical, VFSpacing.sm)
+                    .padding(.horizontal, VFSpacing.lg)
+                    .padding(.vertical, VFSpacing.sm + 2)
                     .frame(maxWidth: .infinity)
                     .background {
                         if isSelected {
                             RoundedRectangle(cornerRadius: VFRadius.segment, style: .continuous)
                                 .fill(VFColor.glass2)
+                                .shadow(color: VFColor.neuDark, radius: 4, x: 2, y: 2)
+                                .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: VFRadius.segment, style: .continuous)
-                                        .stroke(VFColor.glassBorder, lineWidth: 1)
+                                        .stroke(
+                                            LinearGradient(
+                                                stops: [
+                                                    .init(color: Color.white.opacity(0.10), location: 0.0),
+                                                    .init(color: .clear, location: 0.4),
+                                                ],
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            ),
+                                            lineWidth: 0.5
+                                        )
                                 )
                                 .matchedGeometryEffect(id: "segment", in: segmentNS)
                         }
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
         .padding(VFSpacing.xs)
-        .glassCard(cornerRadius: VFRadius.pill, fill: VFColor.glass1)
+        .background(
+            RoundedRectangle(cornerRadius: VFRadius.pill, style: .continuous)
+                .fill(Color(white: 0.07))
+                .overlay(
+                    RoundedRectangle(cornerRadius: VFRadius.pill, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: VFColor.neuInsetDark, location: 0.0),
+                                    .init(color: .clear, location: 0.5),
+                                    .init(color: VFColor.neuInsetLight, location: 1.0),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: VFColor.neuInsetDark, radius: 4, x: 2, y: 2)
+        )
     }
 }
 
 // MARK: - Section Container
 
-/// A titled card section for settings content.
-private struct GlassSection<Content: View>: View {
+/// A titled neumorphic card section for settings content.
+private struct NeuSection<Content: View>: View {
     let icon: String
     let title: String
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.md) {
+        VStack(alignment: .leading, spacing: VFSpacing.lg) {
             HStack(spacing: VFSpacing.sm) {
                 Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(VFColor.accentFallback)
+                    .frame(width: 20, height: 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(VFColor.accentFallback.opacity(0.12))
+                    )
                 Text(title)
                     .font(VFFont.settingsTitle)
                     .foregroundStyle(VFColor.textPrimary)
@@ -138,9 +180,32 @@ private struct GlassSection<Content: View>: View {
 
             content()
         }
-        .padding(VFSpacing.lg)
+        .padding(VFSpacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard()
+    }
+}
+
+// Keep backward compat alias
+private typealias GlassSection = NeuSection
+
+// MARK: - Separator
+
+private struct NeuDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    stops: [
+                        .init(color: VFColor.neuInsetDark.opacity(0.5), location: 0),
+                        .init(color: VFColor.glassBorder, location: 0.5),
+                        .init(color: VFColor.neuInsetLight, location: 1),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .frame(height: 1)
     }
 }
 
@@ -152,14 +217,14 @@ private struct GeneralSettingsTab: View {
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
-            GlassSection(icon: "slider.horizontal.3", title: "Behavior") {
-                GlassToggleRow(
+            NeuSection(icon: "slider.horizontal.3", title: "Behavior") {
+                NeuToggleRow(
                     title: "Launch at login",
                     subtitle: "Start automatically when you log in",
                     isOn: $launchAtLogin
                 )
-                Divider().overlay(VFColor.glassBorder)
-                GlassToggleRow(
+                NeuDivider()
+                NeuToggleRow(
                     title: "Show floating bubble",
                     subtitle: "Overlay indicator on screen",
                     isOn: $showBubble
@@ -184,9 +249,9 @@ private struct HotkeySettingsTab: View {
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
-            GlassSection(icon: "command", title: "Global Shortcut") {
+            NeuSection(icon: "command", title: "Global Shortcut") {
                 VStack(alignment: .leading, spacing: VFSpacing.md) {
-                    // Combined shortcut display / recorder field
+                    // Shortcut display / recorder
                     HStack {
                         Text("Dictation shortcut")
                             .font(VFFont.settingsBody)
@@ -194,7 +259,6 @@ private struct HotkeySettingsTab: View {
 
                         Spacer()
 
-                        // Click the pill to toggle recording
                         Button {
                             if isRecording {
                                 cancelRecording()
@@ -202,7 +266,7 @@ private struct HotkeySettingsTab: View {
                                 startRecording()
                             }
                         } label: {
-                            HStack(spacing: VFSpacing.xs) {
+                            HStack(spacing: VFSpacing.sm) {
                                 if isRecording {
                                     Circle()
                                         .fill(VFColor.error)
@@ -218,17 +282,38 @@ private struct HotkeySettingsTab: View {
                             }
                             .padding(.horizontal, VFSpacing.md)
                             .padding(.vertical, VFSpacing.sm)
-                            .frame(minWidth: 100)
+                            .frame(minWidth: 110)
                             .background(
-                                Capsule()
-                                    .fill(isRecording ? VFColor.glass2 : VFColor.glass3)
-                                    .overlay(
+                                Group {
+                                    if isRecording {
                                         Capsule()
-                                            .stroke(
-                                                isRecording ? VFColor.accentFallback.opacity(0.6) : VFColor.glassBorder,
-                                                lineWidth: isRecording ? 1.5 : 1
+                                            .fill(Color(white: 0.06))
+                                            .overlay(
+                                                Capsule()
+                                                    .stroke(VFColor.accentFallback.opacity(0.5), lineWidth: 1.5)
                                             )
-                                    )
+                                            .shadow(color: VFColor.accentFallback.opacity(0.15), radius: 6)
+                                    } else {
+                                        Capsule()
+                                            .fill(VFColor.glass3)
+                                            .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                                            .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
+                                            .overlay(
+                                                Capsule()
+                                                    .stroke(
+                                                        LinearGradient(
+                                                            stops: [
+                                                                .init(color: Color.white.opacity(0.08), location: 0),
+                                                                .init(color: .clear, location: 0.4),
+                                                            ],
+                                                            startPoint: .top,
+                                                            endPoint: .bottom
+                                                        ),
+                                                        lineWidth: 0.5
+                                                    )
+                                            )
+                                    }
+                                }
                             )
                             .animation(VFAnimation.fadeFast, value: isRecording)
                             .animation(VFAnimation.fadeFast, value: liveModifiers)
@@ -250,7 +335,7 @@ private struct HotkeySettingsTab: View {
                             .transition(.opacity)
                     }
 
-                    Divider().overlay(VFColor.glassBorder)
+                    NeuDivider()
 
                     // Preset picker
                     HStack {
@@ -268,11 +353,11 @@ private struct HotkeySettingsTab: View {
                                 }
                             }
                         } label: {
-                            HStack(spacing: VFSpacing.xs) {
+                            HStack(spacing: VFSpacing.sm) {
                                 Text(presetDisplayString)
                                     .font(VFFont.pillLabel)
                                 Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 10, weight: .medium))
+                                    .font(.system(size: 9, weight: .semibold))
                             }
                             .foregroundStyle(VFColor.textPrimary)
                             .padding(.horizontal, VFSpacing.md)
@@ -280,15 +365,27 @@ private struct HotkeySettingsTab: View {
                             .background(
                                 Capsule()
                                     .fill(VFColor.glass3)
+                                    .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                                    .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
                                     .overlay(
                                         Capsule()
-                                            .stroke(VFColor.glassBorder, lineWidth: 1)
+                                            .stroke(
+                                                LinearGradient(
+                                                    stops: [
+                                                        .init(color: Color.white.opacity(0.08), location: 0),
+                                                        .init(color: .clear, location: 0.4),
+                                                    ],
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                ),
+                                                lineWidth: 0.5
+                                            )
                                     )
                             )
                         }
                         .menuStyle(.borderlessButton)
                         .disabled(isRecording)
-                        .opacity(isRecording ? 0.5 : 1.0)
+                        .opacity(isRecording ? 0.4 : 1.0)
                     }
 
                     Text("Pick a preset or click the shortcut pill to record a custom combo.")
@@ -308,13 +405,11 @@ private struct HotkeySettingsTab: View {
         liveModifiers = ""
         validationError = nil
 
-        // Monitor keyDown for the final key in a combo (or Esc to cancel)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             handleKeyDown(event)
-            return nil // swallow
+            return nil
         }
 
-        // Monitor flagsChanged so the pill shows live modifier state
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { event in
             handleFlagsChanged(event)
             return nil
@@ -367,9 +462,7 @@ private struct HotkeySettingsTab: View {
             return
         }
 
-        // Attempt to build a binding from the event
         guard let binding = HotkeyBinding.from(event: event) else {
-            // Show validation hint — need at least one modifier
             withAnimation(VFAnimation.fadeFast) {
                 validationError = "Add a modifier key (⌘ ⌥ ⌃ ⇧) with that key."
             }
@@ -377,7 +470,6 @@ private struct HotkeySettingsTab: View {
             return
         }
 
-        // Valid combo — apply instantly
         tearDownMonitors()
         isRecording = false
         liveModifiers = ""
@@ -449,7 +541,7 @@ private struct ProviderSettingsTab: View {
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
-            GlassSection(icon: "cloud.fill", title: "Transcription Provider") {
+            NeuSection(icon: "cloud.fill", title: "Transcription Provider") {
                 VStack(alignment: .leading, spacing: VFSpacing.md) {
                     // Provider picker
                     HStack {
@@ -470,11 +562,11 @@ private struct ProviderSettingsTab: View {
                                 }
                             }
                         } label: {
-                            HStack(spacing: VFSpacing.xs) {
+                            HStack(spacing: VFSpacing.sm) {
                                 Text(selectedKind.displayName)
                                     .font(VFFont.pillLabel)
                                 Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 10, weight: .medium))
+                                    .font(.system(size: 9, weight: .semibold))
                             }
                             .foregroundStyle(VFColor.textPrimary)
                             .padding(.horizontal, VFSpacing.md)
@@ -482,9 +574,21 @@ private struct ProviderSettingsTab: View {
                             .background(
                                 Capsule()
                                     .fill(VFColor.glass3)
+                                    .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                                    .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
                                     .overlay(
                                         Capsule()
-                                            .stroke(VFColor.glassBorder, lineWidth: 1)
+                                            .stroke(
+                                                LinearGradient(
+                                                    stops: [
+                                                        .init(color: Color.white.opacity(0.08), location: 0),
+                                                        .init(color: .clear, location: 0.4),
+                                                    ],
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                ),
+                                                lineWidth: 0.5
+                                            )
                                     )
                             )
                         }
@@ -493,7 +597,7 @@ private struct ProviderSettingsTab: View {
 
                     // Model download section (only for providers that need it)
                     if selectedKind.requiresModelDownload {
-                        Divider().overlay(VFColor.glassBorder)
+                        NeuDivider()
                         ModelDownloadRow(
                             kind: selectedKind,
                             downloadState: downloadState
@@ -503,6 +607,7 @@ private struct ProviderSettingsTab: View {
                     Text(providerCaption)
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textTertiary)
+                        .padding(.top, VFSpacing.xxs)
                 }
             }
         }
@@ -550,6 +655,7 @@ private struct ModelDownloadRow: View {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .tint(VFColor.accentFallback)
+                    .padding(.vertical, VFSpacing.xxs)
             }
 
             // Error message
@@ -571,21 +677,32 @@ private struct ModelDownloadRow: View {
                     state: downloadState
                 )
             } label: {
-                HStack(spacing: VFSpacing.xs) {
+                HStack(spacing: VFSpacing.sm) {
                     Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 12, weight: .semibold))
                     Text("Download")
                         .font(VFFont.pillLabel)
                 }
-                .foregroundStyle(VFColor.textPrimary)
-                .padding(.horizontal, VFSpacing.md)
+                .foregroundStyle(.white)
+                .padding(.horizontal, VFSpacing.lg)
                 .padding(.vertical, VFSpacing.sm)
                 .background(
                     Capsule()
                         .fill(VFColor.accentFallback)
+                        .shadow(color: VFColor.accentFallback.opacity(0.3), radius: 6, y: 3)
                         .overlay(
                             Capsule()
-                                .stroke(VFColor.glassBorder, lineWidth: 1)
+                                .stroke(
+                                    LinearGradient(
+                                        stops: [
+                                            .init(color: Color.white.opacity(0.20), location: 0),
+                                            .init(color: .clear, location: 0.5),
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ),
+                                    lineWidth: 0.5
+                                )
                         )
                 )
             }
@@ -598,30 +715,28 @@ private struct ModelDownloadRow: View {
                     state: downloadState
                 )
             } label: {
-                HStack(spacing: VFSpacing.xs) {
+                HStack(spacing: VFSpacing.sm) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 12, weight: .semibold))
                     Text("Cancel")
                         .font(VFFont.pillLabel)
                 }
                 .foregroundStyle(VFColor.textSecondary)
-                .padding(.horizontal, VFSpacing.md)
+                .padding(.horizontal, VFSpacing.lg)
                 .padding(.vertical, VFSpacing.sm)
                 .background(
                     Capsule()
                         .fill(VFColor.glass3)
-                        .overlay(
-                            Capsule()
-                                .stroke(VFColor.glassBorder, lineWidth: 1)
-                        )
+                        .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                        .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
                 )
             }
             .buttonStyle(.plain)
 
         case .ready:
-            HStack(spacing: VFSpacing.xs) {
+            HStack(spacing: VFSpacing.sm) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(VFColor.success)
                 Text("Ready")
                     .font(VFFont.pillLabel)
@@ -633,9 +748,9 @@ private struct ModelDownloadRow: View {
     }
 }
 
-// MARK: - Glass Toggle Row
+// MARK: - Neumorphic Toggle Row
 
-private struct GlassToggleRow: View {
+private struct NeuToggleRow: View {
     let title: String
     var subtitle: String? = nil
     @Binding var isOn: Bool
@@ -655,34 +770,72 @@ private struct GlassToggleRow: View {
 
             Spacer()
 
-            GlassPillToggle(isOn: $isOn)
+            NeuPillToggle(isOn: $isOn)
         }
     }
 }
 
-// MARK: - Glass Pill Toggle
+// MARK: - Neumorphic Pill Toggle
 
-private struct GlassPillToggle: View {
+/// iOS-style toggle with neumorphic track: inset when off, raised when on.
+private struct NeuPillToggle: View {
     @Binding var isOn: Bool
 
-    private let width: CGFloat = 44
-    private let height: CGFloat = 26
+    private let width: CGFloat = 46
+    private let height: CGFloat = 28
     private let knobPad: CGFloat = 3
 
     var body: some View {
         let knobSize = height - knobPad * 2
 
         ZStack(alignment: isOn ? .trailing : .leading) {
+            // Track
             Capsule()
-                .fill(isOn ? VFColor.accentFallback : VFColor.glass3)
+                .fill(isOn ? VFColor.accentFallback : Color(white: 0.06))
                 .overlay(
-                    Capsule()
-                        .stroke(VFColor.glassBorder, lineWidth: 1)
+                    Group {
+                        if isOn {
+                            Capsule()
+                                .stroke(
+                                    LinearGradient(
+                                        stops: [
+                                            .init(color: Color.white.opacity(0.15), location: 0),
+                                            .init(color: .clear, location: 0.5),
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ),
+                                    lineWidth: 0.5
+                                )
+                        } else {
+                            Capsule()
+                                .stroke(
+                                    LinearGradient(
+                                        stops: [
+                                            .init(color: VFColor.neuInsetDark, location: 0.0),
+                                            .init(color: .clear, location: 0.5),
+                                            .init(color: VFColor.neuInsetLight, location: 1.0),
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        }
+                    }
                 )
+                .shadow(color: isOn ? VFColor.accentFallback.opacity(0.25) : .clear, radius: 6)
 
+            // Knob
             Circle()
-                .fill(Color.white)
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(white: 0.98), Color(white: 0.88)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .shadow(color: .black.opacity(0.30), radius: 2, y: 1)
                 .frame(width: knobSize, height: knobSize)
                 .padding(knobPad)
         }
@@ -692,6 +845,7 @@ private struct GlassPillToggle: View {
                 isOn.toggle()
             }
         }
+        .accessibilityAddTraits(.isToggle)
     }
 }
 
