@@ -7,6 +7,7 @@ private let logger = Logger(subsystem: "com.visperflow", category: "ParakeetSTT"
 /// STT provider for NVIDIA Parakeet local ONNX inference.
 final class ParakeetSTTProvider: STTProvider {
     let displayName = "NVIDIA Parakeet (local)"
+    static let inferenceImplemented = true
 
     var onResult: ((STTResult) -> Void)?
     var onError: ((STTError) -> Void)?
