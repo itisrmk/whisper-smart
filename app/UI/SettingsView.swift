@@ -973,10 +973,18 @@ private struct ModelDownloadRow: View {
     private var downloadButton: some View {
         switch downloadState.phase {
         case .notReady:
-            downloadActionButton(label: "Download", icon: "arrow.down.circle.fill")
+            downloadActionButton(
+                label: "Download",
+                icon: "arrow.down.circle.fill",
+                isEnabled: downloadState.variant.hasDownloadSource
+            )
 
         case .failed:
-            downloadActionButton(label: "Retry", icon: "arrow.clockwise.circle.fill")
+            downloadActionButton(
+                label: "Retry",
+                icon: "arrow.clockwise.circle.fill",
+                isEnabled: downloadState.variant.hasDownloadSource
+            )
 
         case .downloading:
             Button {
@@ -1017,7 +1025,7 @@ private struct ModelDownloadRow: View {
         }
     }
 
-    private func downloadActionButton(label: String, icon: String) -> some View {
+    private func downloadActionButton(label: String, icon: String, isEnabled: Bool) -> some View {
         Button {
             ModelDownloaderService.shared.download(
                 variant: downloadState.variant,
@@ -1039,10 +1047,12 @@ private struct ModelDownloadRow: View {
                     .overlay(
                         Capsule()
                             .stroke(VFColor.glassBorder, lineWidth: 1)
-                    )
+                )
             )
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.5)
     }
 }
 

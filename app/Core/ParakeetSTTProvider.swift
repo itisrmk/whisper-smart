@@ -387,6 +387,9 @@ private extension ParakeetSTTProvider {
         if (lowercased.contains("no such file") || lowercased.contains("not found")) && lowercased.contains(pythonCommand.lowercased()) {
             return "Python runtime '\(pythonCommand)' is unavailable. Run Repair Parakeet Runtime in Settings → Provider."
         }
+        if lowercased.contains("model_load_error") {
+            return "MODEL_LOAD_ERROR: Parakeet ONNX preflight failed. The model file is corrupt or incompatible. Re-download the model in Settings → Provider."
+        }
         if lowercased.contains("modulenotfounderror") || lowercased.contains("dependency_missing") {
             return details
         }

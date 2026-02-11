@@ -204,14 +204,8 @@ private extension ParakeetRuntimeBootstrapManager {
             .appendingPathComponent("runtime", isDirectory: true)
             .appendingPathComponent("parakeet", isDirectory: true)
 
-        var candidates = [projectLocal]
-        if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let appSupportPath = appSupport
-                .appendingPathComponent("Visperflow", isDirectory: true)
-                .appendingPathComponent("runtime", isDirectory: true)
-                .appendingPathComponent("parakeet", isDirectory: true)
-            candidates.insert(appSupportPath, at: 0)
-        }
+        var candidates = AppStoragePaths.runtimeRootCandidates(fileManager: fileManager)
+        candidates.append(projectLocal)
 
         var createErrors: [String] = []
         for candidate in candidates {

@@ -100,6 +100,9 @@ final class ModelDownloadState: ObservableObject {
             let status = variant.validationStatus
             phase = .failed(message: "Model file on disk is invalid: \(status)")
             logger.warning("Disk sync: file exists but invalid for \(self.variant.id): \(status)")
+        } else if let sourceError = variant.downloadUnavailableReason {
+            phase = .failed(message: sourceError)
+            logger.warning("Disk sync: model source unavailable for \(self.variant.id): \(sourceError)")
         } else {
             phase = .notReady
         }

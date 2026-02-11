@@ -169,6 +169,28 @@ enum STTProviderResolver {
         }
 
         let modelReady = variant.isDownloaded
+        let sourceConfigured = variant.hasDownloadSource || modelReady
+        let sourceDetail: String
+        if variant.hasDownloadSource {
+            sourceDetail = "Remote model source is configured."
+        } else if modelReady {
+            sourceDetail = "Model file is already present on disk."
+        } else {
+            sourceDetail = variant.downloadUnavailableReason ?? "Model source not configured."
+        }
+        checks.append(
+            ProviderHealthCheck(
+                id: "parakeet.model_source",
+                title: "Model Source Configuration",
+                isPassing: sourceConfigured,
+                detail: sourceDetail
+            )
+        )
+        if !sourceConfigured, fallbackReason == nil {
+            canUseParakeet = false
+            fallbackReason = variant.downloadUnavailableReason ?? "Model source not configured."
+        }
+
         checks.append(
             ProviderHealthCheck(
                 id: "parakeet.model_ready",
