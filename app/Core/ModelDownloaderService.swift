@@ -192,6 +192,15 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
                 return
             }
 
+            if let modelDataError = downloadModelDataArtifactIfNeeded(
+                variant: context.variant,
+                source: context.source
+            ) {
+                context.completionError = modelDataError
+                cleanupArtifacts(variant: context.variant, source: context.source, modelURL: destinationURL)
+                return
+            }
+
             if let tokenizerError = downloadTokenizerArtifactIfNeeded(
                 variant: context.variant,
                 source: context.source
@@ -294,10 +303,47 @@ private extension ModelDownloaderService {
 
     func cleanupArtifacts(variant: ModelVariant, source: ParakeetResolvedModelSource, modelURL: URL) {
         try? FileManager.default.removeItem(at: modelURL)
+
+        let sidecarURL = modelURL.appendingPathExtension("data")
+        if FileManager.default.fileExists(atPath: sidecarURL.path) {
+            try? FileManager.default.removeItem(at: sidecarURL)
+        }
+
         if source.tokenizerURL != nil,
            let tokenizerURL = variant.tokenizerLocalURL(using: source) {
             try? FileManager.default.removeItem(at: tokenizerURL)
         }
+    }
+
+    func downloadModelDataArtifactIfNeeded(
+        variant: ModelVariant,
+        source: ParakeetResolvedModelSource
+    ) -> String? {
+        guard let modelDataURL = source.modelDataURL else {
+            return nil
+        }
+
+        guard let modelURL = variant.localURL else {
+            return "Model data path resolution failed. Check Application Support permissions and retry."
+        }
+
+        let destinationURL = modelURL.appendingPathExtension("data")
+
+        if let downloadError = downloadAuxiliaryArtifact(
+            from: modelDataURL,
+            to: destinationURL,
+            label: "model data"
+        ) {
+            return downloadError
+        }
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: destinationURL.path),
+              let fileSize = attrs[.size] as? Int64,
+              fileSize >= 1_000_000 else {
+            return "Model data artifact is missing or incomplete. Retry the download."
+        }
+
+        return nil
     }
 
     func downloadTokenizerArtifactIfNeeded(
