@@ -537,6 +537,7 @@ extension Notification.Name {
 
 private struct ProviderSettingsTab: View {
     @State private var selectedKind: STTProviderKind = STTProviderKind.loadSelection()
+    /// Shared download state — rebound to the active variant when the provider changes.
     @StateObject private var downloadState = ModelDownloadState(variant: .parakeetCTC06B)
 
     var body: some View {
@@ -554,11 +555,7 @@ private struct ProviderSettingsTab: View {
                         Menu {
                             ForEach(STTProviderKind.allCases) { kind in
                                 Button(kind.displayName) {
-                                    selectedKind = kind
-                                    kind.saveSelection()
-                                    NotificationCenter.default.post(
-                                        name: .sttProviderDidChange, object: nil
-                                    )
+                                    selectProvider(kind)
                                 }
                             }
                         } label: {
@@ -611,6 +608,24 @@ private struct ProviderSettingsTab: View {
                 }
             }
         }
+        .onAppear {
+            // Sync download state to the persisted provider on appear.
+            syncDownloadState(for: selectedKind)
+        }
+    }
+
+    private func selectProvider(_ kind: STTProviderKind) {
+        selectedKind = kind
+        kind.saveSelection()
+        syncDownloadState(for: kind)
+        NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+    }
+
+    /// Rebind the download state to the correct variant for the selected provider.
+    private func syncDownloadState(for kind: STTProviderKind) {
+        if let variant = kind.defaultVariant {
+            downloadState.rebind(to: variant)
+        }
     }
 
     private var providerCaption: String {
@@ -658,11 +673,23 @@ private struct ModelDownloadRow: View {
                     .padding(.vertical, VFSpacing.xxs)
             }
 
-            // Error message
+            // Error message with retry hint
             if case .failed(let message) = downloadState.phase {
-                Text(message)
+                HStack(alignment: .top, spacing: VFSpacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(VFColor.error)
+                    Text(message)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.error)
+                }
+            }
+
+            // Show validation status when ready
+            if case .ready = downloadState.phase {
+                Text(downloadState.variant.validationStatus)
                     .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.error)
+                    .foregroundStyle(VFColor.textTertiary)
             }
         }
     }
@@ -670,43 +697,11 @@ private struct ModelDownloadRow: View {
     @ViewBuilder
     private var downloadButton: some View {
         switch downloadState.phase {
-        case .notReady, .failed:
-            Button {
-                ModelDownloaderService.shared.download(
-                    variant: downloadState.variant,
-                    state: downloadState
-                )
-            } label: {
-                HStack(spacing: VFSpacing.sm) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Download")
-                        .font(VFFont.pillLabel)
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, VFSpacing.lg)
-                .padding(.vertical, VFSpacing.sm)
-                .background(
-                    Capsule()
-                        .fill(VFColor.accentFallback)
-                        .shadow(color: VFColor.accentFallback.opacity(0.3), radius: 6, y: 3)
-                        .overlay(
-                            Capsule()
-                                .stroke(
-                                    LinearGradient(
-                                        stops: [
-                                            .init(color: Color.white.opacity(0.20), location: 0),
-                                            .init(color: .clear, location: 0.5),
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    ),
-                                    lineWidth: 0.5
-                                )
-                        )
-                )
-            }
-            .buttonStyle(.plain)
+        case .notReady:
+            downloadActionButton(label: "Download", icon: "arrow.down.circle.fill")
+
+        case .failed:
+            downloadActionButton(label: "Retry", icon: "arrow.clockwise.circle.fill")
 
         case .downloading:
             Button {
@@ -745,6 +740,34 @@ private struct ModelDownloadRow: View {
             .padding(.horizontal, VFSpacing.md)
             .padding(.vertical, VFSpacing.sm)
         }
+    }
+
+    private func downloadActionButton(label: String, icon: String) -> some View {
+        Button {
+            ModelDownloaderService.shared.download(
+                variant: downloadState.variant,
+                state: downloadState
+            )
+        } label: {
+            HStack(spacing: VFSpacing.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                Text(label)
+                    .font(VFFont.pillLabel)
+            }
+            .foregroundStyle(VFColor.textPrimary)
+            .padding(.horizontal, VFSpacing.md)
+            .padding(.vertical, VFSpacing.sm)
+            .background(
+                Capsule()
+                    .fill(VFColor.accentFallback)
+                    .overlay(
+                        Capsule()
+                            .stroke(VFColor.glassBorder, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

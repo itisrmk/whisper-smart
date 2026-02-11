@@ -1,4 +1,7 @@
 import AppKit
+import os.log
+
+private let logger = Logger(subsystem: "com.visperflow", category: "AppDelegate")
 
 /// The NSApplicationDelegate that wires together the menu bar,
 /// floating bubble, settings window, and the core dictation pipeline.
@@ -116,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             let kind = STTProviderKind.loadSelection()
+            logger.info("Provider changed to: \(kind.rawValue)")
             self.sttProvider = Self.makeProvider(for: kind)
             self.stateMachine.replaceProvider(self.sttProvider)
         }
@@ -125,8 +129,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func makeProvider(for kind: STTProviderKind) -> STTProvider {
         switch kind {
         case .parakeet:
-            return ParakeetSTTProvider(variant: .parakeetCTC06B)
+            let variant = kind.defaultVariant ?? .parakeetCTC06B
+            logger.info("Creating ParakeetSTTProvider, model status: \(variant.validationStatus)")
+            return ParakeetSTTProvider(variant: variant)
         case .stub, .whisper, .openaiAPI:
+            logger.info("Creating StubSTTProvider for kind: \(kind.rawValue)")
             return StubSTTProvider()
         }
     }
