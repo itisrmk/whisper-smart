@@ -1,4 +1,5 @@
 import SwiftUI
+import Carbon.HIToolbox
 
 /// Root settings view hosted in its own `NSWindow`.
 /// Uses a dark glass theme with a custom segmented tab bar
@@ -38,7 +39,7 @@ struct SettingsView: View {
             .padding(.bottom, VFSpacing.xl)
         }
         .frame(width: VFSize.settingsWidth, height: VFSize.settingsHeight)
-        .background(VFColor.glass0)
+        .layeredDepthBackground()
         .animation(VFAnimation.fadeMedium, value: selectedTab)
     }
 }
@@ -171,13 +172,19 @@ private struct GeneralSettingsTab: View {
 // MARK: - Hotkey Settings
 
 private struct HotkeySettingsTab: View {
+    @State private var currentBinding: HotkeyBinding = HotkeyBinding.load()
     @State private var selectedPresetIndex: Int = Self.initialPresetIndex()
+    @State private var isRecording: Bool = false
+    @State private var liveModifiers: String = ""
+    @State private var validationError: String? = nil
+    @State private var keyMonitor: Any? = nil
+    @State private var flagsMonitor: Any? = nil
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
             GlassSection(icon: "command", title: "Global Shortcut") {
                 VStack(alignment: .leading, spacing: VFSpacing.md) {
-                    // Current shortcut display
+                    // Combined shortcut display / recorder field
                     HStack {
                         Text("Dictation shortcut")
                             .font(VFFont.settingsBody)
@@ -185,19 +192,60 @@ private struct HotkeySettingsTab: View {
 
                         Spacer()
 
-                        Text(currentDisplayString)
-                            .font(VFFont.pillLabel)
-                            .foregroundStyle(VFColor.textPrimary)
+                        // Click the pill to toggle recording
+                        Button {
+                            if isRecording {
+                                cancelRecording()
+                            } else {
+                                startRecording()
+                            }
+                        } label: {
+                            HStack(spacing: VFSpacing.xs) {
+                                if isRecording {
+                                    Circle()
+                                        .fill(VFColor.error)
+                                        .frame(width: 6, height: 6)
+                                    Text(liveModifiers.isEmpty ? "Press shortcut…" : liveModifiers)
+                                        .font(VFFont.pillLabel)
+                                        .foregroundStyle(VFColor.textPrimary)
+                                } else {
+                                    Text(currentBinding.displayString)
+                                        .font(VFFont.pillLabel)
+                                        .foregroundStyle(VFColor.textPrimary)
+                                }
+                            }
                             .padding(.horizontal, VFSpacing.md)
                             .padding(.vertical, VFSpacing.sm)
+                            .frame(minWidth: 100)
                             .background(
                                 Capsule()
-                                    .fill(VFColor.glass3)
+                                    .fill(isRecording ? VFColor.glass2 : VFColor.glass3)
                                     .overlay(
                                         Capsule()
-                                            .stroke(VFColor.glassBorder, lineWidth: 1)
+                                            .stroke(
+                                                isRecording ? VFColor.accentFallback.opacity(0.6) : VFColor.glassBorder,
+                                                lineWidth: isRecording ? 1.5 : 1
+                                            )
                                     )
                             )
+                            .animation(VFAnimation.fadeFast, value: isRecording)
+                            .animation(VFAnimation.fadeFast, value: liveModifiers)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // Hint / error row
+                    if isRecording {
+                        Text("Press modifier + key (e.g. ⌥ Space). Esc to cancel.")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.accentFallback.opacity(0.8))
+                    }
+
+                    if let error = validationError {
+                        Text(error)
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.error)
+                            .transition(.opacity)
                     }
 
                     Divider().overlay(VFColor.glassBorder)
@@ -219,7 +267,188 @@ private struct HotkeySettingsTab: View {
                             }
                         } label: {
                             HStack(spacing: VFSpacing.xs) {
-                                Text(currentDisplayString)
+                                Text(presetDisplayString)
+                                    .font(VFFont.pillLabel)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(VFColor.textPrimary)
+                            .padding(.horizontal, VFSpacing.md)
+                            .padding(.vertical, VFSpacing.sm)
+                            .background(
+                                Capsule()
+                                    .fill(VFColor.glass3)
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(VFColor.glassBorder, lineWidth: 1)
+                                    )
+                            )
+                        }
+                        .menuStyle(.borderlessButton)
+                        .disabled(isRecording)
+                        .opacity(isRecording ? 0.5 : 1.0)
+                    }
+
+                    Text("Pick a preset or click the shortcut pill to record a custom combo.")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textTertiary)
+                }
+            }
+        }
+        .onDisappear { tearDownMonitors() }
+    }
+
+    // MARK: - Recorder lifecycle
+
+    private func startRecording() {
+        guard !isRecording else { return }
+        isRecording = true
+        liveModifiers = ""
+        validationError = nil
+
+        // Monitor keyDown for the final key in a combo (or Esc to cancel)
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            handleKeyDown(event)
+            return nil // swallow
+        }
+
+        // Monitor flagsChanged so the pill shows live modifier state
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { event in
+            handleFlagsChanged(event)
+            return nil
+        }
+    }
+
+    private func cancelRecording() {
+        tearDownMonitors()
+        isRecording = false
+        liveModifiers = ""
+    }
+
+    private func tearDownMonitors() {
+        if let m = keyMonitor  { NSEvent.removeMonitor(m); keyMonitor = nil }
+        if let m = flagsMonitor { NSEvent.removeMonitor(m); flagsMonitor = nil }
+    }
+
+    // MARK: - Event handlers
+
+    private func handleFlagsChanged(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        liveModifiers = Self.modifierSymbols(from: flags)
+    }
+
+    private func handleKeyDown(_ event: NSEvent) {
+        // Esc cancels recording
+        if event.keyCode == UInt16(kVK_Escape) {
+            cancelRecording()
+            return
+        }
+
+        // Attempt to build a binding from the event
+        guard let binding = HotkeyBinding.from(event: event) else {
+            // Show validation hint — need at least one modifier
+            withAnimation(VFAnimation.fadeFast) {
+                validationError = "Add a modifier key (⌘ ⌥ ⌃ ⇧) with that key."
+            }
+            clearValidationAfterDelay()
+            return
+        }
+
+        // Valid combo — apply instantly
+        tearDownMonitors()
+        isRecording = false
+        liveModifiers = ""
+        validationError = nil
+        applyBinding(binding)
+    }
+
+    // MARK: - Apply binding
+
+    private func applyBinding(_ binding: HotkeyBinding) {
+        currentBinding = binding
+        selectedPresetIndex = binding.presetIndex ?? -1
+        binding.save()
+        NotificationCenter.default.post(name: .hotkeyBindingDidChange, object: binding)
+    }
+
+    private func applyPreset(at index: Int) {
+        guard index >= 0 && index < HotkeyBinding.presets.count else { return }
+        applyBinding(HotkeyBinding.presets[index])
+    }
+
+    // MARK: - Helpers
+
+    private func clearValidationAfterDelay() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(VFAnimation.fadeFast) { validationError = nil }
+        }
+    }
+
+    private static func modifierSymbols(from flags: NSEvent.ModifierFlags) -> String {
+        var parts: [String] = []
+        if flags.contains(.control) { parts.append("⌃") }
+        if flags.contains(.option)  { parts.append("⌥") }
+        if flags.contains(.shift)   { parts.append("⇧") }
+        if flags.contains(.command) { parts.append("⌘") }
+        return parts.joined(separator: " ")
+    }
+
+    private var presetDisplayString: String {
+        if selectedPresetIndex >= 0 && selectedPresetIndex < HotkeyBinding.presets.count {
+            return HotkeyBinding.presets[selectedPresetIndex].displayString
+        }
+        return "Custom"
+    }
+
+    private static func initialPresetIndex() -> Int {
+        let current = HotkeyBinding.load()
+        return HotkeyBinding.presets.firstIndex(of: current) ?? -1
+    }
+}
+
+// MARK: - Notification name for binding changes
+
+extension Notification.Name {
+    static let hotkeyBindingDidChange = Notification.Name("hotkeyBindingDidChange")
+}
+
+// MARK: - Notification for provider changes
+
+extension Notification.Name {
+    static let sttProviderDidChange = Notification.Name("sttProviderDidChange")
+}
+
+// MARK: - Provider Settings
+
+private struct ProviderSettingsTab: View {
+    @State private var selectedKind: STTProviderKind = STTProviderKind.loadSelection()
+    @StateObject private var downloadState = ModelDownloadState(variant: .parakeetCTC06B)
+
+    var body: some View {
+        VStack(spacing: VFSpacing.lg) {
+            GlassSection(icon: "cloud.fill", title: "Transcription Provider") {
+                VStack(alignment: .leading, spacing: VFSpacing.md) {
+                    // Provider picker
+                    HStack {
+                        Text("Provider")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+
+                        Spacer()
+
+                        Menu {
+                            ForEach(STTProviderKind.allCases) { kind in
+                                Button(kind.displayName) {
+                                    selectedKind = kind
+                                    kind.saveSelection()
+                                    NotificationCenter.default.post(
+                                        name: .sttProviderDidChange, object: nil
+                                    )
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: VFSpacing.xs) {
+                                Text(selectedKind.displayName)
                                     .font(VFFont.pillLabel)
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(.system(size: 10, weight: .medium))
@@ -239,7 +468,16 @@ private struct HotkeySettingsTab: View {
                         .menuStyle(.borderlessButton)
                     }
 
-                    Text("Select a shortcut preset. Hold the key (or key combo) to start dictation, release to stop.")
+                    // Model download section (only for providers that need it)
+                    if selectedKind.requiresModelDownload {
+                        Divider().overlay(VFColor.glassBorder)
+                        ModelDownloadRow(
+                            kind: selectedKind,
+                            downloadState: downloadState
+                        )
+                    }
+
+                    Text(providerCaption)
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textTertiary)
                 }
@@ -247,95 +485,127 @@ private struct HotkeySettingsTab: View {
         }
     }
 
-    // MARK: - Helpers
-
-    private var currentDisplayString: String {
-        if selectedPresetIndex >= 0 && selectedPresetIndex < HotkeyBinding.presets.count {
-            return HotkeyBinding.presets[selectedPresetIndex].displayString
-        }
-        return HotkeyBinding.load().displayString
-    }
-
-    private func applyPreset(at index: Int) {
-        guard index >= 0 && index < HotkeyBinding.presets.count else { return }
-        let binding = HotkeyBinding.presets[index]
-        binding.save()
-        NotificationCenter.default.post(name: .hotkeyBindingDidChange, object: binding)
-    }
-
-    private static func initialPresetIndex() -> Int {
-        let current = HotkeyBinding.load()
-        return HotkeyBinding.presets.firstIndex(of: current) ?? 0
-    }
-}
-
-// MARK: - Notification name for binding changes
-
-extension Notification.Name {
-    static let hotkeyBindingDidChange = Notification.Name("hotkeyBindingDidChange")
-}
-
-// MARK: - Provider Settings (Placeholder)
-
-private struct ProviderSettingsTab: View {
-    var body: some View {
-        VStack(spacing: VFSpacing.lg) {
-            GlassSection(icon: "cloud.fill", title: "Transcription Provider") {
-                ProviderSettingsPlaceholder()
-            }
+    private var providerCaption: String {
+        switch selectedKind {
+        case .stub:
+            return "Stub provider returns a fixed placeholder. Useful for testing the pipeline."
+        case .whisper:
+            return "On-device transcription via Whisper.cpp. Download a model to get started."
+        case .parakeet:
+            return "On-device transcription via NVIDIA Parakeet. Download the model for one-click setup."
+        case .openaiAPI:
+            return "Cloud transcription via OpenAI Whisper API. Requires an API key (coming soon)."
         }
     }
 }
 
-/// Placeholder for provider configuration.
-struct ProviderSettingsPlaceholder: View {
-    @State private var selectedProvider = "Whisper (local)"
+// MARK: - Model Download Row
 
-    private let providers = [
-        "Whisper (local)",
-        "OpenAI Whisper API",
-        "Deepgram",
-        "AssemblyAI",
-    ]
+private struct ModelDownloadRow: View {
+    let kind: STTProviderKind
+    @ObservedObject var downloadState: ModelDownloadState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.md) {
+        VStack(alignment: .leading, spacing: VFSpacing.sm) {
             HStack {
-                Text("Provider")
-                    .font(VFFont.settingsBody)
-                    .foregroundStyle(VFColor.textPrimary)
+                VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                    Text("Model")
+                        .font(VFFont.settingsBody)
+                        .foregroundStyle(VFColor.textPrimary)
+                    Text(downloadState.variant.displayName)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
+                }
 
                 Spacer()
 
-                Menu {
-                    ForEach(providers, id: \.self) { p in
-                        Button(p) { selectedProvider = p }
-                    }
-                } label: {
-                    HStack(spacing: VFSpacing.xs) {
-                        Text(selectedProvider)
-                            .font(VFFont.pillLabel)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundStyle(VFColor.textPrimary)
-                    .padding(.horizontal, VFSpacing.md)
-                    .padding(.vertical, VFSpacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(VFColor.glass3)
-                            .overlay(
-                                Capsule()
-                                    .stroke(VFColor.glassBorder, lineWidth: 1)
-                            )
-                    )
-                }
-                .menuStyle(.borderlessButton)
+                downloadButton
             }
 
-            Text("Provider-specific settings will appear here once the core transcription layer is connected.")
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textTertiary)
+            // Progress bar
+            if case .downloading(let progress) = downloadState.phase {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(VFColor.accentFallback)
+            }
+
+            // Error message
+            if case .failed(let message) = downloadState.phase {
+                Text(message)
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.error)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var downloadButton: some View {
+        switch downloadState.phase {
+        case .notReady, .failed:
+            Button {
+                ModelDownloaderService.shared.download(
+                    variant: downloadState.variant,
+                    state: downloadState
+                )
+            } label: {
+                HStack(spacing: VFSpacing.xs) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("Download")
+                        .font(VFFont.pillLabel)
+                }
+                .foregroundStyle(VFColor.textPrimary)
+                .padding(.horizontal, VFSpacing.md)
+                .padding(.vertical, VFSpacing.sm)
+                .background(
+                    Capsule()
+                        .fill(VFColor.accentFallback)
+                        .overlay(
+                            Capsule()
+                                .stroke(VFColor.glassBorder, lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+
+        case .downloading:
+            Button {
+                ModelDownloaderService.shared.cancel(
+                    variant: downloadState.variant,
+                    state: downloadState
+                )
+            } label: {
+                HStack(spacing: VFSpacing.xs) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("Cancel")
+                        .font(VFFont.pillLabel)
+                }
+                .foregroundStyle(VFColor.textSecondary)
+                .padding(.horizontal, VFSpacing.md)
+                .padding(.vertical, VFSpacing.sm)
+                .background(
+                    Capsule()
+                        .fill(VFColor.glass3)
+                        .overlay(
+                            Capsule()
+                                .stroke(VFColor.glassBorder, lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+
+        case .ready:
+            HStack(spacing: VFSpacing.xs) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(VFColor.success)
+                Text("Ready")
+                    .font(VFFont.pillLabel)
+                    .foregroundStyle(VFColor.success)
+            }
+            .padding(.horizontal, VFSpacing.md)
+            .padding(.vertical, VFSpacing.sm)
         }
     }
 }
