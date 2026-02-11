@@ -568,6 +568,9 @@ private extension ModelDownloaderService {
         if lowercased.contains("model_load_error") {
             return "MODEL_LOAD_ERROR during ONNX preflight. The downloaded file is not a loadable Parakeet ONNX model. Delete it and download again."
         }
+        if lowercased.contains("model_signature_error") || lowercased.contains("unsupported onnx audio input signature") {
+            return "MODEL_SIGNATURE_ERROR during ONNX preflight. This model source is not compatible with Visperflow's raw-audio pipeline. Switch source to 'Hugging Face full ONNX (recommended)' and re-download."
+        }
         if lowercased.contains("tokenizer_missing") || lowercased.contains("tokenizer_error") {
             return "Tokenizer validation failed during ONNX preflight. Re-download model artifacts from Settings -> Provider."
         }
