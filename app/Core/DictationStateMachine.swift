@@ -111,25 +111,40 @@ final class DictationStateMachine {
             }
         }
 
-        wireSTTCallbacks()
+        wireSTTCallbacks(for: sttProvider)
     }
 
-    private func wireSTTCallbacks() {
+    private func wireSTTCallbacks(for provider: STTProvider) {
         // STT result → inject text
-        sttProvider.onResult = { [weak self] result in
+        provider.onResult = { [weak self, weak provider] result in
             DispatchQueue.main.async {
-                logger.info("STT result received (partial=\(result.isPartial), len=\(result.text.count))")
-                self?.handleSTTResult(result)
+                guard let self, let provider else { return }
+                guard self.sttProvider === provider else {
+                    logger.warning("Ignoring STT result from stale provider: \(provider.displayName, privacy: .public)")
+                    return
+                }
+                logger.info("STT result received from provider \(provider.displayName, privacy: .public) (partial=\(result.isPartial), len=\(result.text.count))")
+                self.handleSTTResult(result)
             }
         }
 
         // STT error → surface
-        sttProvider.onError = { [weak self] error in
+        provider.onError = { [weak self, weak provider] error in
             DispatchQueue.main.async {
-                logger.error("STT provider error: \(error.localizedDescription)")
-                self?.transition(to: .error(error.localizedDescription))
+                guard let self, let provider else { return }
+                guard self.sttProvider === provider else {
+                    logger.warning("Ignoring STT error from stale provider: \(provider.displayName, privacy: .public)")
+                    return
+                }
+                logger.error("STT provider error from \(provider.displayName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                self.transition(to: .error(error.localizedDescription))
             }
         }
+    }
+
+    private func clearSTTCallbacks(for provider: STTProvider) {
+        provider.onResult = nil
+        provider.onError = nil
     }
 
     // MARK: - Lifecycle
@@ -152,11 +167,42 @@ final class DictationStateMachine {
         transition(to: .idle)
     }
 
-    /// Hot-swap the STT provider while idle (e.g. user changed provider in Settings).
+    /// Hot-swap the STT provider immediately (e.g. user changed provider in Settings).
+    /// If a session was in-flight or the machine was in an error state, this
+    /// method force-resets the machine to `.idle` so the next hotkey hold can
+    /// start with the new provider.
     func replaceProvider(_ newProvider: STTProvider) {
-        guard state == .idle else { return }
+        let oldProvider = sttProvider
+        let oldProviderName = oldProvider.displayName
+        let newProviderName = newProvider.displayName
+        let priorState = state
+        let isSameInstance = (oldProvider === newProvider)
+
+        logger.info("Replacing STT provider \(oldProviderName, privacy: .public) → \(newProviderName, privacy: .public) (state=\(String(describing: priorState), privacy: .public))")
+
+        if isSameInstance {
+            if priorState != .idle {
+                logger.info("Provider unchanged; resetting state to idle from \(String(describing: priorState), privacy: .public)")
+                transition(to: .idle)
+            }
+            return
+        }
+
+        if priorState == .recording {
+            audioCapture.stop()
+            oldProvider.endSession()
+        } else if priorState == .transcribing {
+            oldProvider.endSession()
+        }
+
+        clearSTTCallbacks(for: oldProvider)
         sttProvider = newProvider
-        wireSTTCallbacks()
+
+        wireSTTCallbacks(for: newProvider)
+
+        if priorState != .idle {
+            transition(to: .idle)
+        }
     }
 
     /// Starts a one-shot recording session bypassing the hotkey monitor.
@@ -210,13 +256,21 @@ final class DictationStateMachine {
     private func beginRecordingSession() {
         guard state == .idle else { return }
 
+        let providerName = sttProvider.displayName
+        var didBeginSTTSession = false
+
         do {
+            logger.info("Starting recording session with provider: \(providerName, privacy: .public)")
             try sttProvider.beginSession()
+            didBeginSTTSession = true
             try audioCapture.start()
-            logger.info("Recording session started")
+            logger.info("Recording session started with provider: \(providerName, privacy: .public)")
             transition(to: .recording)
         } catch {
-            logger.error("Failed to start recording: \(error.localizedDescription)")
+            if didBeginSTTSession {
+                sttProvider.endSession()
+            }
+            logger.error("Failed to start recording with provider \(providerName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             transition(to: .error(error.localizedDescription))
         }
     }

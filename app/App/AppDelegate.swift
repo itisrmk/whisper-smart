@@ -201,8 +201,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             let kind = STTProviderKind.loadSelection()
-            logger.info("Provider changed to: \(kind.rawValue)")
+            logger.info("Provider changed in settings to kind: \(kind.rawValue, privacy: .public)")
             self.sttProvider = Self.makeProvider(for: kind)
+            logger.info("Replacing state-machine provider with: \(self.sttProvider.displayName, privacy: .public)")
             self.stateMachine.replaceProvider(self.sttProvider)
         }
     }
