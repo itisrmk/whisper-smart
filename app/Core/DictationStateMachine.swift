@@ -52,7 +52,7 @@ final class DictationStateMachine {
 
     private let hotkeyMonitor: HotkeyMonitor
     private let audioCapture: AudioCaptureService
-    private let sttProvider: STTProvider
+    private var sttProvider: STTProvider
     private let injector: ClipboardInjector
 
     // MARK: - Init
@@ -96,6 +96,10 @@ final class DictationStateMachine {
             }
         }
 
+        wireSTTCallbacks()
+    }
+
+    private func wireSTTCallbacks() {
         // STT result → inject text
         sttProvider.onResult = { [weak self] result in
             DispatchQueue.main.async {
@@ -124,6 +128,13 @@ final class DictationStateMachine {
         audioCapture.stop()
         sttProvider.endSession()
         transition(to: .idle)
+    }
+
+    /// Hot-swap the STT provider while idle (e.g. user changed provider in Settings).
+    func replaceProvider(_ newProvider: STTProvider) {
+        guard state == .idle else { return }
+        sttProvider = newProvider
+        wireSTTCallbacks()
     }
 
     // MARK: - State transitions

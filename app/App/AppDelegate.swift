@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private lazy var hotkeyMonitor = HotkeyMonitor(binding: HotkeyBinding.load())
     private lazy var audioCapture = AudioCaptureService()
-    private lazy var sttProvider: STTProvider = StubSTTProvider()
+    private lazy var sttProvider: STTProvider = Self.makeProvider(for: STTProviderKind.loadSelection())
     private lazy var injector = ClipboardInjector()
 
     private lazy var stateMachine = DictationStateMachine(
@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
 
     private var bindingObserver: NSObjectProtocol?
+    private var providerObserver: NSObjectProtocol?
 
     // MARK: - Lifecycle
 
@@ -42,12 +43,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         wireCallbacks()
         observeBindingChanges()
+        observeProviderChanges()
         stateMachine.activate()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         stateMachine.deactivate()
         if let observer = bindingObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = providerObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -98,6 +103,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] notification in
             guard let binding = notification.object as? HotkeyBinding else { return }
             self?.hotkeyMonitor.updateBinding(binding)
+        }
+    }
+
+    /// Listens for `.sttProviderDidChange` from Settings and rebuilds
+    /// the state machine with the newly selected provider.
+    private func observeProviderChanges() {
+        providerObserver = NotificationCenter.default.addObserver(
+            forName: .sttProviderDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let kind = STTProviderKind.loadSelection()
+            self.sttProvider = Self.makeProvider(for: kind)
+            self.stateMachine.replaceProvider(self.sttProvider)
+        }
+    }
+
+    /// Factory that returns the concrete ``STTProvider`` for a given kind.
+    private static func makeProvider(for kind: STTProviderKind) -> STTProvider {
+        switch kind {
+        case .parakeet:
+            return ParakeetSTTProvider(variant: .parakeetCTC06B)
+        case .stub, .whisper, .openaiAPI:
+            return StubSTTProvider()
         }
     }
 
