@@ -10,13 +10,13 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             // ── Header ──
-            VStack(alignment: .leading, spacing: VFSpacing.xs) {
+            VStack(alignment: .leading, spacing: VFSpacing.sm) {
                 Text("Settings")
                     .font(VFFont.settingsHeading)
                     .foregroundStyle(VFColor.textPrimary)
                 Text("Configure Visperflow to your liking")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textTertiary)
+                    .font(VFFont.settingsBody)
+                    .foregroundStyle(VFColor.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, VFSpacing.xxl)
@@ -165,18 +165,31 @@ private struct NeuSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.lg) {
-            HStack(spacing: VFSpacing.sm) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(VFColor.accentFallback)
-                    .frame(width: 20, height: 20)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(VFColor.accentFallback.opacity(0.12))
+            VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                HStack(spacing: VFSpacing.sm) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(VFColor.accentFallback)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(VFColor.accentFallback.opacity(0.15))
+                        )
+                    Text(title)
+                        .font(VFFont.settingsTitle)
+                        .foregroundStyle(VFColor.textPrimary)
+                }
+
+                // Subtle accent underline for visual hierarchy
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [VFColor.accentFallback.opacity(0.25), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
                     )
-                Text(title)
-                    .font(VFFont.settingsTitle)
-                    .foregroundStyle(VFColor.textPrimary)
+                    .frame(height: 1)
             }
 
             content()
@@ -391,7 +404,7 @@ private struct HotkeySettingsTab: View {
 
                     Text("Pick a preset or click the shortcut pill to record a custom combo.")
                         .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textTertiary)
+                        .foregroundStyle(VFColor.textSecondary)
                 }
             }
         }
@@ -608,7 +621,7 @@ private struct ProviderSettingsTab: View {
 
                     Text(providerCaption)
                         .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textTertiary)
+                        .foregroundStyle(VFColor.textSecondary)
                         .padding(.top, VFSpacing.xxs)
                 }
             }
@@ -785,14 +798,14 @@ private struct NeuToggleRow: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+            VStack(alignment: .leading, spacing: VFSpacing.xs) {
                 Text(title)
                     .font(VFFont.settingsBody)
                     .foregroundStyle(VFColor.textPrimary)
                 if let subtitle {
                     Text(subtitle)
                         .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textTertiary)
+                        .foregroundStyle(VFColor.textSecondary)
                 }
             }
 

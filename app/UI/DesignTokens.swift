@@ -17,9 +17,9 @@ enum VFColor {
     static let glass3 = Color(white: 0.20)                      // pill / control fill
 
     /// 1-px separator between layers
-    static let glassBorder = Color.white.opacity(0.06)
+    static let glassBorder = Color.white.opacity(0.08)
     /// Highlight edge on top of raised surfaces (lit-from-above)
-    static let glassHighlight = Color.white.opacity(0.09)
+    static let glassHighlight = Color.white.opacity(0.11)
 
     // ── Neumorphic shadow pairs ─────────────────────────────────
     /// Light edge (top-left source) for raised elements
@@ -84,10 +84,10 @@ enum VFColor {
     static let success      = Color(red: 0.22, green: 0.80, blue: 0.50)
     static let error        = Color(red: 1.0,  green: 0.36, blue: 0.36)
 
-    // Text — tuned for WCAG contrast on dark surfaces
+    // Text — tuned for WCAG-AA contrast on dark surfaces
     static let textPrimary   = Color.white.opacity(0.92)
-    static let textSecondary = Color.white.opacity(0.55)
-    static let textTertiary  = Color.white.opacity(0.32)
+    static let textSecondary = Color.white.opacity(0.62)
+    static let textTertiary  = Color.white.opacity(0.40)
     static let textOnOverlay = Color.white
 }
 
@@ -136,6 +136,13 @@ enum VFSize {
     static let menuBarIcon:     CGFloat = 18
     static let settingsWidth:   CGFloat = 520
     static let settingsHeight:  CGFloat = 520
+
+    // Waveform bar layout
+    static let waveformBarCount: Int = 5
+    static let waveformBarWidth: CGFloat = 3
+    static let waveformBarSpacing: CGFloat = 2.5
+    static let waveformBarMinHeight: CGFloat = 4
+    static let waveformBarMaxHeight: CGFloat = 22
 }
 
 // MARK: - Shadow / Depth Tokens
@@ -170,6 +177,16 @@ enum VFAnimation {
     static let pulseLoop     = Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true)
     static let glowPulse     = Animation.easeInOut(duration: 1.6).repeatForever(autoreverses: true)
     static let shimmer       = Animation.linear(duration: 2.0).repeatForever(autoreverses: false)
+
+    // Waveform bar animation — staggered per-bar loops
+    static func waveformBar(index: Int, count: Int) -> Animation {
+        let baseDuration = 0.45
+        let offset = Double(index) / Double(max(count, 1)) * 0.25
+        return Animation
+            .easeInOut(duration: baseDuration + offset)
+            .repeatForever(autoreverses: true)
+            .delay(offset)
+    }
 }
 
 // MARK: - Neumorphic Card Modifier

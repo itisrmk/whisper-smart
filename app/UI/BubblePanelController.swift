@@ -36,7 +36,6 @@ final class BubblePanelController {
 
     private func createPanel() {
         let content = FloatingBubbleWithLabel(
-            state: stateSubject.state,
             onTap: { [weak self] in self?.stateSubject.handleTap() }
         )
         .environmentObject(stateSubject)
@@ -75,6 +74,9 @@ final class BubblePanelController {
 /// Core layer will drive this; UI layer only reads.
 final class BubbleStateSubject: ObservableObject {
     @Published var state: BubbleState = .idle
+    /// Normalised audio level (0…1) fed from the audio capture pipeline.
+    /// Drives the waveform bar heights when `state == .listening`.
+    @Published var audioLevel: CGFloat = 0
 
     /// Called when the user taps the bubble. Override via `onTap` closure.
     var onTap: (() -> Void)?
@@ -86,6 +88,12 @@ final class BubbleStateSubject: ObservableObject {
     func transition(to newState: BubbleState) {
         DispatchQueue.main.async { [weak self] in
             self?.state = newState
+        }
+    }
+
+    func updateAudioLevel(_ level: CGFloat) {
+        DispatchQueue.main.async { [weak self] in
+            self?.audioLevel = min(max(level, 0), 1)
         }
     }
 }

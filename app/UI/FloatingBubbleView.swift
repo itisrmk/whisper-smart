@@ -3,11 +3,13 @@ import SwiftUI
 /// Floating overlay bubble that visualises dictation state.
 ///
 /// The bubble is designed to be hosted inside a borderless, transparent
-/// `NSPanel` so it appears to float above all other windows. The dark
-/// neumorphic design uses layered gradients, soft shadow edges, and
-/// glow rings inspired by modern Apple dark controls.
+/// `NSPanel` so it appears to float above all other windows. During the
+/// `listening` state the icon is replaced by animated waveform bars for
+/// a superwhisper-like recording feel. Other states keep the SF Symbol
+/// icon with state-driven glow and colour.
 struct FloatingBubbleView: View {
     let state: BubbleState
+    var audioLevel: CGFloat = 0
     var onTap: (() -> Void)?
 
     @State private var pulseScale: CGFloat = 1.0
@@ -113,12 +115,22 @@ struct FloatingBubbleView: View {
                         )
                 )
 
-            // ── Icon ──
-            Image(systemName: state.sfSymbol)
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .foregroundStyle(VFColor.textOnOverlay)
-                .contentTransition(.symbolEffect(.replace))
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+            // ── Centre content: waveform bars when listening, icon otherwise ──
+            if state == .listening {
+                WaveformBarView(
+                    isActive: true,
+                    audioLevel: audioLevel,
+                    tintColor: VFColor.textOnOverlay
+                )
+                .transition(.scale.combined(with: .opacity))
+            } else {
+                Image(systemName: state.sfSymbol)
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundStyle(VFColor.textOnOverlay)
+                    .contentTransition(.symbolEffect(.replace))
+                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
         .frame(width: VFSize.bubbleDiameter + 48,
                height: VFSize.bubbleDiameter + 48)
@@ -130,15 +142,20 @@ struct FloatingBubbleView: View {
 
 /// Extended bubble that includes a status label beneath the circle.
 struct FloatingBubbleWithLabel: View {
-    let state: BubbleState
+    @EnvironmentObject var stateSubject: BubbleStateSubject
+
     var onTap: (() -> Void)?
 
     var body: some View {
         VStack(spacing: VFSpacing.sm) {
-            FloatingBubbleView(state: state, onTap: onTap)
+            FloatingBubbleView(
+                state: stateSubject.state,
+                audioLevel: stateSubject.audioLevel,
+                onTap: onTap
+            )
 
             // ── Neumorphic pill label ──
-            Text(state.label)
+            Text(stateSubject.state.label)
                 .font(VFFont.bubbleStatus)
                 .foregroundStyle(VFColor.textOnOverlay)
                 .padding(.horizontal, VFSpacing.md)
@@ -165,7 +182,7 @@ struct FloatingBubbleWithLabel: View {
                 )
                 .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
         }
-        .animation(VFAnimation.fadeMedium, value: state)
+        .animation(VFAnimation.fadeMedium, value: stateSubject.state)
     }
 }
 
@@ -176,7 +193,13 @@ struct FloatingBubbleView_Previews: PreviewProvider {
     static var previews: some View {
         HStack(spacing: 24) {
             ForEach(BubbleState.allCases) { s in
-                FloatingBubbleWithLabel(state: s)
+                FloatingBubbleWithLabel()
+                    .environmentObject({
+                        let subject = BubbleStateSubject()
+                        subject.state = s
+                        if s == .listening { subject.audioLevel = 0.6 }
+                        return subject
+                    }())
             }
         }
         .padding(40)
