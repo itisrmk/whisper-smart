@@ -32,6 +32,29 @@ struct ProviderRuntimeDiagnostics {
     var usesFallback: Bool {
         requestedKind != effectiveKind
     }
+
+    // MARK: - Regression guard
+
+    /// Debug-only consistency check: when `effectiveKind` differs from
+    /// `requestedKind` a `fallbackReason` must be present, and vice-versa
+    /// a healthy non-fallback resolution must not carry a stale reason.
+    #if DEBUG
+    func assertDisplayConsistency(file: StaticString = #fileID, line: UInt = #line) {
+        if usesFallback {
+            assert(
+                fallbackReason != nil && !(fallbackReason?.isEmpty ?? true),
+                "Provider mismatch (requested=\(requestedKind.rawValue), effective=\(effectiveKind.rawValue)) but fallbackReason is missing — UI will display incomplete status.",
+                file: file, line: line
+            )
+        } else {
+            assert(
+                fallbackReason == nil,
+                "Provider matches (effective=\(effectiveKind.rawValue)) but a stale fallbackReason is present: '\(fallbackReason ?? "")' — UI will display misleading status.",
+                file: file, line: line
+            )
+        }
+    }
+    #endif
 }
 
 /// Concrete provider plus diagnostics explaining how it was selected.
@@ -51,6 +74,9 @@ final class ProviderRuntimeDiagnosticsStore: ObservableObject {
     }
 
     func publish(_ diagnostics: ProviderRuntimeDiagnostics) {
+        #if DEBUG
+        diagnostics.assertDisplayConsistency()
+        #endif
         if Thread.isMainThread {
             latest = diagnostics
         } else {

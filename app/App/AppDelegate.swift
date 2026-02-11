@@ -268,14 +268,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logger.info("Replacing state-machine provider with: \(self.sttProvider.displayName, privacy: .public)")
         self.stateMachine.replaceProvider(self.sttProvider)
 
-        // After replaceProvider(), the state machine should be .idle.  However,
-        // if a stale async error callback raced in after the swap, the machine
-        // may still show .error.  Clear it when the new provider is usable so
-        // the menu/bubble status is not stuck.
+        // When state was left in error from a prior provider, clear stale
+        // error state and stale UI once we have a usable replacement.
         if stateMachine.state.isError && resolution.diagnostics.healthLevel != .unavailable {
-            logger.info("Clearing stale error state after provider refresh (effective provider healthy)")
-            // Force-reset to idle — replaceProvider with same instance handles this.
+            logger.info("Clearing stale error state/UI after provider refresh")
             stateMachine.replaceProvider(self.sttProvider)
+            let uiState: BubbleState = .idle
+            bubbleState.transition(to: uiState)
+            menuBar.updateIcon(for: uiState)
         }
     }
 

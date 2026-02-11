@@ -91,7 +91,14 @@ final class MenuBarController {
     }
 
     /// Update provider runtime diagnostics line in the menu.
+    ///
+    /// Also clears any stale error-detail text that may have been left behind
+    /// by a previous provider resolution cycle when the new diagnostics no
+    /// longer indicate an error condition.
     func updateProviderDiagnostics(_ diagnostics: ProviderRuntimeDiagnostics) {
+        #if DEBUG
+        diagnostics.assertDisplayConsistency()
+        #endif
         let summary: String
         if diagnostics.usesFallback {
             if let fallbackReason = diagnostics.fallbackReason, !fallbackReason.isEmpty {
@@ -114,6 +121,14 @@ final class MenuBarController {
             tooltip = "Health: \(diagnostics.healthLevel.rawValue)"
         }
         providerDiagnosticsItem?.toolTip = tooltip
+
+        // When the new provider resolution is healthy (no fallback), clear
+        // any leftover error detail from a previous cycle so it doesn't
+        // persist stale text in the menu.
+        if !diagnostics.usesFallback && diagnostics.healthLevel == .healthy {
+            errorDetailItem?.title = ""
+            errorDetailItem?.isHidden = true
+        }
     }
 
     // MARK: - Menu Construction
