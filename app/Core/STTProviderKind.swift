@@ -277,8 +277,8 @@ extension ModelVariant {
     static let parakeetCTC06B = ModelVariant(
         id: ParakeetModelCatalog.ctc06BVariantID,
         displayName: "Parakeet CTC 0.6B",
-        sizeBytes: 653_436_437,
-        minimumValidBytes: 250_000_000,
+        sizeBytes: 41_000_000,
+        minimumValidBytes: 30_000_000,
         relativePath: "models/parakeet-ctc-0.6b.onnx"
     )
 
