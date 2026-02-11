@@ -744,7 +744,7 @@ private struct ProviderSettingsTab: View {
         case .appleSpeech:
             return "Real transcription via Apple Speech framework. Works on-device with no setup required."
         case .parakeet:
-            return "Experimental — NVIDIA Parakeet ONNX inference not yet implemented. Download model to prepare for future release."
+            return "Local ONNX inference via NVIDIA Parakeet. Requires Python 3 with numpy + onnxruntime, plus tokenizer assets next to the model."
         case .whisper:
             return "Experimental — Whisper.cpp integration not yet implemented. Coming in a future release."
         case .openaiAPI:

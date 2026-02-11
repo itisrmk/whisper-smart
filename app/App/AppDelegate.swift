@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 logger.warning("Parakeet selected but model not ready (\(variant.validationStatus)) — falling back to Apple Speech")
                 return AppleSpeechSTTProvider()
             }
-            logger.info("Creating ParakeetSTTProvider (experimental), model status: \(variant.validationStatus)")
+            logger.info("Creating ParakeetSTTProvider (local), model status: \(variant.validationStatus)")
             return ParakeetSTTProvider(variant: variant)
         case .whisper:
             logger.warning("Whisper not yet implemented — falling back to Apple Speech")
