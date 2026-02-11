@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Color Tokens
@@ -11,10 +12,15 @@ enum VFColor {
     // Dark neumorphism works by pairing a near-black base with
     // subtle light and shadow edges. These layers step up from
     // the deepest well to the most elevated control.
-    static let glass0 = Color(white: 0.08)                      // window / deepest bg
+    static let glass0NS = NSColor(srgbRed: 0.08, green: 0.08, blue: 0.08, alpha: 1.0)
+    static let glass0 = Color(nsColor: glass0NS) // window / deepest bg
     static let glass1 = Color(red: 0.13, green: 0.14, blue: 0.18) // card background (fixed RGB to avoid adaptive gray shifts)
     static let glass2 = Color(red: 0.16, green: 0.17, blue: 0.22) // elevated card / hover
     static let glass3 = Color(red: 0.19, green: 0.20, blue: 0.26) // pill / control fill
+    static let controlInset = Color(red: 0.09, green: 0.10, blue: 0.13)
+    static let controlTrackOff = Color(red: 0.10, green: 0.11, blue: 0.15)
+    static let controlKnobTop = Color(red: 0.96, green: 0.97, blue: 0.99)
+    static let controlKnobBottom = Color(red: 0.84, green: 0.86, blue: 0.90)
 
     /// 1-px separator between layers
     static let glassBorder = Color.white.opacity(0.08)
@@ -85,10 +91,25 @@ enum VFColor {
     static let error        = Color(red: 1.0,  green: 0.36, blue: 0.36)
 
     // Text — tuned for WCAG-AA contrast on dark surfaces
-    static let textPrimary   = Color.white.opacity(0.92)
-    static let textSecondary = Color.white.opacity(0.62)
-    static let textTertiary  = Color.white.opacity(0.40)
+    static let textPrimary   = Color.white.opacity(0.95)
+    static let textSecondary = Color.white.opacity(0.76)
+    static let textTertiary  = Color.white.opacity(0.58)
+    static let textOnAccent  = Color(red: 0.05, green: 0.10, blue: 0.18)
+    static let textDisabled  = Color.white.opacity(0.46)
     static let textOnOverlay = Color.white
+}
+
+// MARK: - Theme Tokens
+
+enum VFTheme {
+    static let forcedAppearanceName: NSAppearance.Name = .darkAqua
+    static let forcedColorScheme: ColorScheme = .dark
+
+    static func debugAssertTokenSanity(file: StaticString = #fileID, line: UInt = #line) {
+#if DEBUG
+        VFThemeGuard.assertDarkPaletteSanity(file: file, line: line)
+#endif
+    }
 }
 
 // MARK: - Typography Tokens
@@ -273,7 +294,7 @@ struct NeuInset: ViewModifier {
         content
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color(white: 0.06))
+                    .fill(VFColor.controlInset)
                     .overlay(
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .stroke(
@@ -384,6 +405,24 @@ extension View {
     }
 }
 
+// MARK: - Forced Dark Theme Modifier
+
+/// Apply this at settings root to keep SwiftUI controls and labels resolved in dark mode.
+struct VFForcedDarkTheme: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .environment(\.colorScheme, VFTheme.forcedColorScheme)
+            .preferredColorScheme(VFTheme.forcedColorScheme)
+            .tint(VFColor.accentFallback)
+    }
+}
+
+extension View {
+    func vfForcedDarkTheme() -> some View {
+        modifier(VFForcedDarkTheme())
+    }
+}
+
 // MARK: - Inner Highlight Shape
 
 /// A top-edge inner highlight for a lit-from-above feel.
@@ -414,3 +453,71 @@ extension View {
         modifier(InnerHighlightStroke(cornerRadius: cornerRadius))
     }
 }
+
+#if DEBUG
+// Lightweight visual regression guard. If token edits accidentally drift
+// toward bright surfaces or weak contrast, this assertion fails in debug.
+private enum VFThemeGuard {
+    private static var didAssert = false
+
+    static func assertDarkPaletteSanity(file: StaticString = #fileID, line: UInt = #line) {
+        guard !didAssert else { return }
+        didAssert = true
+
+        let glass0 = RGB(0.08, 0.08, 0.08)
+        let glass1 = RGB(0.13, 0.14, 0.18)
+        let glass2 = RGB(0.16, 0.17, 0.22)
+        let glass3 = RGB(0.19, 0.20, 0.26)
+        let accent = RGB(0.35, 0.58, 1.00)
+
+        assert(luminance(glass0) < luminance(glass1), "Expected glass0 to be darker than glass1", file: file, line: line)
+        assert(luminance(glass1) < luminance(glass2), "Expected glass1 to be darker than glass2", file: file, line: line)
+        assert(luminance(glass2) < luminance(glass3), "Expected glass2 to be darker than glass3", file: file, line: line)
+
+        let textPrimary = composite(whiteWithOpacity: 0.95, over: glass1)
+        let textSecondary = composite(whiteWithOpacity: 0.76, over: glass1)
+        let textTertiary = composite(whiteWithOpacity: 0.58, over: glass1)
+
+        assert(contrastRatio(textPrimary, glass1) >= 7.0, "textPrimary contrast on glass1 must stay >= 7.0", file: file, line: line)
+        assert(contrastRatio(textSecondary, glass1) >= 4.5, "textSecondary contrast on glass1 must stay >= 4.5", file: file, line: line)
+        assert(contrastRatio(textTertiary, glass1) >= 3.0, "textTertiary contrast on glass1 must stay >= 3.0", file: file, line: line)
+        assert(contrastRatio(RGB(0.05, 0.10, 0.18), accent) >= 4.5, "textOnAccent contrast must stay >= 4.5", file: file, line: line)
+    }
+
+    private struct RGB {
+        let r: Double
+        let g: Double
+        let b: Double
+    }
+
+    private static func composite(whiteWithOpacity alpha: Double, over background: RGB) -> RGB {
+        RGB(
+            r: alpha + ((1 - alpha) * background.r),
+            g: alpha + ((1 - alpha) * background.g),
+            b: alpha + ((1 - alpha) * background.b)
+        )
+    }
+
+    private static func luminance(_ rgb: RGB) -> Double {
+        let r = linearize(rgb.r)
+        let g = linearize(rgb.g)
+        let b = linearize(rgb.b)
+        return (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+    }
+
+    private static func contrastRatio(_ a: RGB, _ b: RGB) -> Double {
+        let l1 = luminance(a)
+        let l2 = luminance(b)
+        let lighter = max(l1, l2)
+        let darker = min(l1, l2)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private static func linearize(_ channel: Double) -> Double {
+        if channel <= 0.03928 {
+            return channel / 12.92
+        }
+        return pow((channel + 0.055) / 1.055, 2.4)
+    }
+}
+#endif

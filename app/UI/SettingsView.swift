@@ -45,7 +45,7 @@ struct SettingsView: View {
         }
         .frame(width: VFSize.settingsWidth, height: VFSize.settingsHeight)
         .layeredDepthBackground()
-        .preferredColorScheme(.dark)
+        .vfForcedDarkTheme()
         .animation(VFAnimation.fadeMedium, value: selectedTab)
     }
 }
@@ -134,7 +134,7 @@ private struct GlassSegmentedControl: View {
         .padding(VFSpacing.xs)
         .background(
             RoundedRectangle(cornerRadius: VFRadius.pill, style: .continuous)
-                .fill(Color(white: 0.07))
+                .fill(VFColor.controlInset)
                 .overlay(
                     RoundedRectangle(cornerRadius: VFRadius.pill, style: .continuous)
                         .stroke(
@@ -394,7 +394,7 @@ private struct HotkeySettingsTab: View {
                                 Group {
                                     if isRecording {
                                         Capsule()
-                                            .fill(Color(white: 0.06))
+                                            .fill(VFColor.controlInset)
                                             .overlay(
                                                 Capsule()
                                                     .stroke(VFColor.accentFallback.opacity(0.5), lineWidth: 1.5)
@@ -813,6 +813,7 @@ private struct ProviderDiagnosticsView: View {
                                 ProgressView()
                                     .progressViewStyle(.circular)
                                     .controlSize(.small)
+                                    .tint(VFColor.textPrimary)
                             } else {
                                 Image(systemName: "wrench.and.screwdriver.fill")
                                     .font(.system(size: 11, weight: .semibold))
@@ -1038,21 +1039,25 @@ private struct ModelDownloadRow: View {
                 Text(label)
                     .font(VFFont.pillLabel)
             }
-            .foregroundStyle(VFColor.textPrimary)
+            .foregroundStyle(isEnabled ? VFColor.textOnAccent : VFColor.textDisabled)
             .padding(.horizontal, VFSpacing.md)
             .padding(.vertical, VFSpacing.sm)
             .background(
                 Capsule()
-                    .fill(VFColor.accentFallback)
+                    .fill(isEnabled ? VFColor.accentFallback : VFColor.glass3)
                     .overlay(
                         Capsule()
-                            .stroke(VFColor.glassBorder, lineWidth: 1)
+                            .stroke(isEnabled ? VFColor.glassBorder : VFColor.neuInsetLight, lineWidth: 1)
+                    )
+                    .shadow(
+                        color: isEnabled ? VFColor.accentFallback.opacity(0.20) : VFColor.neuDark.opacity(0.35),
+                        radius: isEnabled ? 6 : 3,
+                        y: isEnabled ? 2 : 1
                 )
             )
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.5)
     }
 }
 
@@ -1099,7 +1104,7 @@ private struct NeuPillToggle: View {
         ZStack(alignment: isOn ? .trailing : .leading) {
             // Track
             Capsule()
-                .fill(isOn ? VFColor.accentFallback : Color(white: 0.06))
+                .fill(isOn ? VFColor.accentFallback : VFColor.controlTrackOff)
                 .overlay(
                     Group {
                         if isOn {
@@ -1138,7 +1143,7 @@ private struct NeuPillToggle: View {
             Circle()
                 .fill(
                     LinearGradient(
-                        colors: [Color(white: 0.98), Color(white: 0.88)],
+                        colors: [VFColor.controlKnobTop, VFColor.controlKnobBottom],
                         startPoint: .top,
                         endPoint: .bottom
                     )
