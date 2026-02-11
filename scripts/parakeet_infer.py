@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
+import tempfile
 import wave
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -360,6 +362,38 @@ def normalize_text(text: str) -> str:
     return normalized.strip()
 
 
+def prepare_onnx_asr_model_dir(model_path: Path, explicit_tokenizer: Optional[str]) -> Path:
+    """Create a temporary model directory with canonical onnx-asr file names.
+
+    onnx-asr expects names like model.onnx/model.int8.onnx and vocab.txt in the
+    model directory. Visperflow stores model under a fixed app-specific filename,
+    so we normalize via symlinks/copies in a temp directory.
+    """
+    temp_dir = Path(tempfile.mkdtemp(prefix="visperflow-parakeet-onnxasr-"))
+
+    # Always provide canonical model names for robust probing.
+    model_onnx = temp_dir / "model.onnx"
+    model_int8 = temp_dir / "model.int8.onnx"
+
+    shutil.copy2(model_path, model_onnx)
+    shutil.copy2(model_path, model_int8)
+
+    sidecar = model_path.with_suffix(model_path.suffix + ".data")
+    if sidecar.exists() and sidecar.is_file():
+        shutil.copy2(sidecar, temp_dir / "model.onnx.data")
+
+    tokenizer = find_tokenizer_path(model_path, explicit_tokenizer)
+    if tokenizer is not None and tokenizer.exists():
+        if tokenizer.suffix.lower() == ".txt":
+            shutil.copy2(tokenizer, temp_dir / "vocab.txt")
+        elif tokenizer.suffix.lower() == ".model":
+            shutil.copy2(tokenizer, temp_dir / "tokenizer.model")
+        elif tokenizer.suffix.lower() == ".json":
+            shutil.copy2(tokenizer, temp_dir / "tokenizer.json")
+
+    return temp_dir
+
+
 def decode_tokens(
     token_ids: List[int],
     meta: Dict[str, str],
@@ -422,15 +456,18 @@ def run_inference(
     explicit_tokenizer: Optional[str],
 ) -> str:
     # Preferred path: onnx-asr handles Parakeet preprocessing/signature variants.
+    temp_model_dir: Path | None = None
     try:
         onnx_asr = load_onnx_asr()
+        temp_model_dir = prepare_onnx_asr_model_dir(model_path, explicit_tokenizer)
+
         model = None
         last_error: Exception | None = None
         for quant in (None, "int8"):
             try:
                 model = onnx_asr.load_model(
                     "nemo-parakeet-ctc-0.6b",
-                    path=str(model_path.parent),
+                    path=str(temp_model_dir),
                     quantization=quant,
                     providers=["CPUExecutionProvider"],
                 )
@@ -453,6 +490,9 @@ def run_inference(
     except Exception:
         # Fallback path for raw-audio compatible exports.
         pass
+    finally:
+        if temp_model_dir is not None:
+            shutil.rmtree(temp_model_dir, ignore_errors=True)
 
     np, ort = load_core_dependencies()
     session = load_session(model_path, ort)
@@ -487,14 +527,17 @@ def run_inference(
 
 def check_runtime(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
     # Preferred check path via onnx-asr (supports Parakeet preprocessing graph requirements).
+    temp_model_dir: Path | None = None
     try:
         onnx_asr = load_onnx_asr()
+        temp_model_dir = prepare_onnx_asr_model_dir(model_path, explicit_tokenizer)
+
         last_error: Exception | None = None
         for quant in (None, "int8"):
             try:
                 _ = onnx_asr.load_model(
                     "nemo-parakeet-ctc-0.6b",
-                    path=str(model_path.parent),
+                    path=str(temp_model_dir),
                     quantization=quant,
                     providers=["CPUExecutionProvider"],
                 )
@@ -508,6 +551,9 @@ def check_runtime(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
     except Exception:
         # Fallback to legacy raw-audio validator.
         pass
+    finally:
+        if temp_model_dir is not None:
+            shutil.rmtree(temp_model_dir, ignore_errors=True)
 
     _, ort = load_core_dependencies()
     session = load_session(model_path, ort)
