@@ -25,6 +25,8 @@ final class MenuBarController {
     private var oneShotItem: NSMenuItem?
     /// Menu item for retrying the hotkey monitor.
     private var retryItem: NSMenuItem?
+    /// Menu item showing provider runtime diagnostics.
+    private var providerDiagnosticsItem: NSMenuItem?
 
     private var isOneShotActive = false
 
@@ -88,6 +90,21 @@ final class MenuBarController {
         errorDetailItem?.isHidden = false
     }
 
+    /// Update provider runtime diagnostics line in the menu.
+    func updateProviderDiagnostics(_ diagnostics: ProviderRuntimeDiagnostics) {
+        let summary: String
+        if diagnostics.usesFallback {
+            summary = "Provider: \(diagnostics.effectiveKind.displayName) (fallback)"
+        } else {
+            summary = "Provider: \(diagnostics.effectiveKind.displayName)"
+        }
+        providerDiagnosticsItem?.title = summary
+
+        let tooltip = diagnostics.fallbackReason
+            ?? "Health: \(diagnostics.healthLevel.rawValue)"
+        providerDiagnosticsItem?.toolTip = tooltip
+    }
+
     // MARK: - Menu Construction
 
     private func buildMenu() -> NSMenu {
@@ -100,6 +117,15 @@ final class MenuBarController {
         )
         dictateItem.target = self
         menu.addItem(dictateItem)
+
+        let providerDiag = NSMenuItem(
+            title: "Provider: Loading…",
+            action: nil,
+            keyEquivalent: ""
+        )
+        providerDiag.isEnabled = false
+        menu.addItem(providerDiag)
+        self.providerDiagnosticsItem = providerDiag
 
         menu.addItem(.separator())
 

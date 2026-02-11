@@ -22,7 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private lazy var hotkeyMonitor = HotkeyMonitor(binding: HotkeyBinding.load())
     private lazy var audioCapture = AudioCaptureService()
-    private lazy var sttProvider: STTProvider = Self.makeProvider(for: STTProviderKind.loadSelection())
+    private lazy var initialProviderResolution = STTProviderResolver.resolve(for: STTProviderKind.loadSelection())
+    private lazy var sttProvider: STTProvider = initialProviderResolution.provider
     private lazy var injector = ClipboardInjector()
 
     private lazy var stateMachine = DictationStateMachine(
@@ -46,6 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBar.install()
         bubblePanel.show()
+
+        publishProviderDiagnostics(initialProviderResolution.diagnostics)
 
         wireCallbacks()
         observeBindingChanges()
@@ -202,38 +205,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             let kind = STTProviderKind.loadSelection()
             logger.info("Provider changed in settings to kind: \(kind.rawValue, privacy: .public)")
-            self.sttProvider = Self.makeProvider(for: kind)
+            let resolution = STTProviderResolver.resolve(for: kind)
+            self.publishProviderDiagnostics(resolution.diagnostics)
+            self.sttProvider = resolution.provider
             logger.info("Replacing state-machine provider with: \(self.sttProvider.displayName, privacy: .public)")
             self.stateMachine.replaceProvider(self.sttProvider)
         }
     }
 
-    /// Factory that returns the concrete ``STTProvider`` for a given kind.
-    private static func makeProvider(for kind: STTProviderKind) -> STTProvider {
-        switch kind {
-        case .appleSpeech:
-            logger.info("Creating AppleSpeechSTTProvider")
-            return AppleSpeechSTTProvider()
-        case .parakeet:
-            guard let variant = kind.defaultVariant else {
-                logger.error("No model variant available for \(kind.rawValue) — falling back to Apple Speech")
-                return AppleSpeechSTTProvider()
-            }
-            if !variant.isDownloaded {
-                logger.warning("Parakeet selected but model not ready (\(variant.validationStatus)) — falling back to Apple Speech")
-                return AppleSpeechSTTProvider()
-            }
-            logger.info("Creating ParakeetSTTProvider (local), model status: \(variant.validationStatus)")
-            return ParakeetSTTProvider(variant: variant)
-        case .whisper:
-            logger.warning("Whisper not yet implemented — falling back to Apple Speech")
-            return AppleSpeechSTTProvider()
-        case .openaiAPI:
-            logger.warning("OpenAI API not yet implemented — falling back to Apple Speech")
-            return AppleSpeechSTTProvider()
-        case .stub:
-            logger.info("Creating StubSTTProvider (testing only)")
-            return StubSTTProvider()
+    private func publishProviderDiagnostics(_ diagnostics: ProviderRuntimeDiagnostics) {
+        ProviderRuntimeDiagnosticsStore.shared.publish(diagnostics)
+        menuBar.updateProviderDiagnostics(diagnostics)
+
+        logger.info(
+            "Provider diagnostics health=\(diagnostics.healthLevel.rawValue, privacy: .public) requested=\(diagnostics.requestedKind.rawValue, privacy: .public) effective=\(diagnostics.effectiveKind.rawValue, privacy: .public)"
+        )
+
+        if let fallbackReason = diagnostics.fallbackReason {
+            logger.warning("Provider fallback reason: \(fallbackReason, privacy: .public)")
         }
     }
 

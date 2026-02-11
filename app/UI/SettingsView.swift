@@ -650,6 +650,7 @@ private struct ProviderSettingsTab: View {
     @State private var selectedKind: STTProviderKind = STTProviderKind.loadSelection()
     /// Shared download state — rebound to the active variant when the provider changes.
     @StateObject private var downloadState = ModelDownloadState(variant: .parakeetCTC06B)
+    @ObservedObject private var diagnosticsStore = ProviderRuntimeDiagnosticsStore.shared
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
@@ -716,6 +717,13 @@ private struct ProviderSettingsTab: View {
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
                         .padding(.top, VFSpacing.xxs)
+
+                    NeuDivider()
+
+                    ProviderDiagnosticsView(
+                        diagnostics: diagnosticsStore.latest,
+                        selectedKind: selectedKind
+                    )
                 }
             }
         }
@@ -751,6 +759,102 @@ private struct ProviderSettingsTab: View {
             return "Experimental — OpenAI Whisper API not yet implemented. Coming in a future release."
         case .stub:
             return "Testing only — does not transcribe. Select Apple Speech for real transcription."
+        }
+    }
+}
+
+private struct ProviderDiagnosticsView: View {
+    let diagnostics: ProviderRuntimeDiagnostics
+    let selectedKind: STTProviderKind
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: VFSpacing.sm) {
+            HStack(spacing: VFSpacing.sm) {
+                Circle()
+                    .fill(healthColor)
+                    .frame(width: 8, height: 8)
+                Text("Runtime Diagnostics")
+                    .font(VFFont.settingsBody)
+                    .foregroundStyle(VFColor.textPrimary)
+                Spacer()
+                Text(diagnostics.healthLevel.rawValue)
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(healthColor)
+            }
+
+            DiagnosticLine(label: "Requested", value: diagnostics.requestedKind.displayName)
+            DiagnosticLine(label: "Effective", value: diagnostics.effectiveKind.displayName)
+
+            if selectedKind != diagnostics.requestedKind {
+                Text("Refreshing runtime diagnostics for \(selectedKind.displayName)…")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+            }
+
+            if let fallbackReason = diagnostics.fallbackReason {
+                HStack(alignment: .top, spacing: VFSpacing.xs) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(VFColor.error)
+                    Text("Fallback reason: \(fallbackReason)")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.error)
+                }
+            }
+
+            ForEach(diagnostics.checks) { check in
+                HStack(alignment: .top, spacing: VFSpacing.xs) {
+                    Image(systemName: check.isPassing ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(check.isPassing ? VFColor.success : VFColor.error)
+                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                        Text(check.title)
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textPrimary)
+                        Text(check.detail)
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                    }
+                }
+            }
+
+            Text("Last updated \(Self.timestampFormatter.string(from: diagnostics.timestamp))")
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textTertiary)
+        }
+    }
+
+    private var healthColor: Color {
+        switch diagnostics.healthLevel {
+        case .healthy:
+            return VFColor.success
+        case .degraded:
+            return VFColor.accentFallback
+        case .unavailable:
+            return VFColor.error
+        }
+    }
+
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        return formatter
+    }()
+}
+
+private struct DiagnosticLine: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: VFSpacing.xs) {
+            Text(label + ":")
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textSecondary)
+            Text(value)
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textPrimary)
         }
     }
 }
