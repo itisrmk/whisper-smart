@@ -57,6 +57,16 @@ def load_sentencepiece():
     return spm
 
 
+def load_onnx_asr():
+    try:
+        import onnx_asr  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise_dependency_error("onnx-asr", exc)
+    except Exception as exc:  # pragma: no cover - unexpected import failure
+        raise RunnerError(f"DEPENDENCY_ERROR: Failed to import onnx-asr: {exc}") from exc
+    return onnx_asr
+
+
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run local NVIDIA Parakeet ONNX inference.")
     parser.add_argument("--model", required=True, help="Path to Parakeet ONNX model file.")
@@ -411,6 +421,26 @@ def run_inference(
     audio_path: Path,
     explicit_tokenizer: Optional[str],
 ) -> str:
+    # Preferred path: onnx-asr handles Parakeet preprocessing/signature variants.
+    try:
+        onnx_asr = load_onnx_asr()
+        model = onnx_asr.load_model(
+            "nemo-parakeet-ctc-0.6b",
+            path=str(model_path.parent),
+            quantization="int8" if model_path.name.endswith(".int8.onnx") else None,
+            providers=["CPUExecutionProvider"],
+        )
+        result = model.recognize(str(audio_path), sample_rate=16000)
+        text = str(result).strip()
+        if text:
+            return text
+        raise RunnerError("INFERENCE_ERROR: onnx-asr returned empty transcript.")
+    except RunnerError:
+        raise
+    except Exception:
+        # Fallback path for raw-audio compatible exports.
+        pass
+
     np, ort = load_core_dependencies()
     session = load_session(model_path, ort)
 
@@ -443,6 +473,22 @@ def run_inference(
 
 
 def check_runtime(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
+    # Preferred check path via onnx-asr (supports Parakeet preprocessing graph requirements).
+    try:
+        onnx_asr = load_onnx_asr()
+        _ = onnx_asr.load_model(
+            "nemo-parakeet-ctc-0.6b",
+            path=str(model_path.parent),
+            quantization="int8" if model_path.name.endswith(".int8.onnx") else None,
+            providers=["CPUExecutionProvider"],
+        )
+        return
+    except RunnerError:
+        raise
+    except Exception:
+        # Fallback to legacy raw-audio validator.
+        pass
+
     _, ort = load_core_dependencies()
     session = load_session(model_path, ort)
     validate_setup(session, model_path, explicit_tokenizer)

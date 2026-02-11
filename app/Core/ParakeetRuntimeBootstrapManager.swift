@@ -32,7 +32,7 @@ final class ParakeetRuntimeBootstrapManager {
     private let queue = DispatchQueue(label: "com.visperflow.parakeet.bootstrap", qos: .userInitiated)
     private let statusLock = NSLock()
     private let fileManager = FileManager.default
-    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece"]
+    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece", "onnx-asr"]
 
     private var status = ParakeetRuntimeBootstrapStatus(
         phase: .idle,

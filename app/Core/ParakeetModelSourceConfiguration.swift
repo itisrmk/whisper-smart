@@ -221,18 +221,18 @@ private extension ParakeetModelSourceConfigurationStore {
         case ParakeetModelCatalog.ctc06BVariantID:
             return [
                 ParakeetModelSourceOption(
-                    id: "hf_parakeet_ctc06b_full",
-                    displayName: "Hugging Face full ONNX (recommended)",
-                    modelURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.onnx",
-                    modelDataURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.onnx.data",
+                    id: "hf_parakeet_ctc06b_int8",
+                    displayName: "Hugging Face int8 ONNX (recommended)",
+                    modelURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.int8.onnx",
+                    modelDataURLString: nil,
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/vocab.txt",
                     isBuiltIn: true
                 ),
                 ParakeetModelSourceOption(
-                    id: "hf_parakeet_ctc06b_int8",
-                    displayName: "Hugging Face int8 ONNX (alternate)",
-                    modelURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.int8.onnx",
-                    modelDataURLString: nil,
+                    id: "hf_parakeet_ctc06b_full",
+                    displayName: "Hugging Face full ONNX (alternate)",
+                    modelURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.onnx",
+                    modelDataURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.onnx.data",
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/vocab.txt",
                     isBuiltIn: true
                 )
