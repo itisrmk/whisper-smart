@@ -4,7 +4,7 @@ import Carbon.HIToolbox
 /// Monitors a global hotkey for press-and-hold dictation activation.
 ///
 /// Usage:
-///   let monitor = HotkeyMonitor(keyCode: kVK_RightCommand)
+///   let monitor = HotkeyMonitor()
 ///   monitor.onHoldStarted = { … }
 ///   monitor.onHoldEnded  = { … }
 ///   monitor.start()
@@ -23,12 +23,12 @@ final class HotkeyMonitor {
 
     // MARK: - Configuration
 
-    /// Virtual key code to watch (Carbon `kVK_*` constant).
-    let keyCode: Int
+    /// The active binding describing which key/modifiers to watch.
+    private(set) var binding: HotkeyBinding
 
-    /// All key codes that should be treated as equivalent to `keyCode`.
+    /// All key codes that should be treated as equivalent to the binding's key code.
     /// Populated automatically to include both left and right modifier variants.
-    private let matchingKeyCodes: Set<Int>
+    private var matchingKeyCodes: Set<Int>
 
     /// Minimum hold duration (seconds) before `onHoldStarted` fires.
     /// Prevents accidental taps from triggering dictation.
@@ -40,13 +40,14 @@ final class HotkeyMonitor {
     private var runLoopSource: CFRunLoopSource?
     private var keyDownTimestamp: Date?
     private var holdFired = false
+    private var isRunning = false
 
     // MARK: - Init
 
-    /// - Parameter keyCode: Carbon virtual key code (e.g. `kVK_RightCommand`).
-    init(keyCode: Int = kVK_RightCommand) {
-        self.keyCode = keyCode
-        self.matchingKeyCodes = Self.pairedKeyCodes(for: keyCode)
+    /// - Parameter binding: The hotkey binding to monitor (defaults to `.defaultBinding`).
+    init(binding: HotkeyBinding = .defaultBinding) {
+        self.binding = binding
+        self.matchingKeyCodes = Self.pairedKeyCodes(for: binding.keyCode)
     }
 
     /// Returns a set containing both left and right variants for modifier keys,
@@ -68,6 +69,22 @@ final class HotkeyMonitor {
 
     deinit {
         stop()
+    }
+
+    // MARK: - Dynamic binding update
+
+    /// Replaces the active binding. Tears down and reinstalls the event tap
+    /// so the new key/modifier combination takes effect immediately.
+    func updateBinding(_ newBinding: HotkeyBinding) {
+        guard newBinding != binding else { return }
+
+        let wasRunning = isRunning
+        if wasRunning { stop() }
+
+        binding = newBinding
+        matchingKeyCodes = Self.pairedKeyCodes(for: newBinding.keyCode)
+
+        if wasRunning { start() }
     }
 
     // MARK: - Lifecycle
@@ -104,6 +121,7 @@ final class HotkeyMonitor {
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        isRunning = true
     }
 
     /// Removes the event tap.
@@ -116,15 +134,13 @@ final class HotkeyMonitor {
         }
         eventTap = nil
         runLoopSource = nil
+        isRunning = false
         resetState()
     }
 
     // MARK: - Event handling
 
     private func handleCGEvent(type: CGEventType, event: CGEvent) {
-        // For modifier-only keys (Cmd, Option, etc.) macOS fires .flagsChanged.
-        // For regular keys it fires .keyDown / .keyUp.
-
         switch type {
         case .flagsChanged:
             handleFlagsChanged(event: event)
@@ -133,7 +149,6 @@ final class HotkeyMonitor {
         case .keyUp:
             handleKeyUp(event: event)
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            // Re-enable the tap if the system disables it.
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
@@ -144,26 +159,29 @@ final class HotkeyMonitor {
 
     private func handleFlagsChanged(event: CGEvent) {
         let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
-        guard matchingKeyCodes.contains(code) else { return }
 
-        // Determine press/release from the modifier flags.
-        let flags = event.flags
-        let isPressed = isModifierPressed(flags: flags, keyCode: code)
-
-        if isPressed {
-            onKeyDown()
-        } else {
-            onKeyUp()
+        if binding.isModifierOnly {
+            // Modifier-only binding: watch for the modifier key itself.
+            guard matchingKeyCodes.contains(code) else { return }
+            let flags = event.flags
+            let isPressed = isModifierPressed(flags: flags, keyCode: code)
+            if isPressed { onKeyDown() } else { onKeyUp() }
         }
+        // For modifier+key combos, flagsChanged is irrelevant — we track keyDown/keyUp.
     }
 
     private func handleKeyDown(event: CGEvent) {
+        guard !binding.isModifierOnly else { return }
         let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
         guard matchingKeyCodes.contains(code) else { return }
+        // Check that the required modifiers are held.
+        let flags = event.flags
+        guard flags.contains(binding.modifierFlags) else { return }
         onKeyDown()
     }
 
     private func handleKeyUp(event: CGEvent) {
+        guard !binding.isModifierOnly else { return }
         let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
         guard matchingKeyCodes.contains(code) else { return }
         onKeyUp()
@@ -176,7 +194,6 @@ final class HotkeyMonitor {
         keyDownTimestamp = Date()
         holdFired = false
 
-        // Schedule a check after the minimum hold duration.
         DispatchQueue.main.asyncAfter(deadline: .now() + minimumHoldDuration) { [weak self] in
             self?.checkHoldThreshold()
         }
@@ -207,7 +224,6 @@ final class HotkeyMonitor {
 
     /// Returns `true` when the modifier flag corresponding to `keyCode` is set.
     private func isModifierPressed(flags: CGEventFlags, keyCode: Int) -> Bool {
-        // TODO: Extend mapping for other modifier keys if needed.
         switch keyCode {
         case kVK_RightCommand, kVK_Command:
             return flags.contains(.maskCommand)
@@ -217,6 +233,8 @@ final class HotkeyMonitor {
             return flags.contains(.maskAlternate)
         case kVK_Control, kVK_RightControl:
             return flags.contains(.maskControl)
+        case kVK_Function:
+            return flags.contains(.maskSecondaryFn)
         default:
             return false
         }

@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Core
 
-    private lazy var hotkeyMonitor = HotkeyMonitor()
+    private lazy var hotkeyMonitor = HotkeyMonitor(binding: HotkeyBinding.load())
     private lazy var audioCapture = AudioCaptureService()
     private lazy var sttProvider: STTProvider = StubSTTProvider()
     private lazy var injector = ClipboardInjector()
@@ -29,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         injector: injector
     )
 
+    private var bindingObserver: NSObjectProtocol?
+
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -39,11 +41,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bubblePanel.show()
 
         wireCallbacks()
+        observeBindingChanges()
         stateMachine.activate()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         stateMachine.deactivate()
+        if let observer = bindingObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Wiring
@@ -79,6 +85,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         bubbleState.onTap = { [weak self] in
             self?.menuBar.onToggleDictation?()
+        }
+    }
+
+    /// Listens for `.hotkeyBindingDidChange` from Settings and hot-swaps
+    /// the monitor's binding without restarting the state machine.
+    private func observeBindingChanges() {
+        bindingObserver = NotificationCenter.default.addObserver(
+            forName: .hotkeyBindingDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let binding = notification.object as? HotkeyBinding else { return }
+            self?.hotkeyMonitor.updateBinding(binding)
         }
     }
 

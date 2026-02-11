@@ -49,13 +49,48 @@ private struct GeneralSettingsTab: View {
     }
 }
 
-// MARK: - Hotkey Picker (Placeholder)
+// MARK: - Hotkey Settings
 
 private struct HotkeySettingsTab: View {
+    /// Index into `HotkeyBinding.presets` (or -1 for custom/unknown).
+    @State private var selectedPresetIndex: Int = Self.initialPresetIndex()
+
     var body: some View {
         Form {
             Section {
-                HotkeyPickerPlaceholder()
+                // Current shortcut display
+                HStack {
+                    Text("Dictation shortcut")
+                        .font(VFFont.settingsBody)
+                    Spacer()
+                    Text(currentDisplayString)
+                        .font(VFFont.settingsBody)
+                        .padding(.horizontal, VFSpacing.sm)
+                        .padding(.vertical, VFSpacing.xs)
+                        .background(
+                            RoundedRectangle(cornerRadius: VFRadius.button)
+                                .fill(VFColor.surfaceElevated)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: VFRadius.button)
+                                .stroke(VFColor.textSecondary.opacity(0.3), lineWidth: 1)
+                        )
+                }
+
+                // Preset picker
+                Picker("Preset", selection: $selectedPresetIndex) {
+                    ForEach(0..<HotkeyBinding.presets.count, id: \.self) { i in
+                        Text(HotkeyBinding.presets[i].displayString).tag(i)
+                    }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: selectedPresetIndex) {
+                    applyPreset(at: selectedPresetIndex)
+                }
+
+                Text("Select a shortcut preset. Hold the key (or key combo) to start dictation, release to stop.")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
             } header: {
                 Text("Global Shortcut")
                     .font(VFFont.settingsTitle)
@@ -64,39 +99,34 @@ private struct HotkeySettingsTab: View {
         .formStyle(.grouped)
         .padding(VFSpacing.lg)
     }
+
+    // MARK: - Helpers
+
+    private var currentDisplayString: String {
+        if selectedPresetIndex >= 0 && selectedPresetIndex < HotkeyBinding.presets.count {
+            return HotkeyBinding.presets[selectedPresetIndex].displayString
+        }
+        return HotkeyBinding.load().displayString
+    }
+
+    private func applyPreset(at index: Int) {
+        guard index >= 0 && index < HotkeyBinding.presets.count else { return }
+        let binding = HotkeyBinding.presets[index]
+        binding.save()
+        // Post notification so AppDelegate picks up the change live.
+        NotificationCenter.default.post(name: .hotkeyBindingDidChange, object: binding)
+    }
+
+    private static func initialPresetIndex() -> Int {
+        let current = HotkeyBinding.load()
+        return HotkeyBinding.presets.firstIndex(of: current) ?? 0
+    }
 }
 
-/// Placeholder view for the hotkey picker.
-/// Replace this with a real key-recording control once the
-/// input-handling layer is implemented.
-struct HotkeyPickerPlaceholder: View {
-    @State private var displayedShortcut: String = "⌥ Space"
+// MARK: - Notification name for binding changes
 
-    var body: some View {
-        HStack {
-            Text("Dictation shortcut")
-                .font(VFFont.settingsBody)
-
-            Spacer()
-
-            Text(displayedShortcut)
-                .font(VFFont.settingsBody)
-                .padding(.horizontal, VFSpacing.sm)
-                .padding(.vertical, VFSpacing.xs)
-                .background(
-                    RoundedRectangle(cornerRadius: VFRadius.button)
-                        .fill(VFColor.surfaceElevated)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.button)
-                        .stroke(VFColor.textSecondary.opacity(0.3), lineWidth: 1)
-                )
-        }
-
-        Text("Click the shortcut area to record a new hotkey (coming soon).")
-            .font(VFFont.settingsCaption)
-            .foregroundStyle(VFColor.textSecondary)
-    }
+extension Notification.Name {
+    static let hotkeyBindingDidChange = Notification.Name("hotkeyBindingDidChange")
 }
 
 // MARK: - Provider Settings (Placeholder)
