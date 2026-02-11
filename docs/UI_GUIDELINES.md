@@ -25,6 +25,8 @@ token enums (`VFColor`, `VFFont`, `VFSpacing`, `VFRadius`, `VFSize`,
 | `VFColor.glass0` – `glass3` | Layered dark surfaces (0.06 → 0.18 white) |
 | `VFColor.glassBorder` | 1-px white-8% separator between glass layers |
 | `VFColor.glassHighlight` | White-12% top-edge shine on cards |
+| `VFColor.depthRadialTop` | Cool blue-grey radial tint for background depth |
+| `VFColor.depthRadialBottom` | Warm purple radial tint for background depth |
 | `VFColor.textTertiary` | White-35% for captions and hints |
 | `VFColor.accentGradient` | Blue-to-purple brand gradient |
 | `VFColor.*Gradient` | Per-state two-stop vertical gradients |
@@ -173,17 +175,42 @@ brighter:
 | `glass2` | 14% | Elevated card / hover / selected segment |
 | `glass3` | 18% | Pill control fill, input backgrounds |
 
+### Container / background treatment
+
+Use `.layeredDepthBackground()` on any root container instead of a
+flat `glass0` fill. The modifier composites three layers:
+
+1. **Solid base** — `glass0` (6% white).
+2. **Radial depth tints** — Two faint radial gradients:
+   - Cool blue-grey (`depthRadialTop`, 12% opacity) from top-leading.
+   - Warm purple (`depthRadialBottom`, 8% opacity) from bottom-trailing.
+   They provide subtle environmental depth without competing with
+   content.
+3. **Film grain overlay** — A procedural `GrainTexture` rendered via
+   SwiftUI `Canvas` (no image asset). Deterministic hash-based noise
+   at 4% opacity / 3-pt cells. Adds tactile texture to flat dark
+   surfaces while preserving text readability.
+
+The `SettingsView` and bubble preview both use this treatment.
+
 ### Glass card treatment
 
 The reusable `.glassCard()` modifier applies:
 
-1. **Fill** — `glass1` (or custom via parameter).
+1. **Gradient fill** — A subtle top-to-bottom gradient from `fillColor`
+   (default `glass1`) at full opacity to 85%, creating a slight
+   vertical lift.
 2. **Border** — 1-px `glassBorder` (white 8%).
-3. **Top-edge highlight** — A gradient stroke from `glassHighlight`
-   (white 12%) to clear, giving the card a subtle light-from-above
-   shine.
+3. **Multi-stop top-edge highlight** — A stroke gradient with three
+   stops: 18% white at the top, fading through 6% at 30%, to clear
+   at 55%. This produces a more realistic lit-from-above shine than
+   a two-stop fade.
 4. **Depth shadow** — `VFShadow.cardColor` at 16-pt radius, offset
    6-pt down.
+
+For additional inner-edge highlights on custom shapes, use the
+`.innerHighlight(cornerRadius:)` modifier which applies an inset
+`strokeBorder` with the same multi-stop gradient.
 
 ### Accent gradients & glow
 

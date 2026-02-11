@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Carbon.HIToolbox
 import CoreGraphics
 
@@ -92,5 +92,82 @@ struct HotkeyBinding: Equatable, Codable {
             return .defaultBinding
         }
         return binding
+    }
+
+    // MARK: - Build from NSEvent (for shortcut recorder)
+
+    /// Creates a HotkeyBinding from a captured NSEvent key-down.
+    /// Returns nil if the event has no usable key information.
+    static func from(event: NSEvent) -> HotkeyBinding? {
+        let keyCode = Int(event.keyCode)
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // Build display string
+        var parts: [String] = []
+        if flags.contains(.control) { parts.append("⌃") }
+        if flags.contains(.option)  { parts.append("⌥") }
+        if flags.contains(.shift)   { parts.append("⇧") }
+        if flags.contains(.command) { parts.append("⌘") }
+
+        let keyName = Self.keyName(for: keyCode) ?? event.charactersIgnoringModifiers?.uppercased()
+        if let keyName {
+            parts.append(keyName)
+        }
+
+        // Must have at least one modifier + a non-modifier key
+        guard !parts.isEmpty, keyName != nil, !flags.isEmpty else { return nil }
+
+        let display = parts.joined(separator: " ")
+
+        // Convert NSEvent modifier flags to CGEventFlags
+        var cgFlags: CGEventFlags = []
+        if flags.contains(.control) { cgFlags.insert(.maskControl) }
+        if flags.contains(.option)  { cgFlags.insert(.maskAlternate) }
+        if flags.contains(.shift)   { cgFlags.insert(.maskShift) }
+        if flags.contains(.command) { cgFlags.insert(.maskCommand) }
+
+        return HotkeyBinding(
+            keyCode: keyCode,
+            modifierFlags: cgFlags,
+            displayString: display,
+            isModifierOnly: false
+        )
+    }
+
+    /// Human-readable name for common Carbon key codes.
+    private static func keyName(for keyCode: Int) -> String? {
+        switch keyCode {
+        case kVK_Space:       return "Space"
+        case kVK_Return:      return "Return"
+        case kVK_Tab:         return "Tab"
+        case kVK_Delete:      return "Delete"
+        case kVK_ForwardDelete: return "Fwd Delete"
+        case kVK_UpArrow:     return "↑"
+        case kVK_DownArrow:   return "↓"
+        case kVK_LeftArrow:   return "←"
+        case kVK_RightArrow:  return "→"
+        case kVK_Home:        return "Home"
+        case kVK_End:         return "End"
+        case kVK_PageUp:      return "Page Up"
+        case kVK_PageDown:    return "Page Down"
+        case kVK_F1:          return "F1"
+        case kVK_F2:          return "F2"
+        case kVK_F3:          return "F3"
+        case kVK_F4:          return "F4"
+        case kVK_F5:          return "F5"
+        case kVK_F6:          return "F6"
+        case kVK_F7:          return "F7"
+        case kVK_F8:          return "F8"
+        case kVK_F9:          return "F9"
+        case kVK_F10:         return "F10"
+        case kVK_F11:         return "F11"
+        case kVK_F12:         return "F12"
+        default:              return nil
+        }
+    }
+
+    /// Returns the index in `presets` that matches this binding, or nil.
+    var presetIndex: Int? {
+        HotkeyBinding.presets.firstIndex(of: self)
     }
 }

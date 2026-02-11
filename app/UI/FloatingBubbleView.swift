@@ -142,7 +142,7 @@ struct FloatingBubbleView_Previews: PreviewProvider {
             }
         }
         .padding(40)
-        .background(VFColor.glass0)
+        .layeredDepthBackground()
     }
 }
 #endif

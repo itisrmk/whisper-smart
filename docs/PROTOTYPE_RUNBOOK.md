@@ -63,7 +63,7 @@ The app starts as a menu-bar-only process (no Dock icon).
 - [ ] Click menu bar icon → "Settings…" opens settings window
 - [ ] Tabs: General, Hotkey, Provider are present
 
-### 6. Shortcut Customization
+### 6. Shortcut Customization — Preset Picker
 - [ ] Open Settings → Hotkey tab
 - [ ] "Dictation shortcut" label shows current binding (default: "⌘ Hold")
 - [ ] Preset picker lists: ⌘ Hold, ⌥ Space, ⌃ Space, Fn Hold
@@ -75,6 +75,31 @@ The app starts as a menu-bar-only process (no Dock icon).
   - [ ] Release → "Transcribing…" → text pasted → back to "Ready"
 - [ ] Switch back to "⌘ Hold" and verify it works again
 - [ ] Changes take effect live — no app restart required
+
+### 6b. Shortcut Customization — Shortcut Recorder
+The recorder lets you capture a custom modifier + key combo instead of choosing
+a preset.
+
+- [ ] Open Settings → Hotkey tab
+- [ ] Click the **"Record"** button (shows a record icon)
+  - [ ] Button changes to **"Press keys…"** with a red accent
+  - [ ] Helper text appears: "Press a modifier + key combo (e.g. ⌥ Space). Press Esc to cancel."
+  - [ ] Preset picker is disabled while recording
+- [ ] **Record a custom shortcut:**
+  - [ ] Press a modifier + key combo (e.g. ⌃ ⇧ K)
+  - [ ] "Dictation shortcut" pill updates to show the recorded combo (e.g. "⌃ ⇧ K")
+  - [ ] Preset picker shows "Custom" (since it doesn't match a built-in preset)
+  - [ ] The new binding is persisted — restart the app and verify it still shows "⌃ ⇧ K"
+  - [ ] The new shortcut works for hold-to-dictate
+- [ ] **Cancel recording with Escape:**
+  - [ ] Click "Record", then press Esc
+  - [ ] Recording stops, previous shortcut is unchanged
+- [ ] **Validation — keys without modifiers are rejected:**
+  - [ ] Click "Record", press a plain key (e.g. just "K" with no modifiers)
+  - [ ] Recording does NOT accept it; stays in recording mode waiting for a valid combo
+- [ ] **Switch back to a preset after recording custom:**
+  - [ ] Select a preset from the picker (e.g. "⌘ Hold")
+  - [ ] Shortcut updates, preset picker shows the preset name again
 
 ### 7. Quit
 - [ ] Click menu bar icon → "Quit Visperflow" terminates the process cleanly
