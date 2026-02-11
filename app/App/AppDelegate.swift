@@ -260,12 +260,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshProviderResolution(logReason: String) {
         let kind = STTProviderKind.loadSelection()
-        logger.info("\(logReason, privacy: .public): kind=\(kind.rawValue, privacy: .public)")
+        let priorState = stateMachine.state
+        logger.info("\(logReason, privacy: .public): kind=\(kind.rawValue, privacy: .public) priorState=\(String(describing: priorState), privacy: .public)")
         let resolution = STTProviderResolver.resolve(for: kind)
         publishProviderDiagnostics(resolution.diagnostics)
         self.sttProvider = resolution.provider
         logger.info("Replacing state-machine provider with: \(self.sttProvider.displayName, privacy: .public)")
         self.stateMachine.replaceProvider(self.sttProvider)
+
+        // After replaceProvider(), the state machine should be .idle.  However,
+        // if a stale async error callback raced in after the swap, the machine
+        // may still show .error.  Clear it when the new provider is usable so
+        // the menu/bubble status is not stuck.
+        if stateMachine.state.isError && resolution.diagnostics.healthLevel != .unavailable {
+            logger.info("Clearing stale error state after provider refresh (effective provider healthy)")
+            // Force-reset to idle — replaceProvider with same instance handles this.
+            stateMachine.replaceProvider(self.sttProvider)
+        }
     }
 
     private func publishProviderDiagnostics(_ diagnostics: ProviderRuntimeDiagnostics) {

@@ -99,12 +99,12 @@ final class ParakeetSTTProvider: STTProvider {
         samplesLock.unlock()
 
         updateSessionActive(true)
-        logger.info("Parakeet session started")
+        logger.info("[SESSION_START] Parakeet session started (variant=\(self.variant.id, privacy: .public))")
     }
 
     func endSession() {
         guard currentSessionActive else {
-            logger.warning("endSession called but no session was active — ignoring")
+            logger.warning("[SESSION_END] endSession called but no session was active — ignoring")
             return
         }
 
@@ -148,8 +148,9 @@ final class ParakeetSTTProvider: STTProvider {
             onError?(.providerError(message: error.localizedDescription))
             return
         }
-        logger.info("Parakeet session ended, launching local inference (samples=\(samples.count))")
+        logger.info("[SESSION_END] Parakeet session ended, launching local inference (samples=\(samples.count))")
 
+        logger.info("[INFERENCE_START] Dispatching inference on background queue (samples=\(samples.count))")
         inferenceQueue.async { [weak self] in
             guard let self else { return }
             let result: Result<String, STTError>
@@ -174,17 +175,20 @@ final class ParakeetSTTProvider: STTProvider {
                 case .success(let transcript):
                     let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
                     if trimmed.isEmpty {
+                        logger.error("[INFERENCE_FAILED] Empty transcript returned")
                         self.onError?(.providerError(
                             message: "Parakeet inference returned an empty transcript. Speak clearly and verify model/tokenizer files."
                         ))
                         return
                     }
+                    logger.info("[INFERENCE_COMPLETE] Transcript ready (\(trimmed.count) chars)")
                     self.onResult?(STTResult(
                         text: trimmed,
                         isPartial: false,
                         confidence: nil
                     ))
                 case .failure(let error):
+                    logger.error("[INFERENCE_FAILED] \(error.localizedDescription, privacy: .public)")
                     self.onError?(error)
                 }
             }

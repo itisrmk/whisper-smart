@@ -63,6 +63,11 @@ final class DictationStateMachine {
     private var sttProvider: STTProvider
     private let injector: ClipboardInjector
 
+    /// Timeout for the transcribing state. If the STT provider never delivers
+    /// a result or error, recover to idle after this interval.
+    private let transcribingTimeout: TimeInterval = 30.0
+    private var transcribingTimeoutWork: DispatchWorkItem?
+
     // MARK: - Init
 
     init(
@@ -137,6 +142,7 @@ final class DictationStateMachine {
                     return
                 }
                 logger.error("STT provider error from \(provider.displayName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                self.cancelTranscribingTimeout()
                 self.transition(to: .error(error.localizedDescription))
             }
         }
@@ -160,6 +166,7 @@ final class DictationStateMachine {
         logger.info("Deactivating dictation state machine (current state: \(String(describing: self.state)))")
         hotkeyMonitor.stop()
         audioCapture.stop()
+        cancelTranscribingTimeout()
         // Only end the session if we were actively using the provider.
         if state == .recording || state == .transcribing {
             sttProvider.endSession()
@@ -187,6 +194,8 @@ final class DictationStateMachine {
             }
             return
         }
+
+        cancelTranscribingTimeout()
 
         if priorState == .recording {
             audioCapture.stop()
@@ -232,6 +241,10 @@ final class DictationStateMachine {
     // MARK: - State transitions
 
     private func handleHoldStarted() {
+        if state.isError {
+            logger.info("Hold-start received in error state — recovering to idle before recording")
+            transition(to: .idle)
+        }
         guard state == .idle else { return }
 
         // Pre-flight: check microphone permission before attempting capture.
@@ -283,6 +296,7 @@ final class DictationStateMachine {
         // result delivery (e.g. StubSTTProvider) finds the machine in the
         // correct state.
         transition(to: .transcribing)
+        scheduleTranscribingTimeout()
         sttProvider.endSession()
     }
 
@@ -293,6 +307,7 @@ final class DictationStateMachine {
         }
 
         if !result.isPartial {
+            cancelTranscribingTimeout()
             let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 logger.info("Injecting transcription (\(trimmed.count) chars)")
@@ -309,5 +324,23 @@ final class DictationStateMachine {
     private func transition(to newState: State) {
         logger.info("State transition: \(String(describing: self.state)) → \(String(describing: newState))")
         state = newState
+    }
+
+    // MARK: - Transcribing Timeout
+
+    private func scheduleTranscribingTimeout() {
+        cancelTranscribingTimeout()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.state == .transcribing else { return }
+            logger.error("Transcribing timeout (\(self.transcribingTimeout)s) — STT provider did not respond, recovering to idle")
+            self.transition(to: .error("Transcription timed out. The STT provider did not return a result. Try again."))
+        }
+        transcribingTimeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + transcribingTimeout, execute: work)
+    }
+
+    private func cancelTranscribingTimeout() {
+        transcribingTimeoutWork?.cancel()
+        transcribingTimeoutWork = nil
     }
 }
