@@ -41,6 +41,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Menu-bar-only app: no Dock icon
         NSApp.setActivationPolicy(.accessory)
 
+        // Proactively prompt for Accessibility permission if not yet granted.
+        // This surfaces the system dialog early rather than failing silently
+        // when the event tap is first installed.
+        if !HotkeyMonitor.checkAccessibilityTrust(promptIfNeeded: true) {
+            logger.warning("Accessibility trust not yet granted — hotkey monitoring may fail until approved")
+        }
+
+        // Pre-request microphone permission so it's ready when the user
+        // first holds the hotkey (avoids a delay on first dictation).
+        if AudioCaptureService.microphoneAuthorizationStatus() == .notDetermined {
+            AudioCaptureService.requestMicrophoneAccess { granted in
+                logger.info("Microphone permission prompt result: \(granted ? "granted" : "denied")")
+            }
+        }
+
         menuBar.install()
         bubblePanel.show()
 
@@ -134,10 +149,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func makeProvider(for kind: STTProviderKind) -> STTProvider {
         switch kind {
         case .parakeet:
-            let variant = kind.defaultVariant ?? .parakeetCTC06B
+            guard let variant = kind.defaultVariant else {
+                logger.error("No model variant available for \(kind.rawValue) — falling back to stub")
+                return StubSTTProvider()
+            }
             logger.info("Creating ParakeetSTTProvider, model status: \(variant.validationStatus)")
             return ParakeetSTTProvider(variant: variant)
-        case .stub, .whisper, .openaiAPI:
+        case .whisper:
+            if kind.defaultVariant == nil {
+                logger.warning("Whisper model variants not yet configured — using stub provider")
+            }
+            return StubSTTProvider()
+        case .stub, .openaiAPI:
             logger.info("Creating StubSTTProvider for kind: \(kind.rawValue)")
             return StubSTTProvider()
         }

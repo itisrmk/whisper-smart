@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.visperflow", category: "DictationSM")
 
 /// Central coordinator that ties together hotkey detection, audio capture,
 /// speech-to-text, and text injection into a single dictation lifecycle.
@@ -84,6 +87,12 @@ final class DictationStateMachine {
             self?.handleHoldEnded()
         }
 
+        // Event tap creation failed → surface to UI
+        hotkeyMonitor.onStartFailed = { [weak self] error in
+            logger.error("Hotkey monitor start failed: \(error.localizedDescription)")
+            self?.transition(to: .error(error.localizedDescription))
+        }
+
         // Audio buffer → feed to STT
         audioCapture.onBuffer = { [weak self] buffer, time in
             self?.sttProvider.feedAudio(buffer: buffer, time: time)
@@ -92,6 +101,7 @@ final class DictationStateMachine {
         // Audio error → surface
         audioCapture.onError = { [weak self] error in
             DispatchQueue.main.async {
+                logger.error("Audio capture error: \(error.localizedDescription)")
                 self?.transition(to: .error(error.localizedDescription))
             }
         }
@@ -103,6 +113,7 @@ final class DictationStateMachine {
         // STT result → inject text
         sttProvider.onResult = { [weak self] result in
             DispatchQueue.main.async {
+                logger.info("STT result received (partial=\(result.isPartial), len=\(result.text.count))")
                 self?.handleSTTResult(result)
             }
         }
@@ -110,6 +121,7 @@ final class DictationStateMachine {
         // STT error → surface
         sttProvider.onError = { [weak self] error in
             DispatchQueue.main.async {
+                logger.error("STT provider error: \(error.localizedDescription)")
                 self?.transition(to: .error(error.localizedDescription))
             }
         }
@@ -119,14 +131,19 @@ final class DictationStateMachine {
 
     /// Call once at app launch to start monitoring the hotkey.
     func activate() {
+        logger.info("Activating dictation state machine")
         hotkeyMonitor.start()
     }
 
     /// Call at app termination or when disabling dictation.
     func deactivate() {
+        logger.info("Deactivating dictation state machine (current state: \(String(describing: self.state)))")
         hotkeyMonitor.stop()
         audioCapture.stop()
-        sttProvider.endSession()
+        // Only end the session if we were actively using the provider.
+        if state == .recording || state == .transcribing {
+            sttProvider.endSession()
+        }
         transition(to: .idle)
     }
 
@@ -142,11 +159,35 @@ final class DictationStateMachine {
     private func handleHoldStarted() {
         guard state == .idle else { return }
 
+        // Pre-flight: check microphone permission before attempting capture.
+        let micStatus = AudioCaptureService.microphoneAuthorizationStatus()
+        if micStatus == .notDetermined {
+            logger.info("Microphone permission not yet determined — requesting")
+            AudioCaptureService.requestMicrophoneAccess { [weak self] granted in
+                if granted {
+                    logger.info("Microphone permission granted")
+                    self?.beginRecordingSession()
+                } else {
+                    logger.error("Microphone permission denied by user")
+                    self?.transition(to: .error(AudioCaptureError.microphonePermissionDenied.localizedDescription))
+                }
+            }
+            return
+        }
+
+        beginRecordingSession()
+    }
+
+    private func beginRecordingSession() {
+        guard state == .idle else { return }
+
         do {
             try sttProvider.beginSession()
             try audioCapture.start()
+            logger.info("Recording session started")
             transition(to: .recording)
         } catch {
+            logger.error("Failed to start recording: \(error.localizedDescription)")
             transition(to: .error(error.localizedDescription))
         }
     }
@@ -155,17 +196,26 @@ final class DictationStateMachine {
         guard state == .recording else { return }
 
         audioCapture.stop()
-        sttProvider.endSession()
+        // Transition to .transcribing BEFORE endSession() so that synchronous
+        // result delivery (e.g. StubSTTProvider) finds the machine in the
+        // correct state.
         transition(to: .transcribing)
+        sttProvider.endSession()
     }
 
     private func handleSTTResult(_ result: STTResult) {
-        guard state == .transcribing || state == .recording else { return }
+        guard state == .transcribing || state == .recording else {
+            logger.warning("STT result arrived in unexpected state \(String(describing: self.state)), ignoring")
+            return
+        }
 
         if !result.isPartial {
             let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
+                logger.info("Injecting transcription (\(trimmed.count) chars)")
                 injector.inject(text: trimmed)
+            } else {
+                logger.info("Transcription empty after trim, skipping injection")
             }
             transition(to: .idle)
         }
@@ -174,6 +224,7 @@ final class DictationStateMachine {
     }
 
     private func transition(to newState: State) {
+        logger.info("State transition: \(String(describing: self.state)) → \(String(describing: newState))")
         state = newState
     }
 }

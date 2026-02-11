@@ -48,7 +48,11 @@ final class ParakeetSTTProvider: STTProvider {
     }
 
     func endSession() {
-        defer { sessionActive = false }
+        guard sessionActive else {
+            logger.warning("endSession called but no session was active — ignoring")
+            return
+        }
+        sessionActive = false
         logger.info("Parakeet session ended")
         // Deliver a placeholder result (same as Stub for now).
         onResult?(STTResult(text: "[parakeet stub transcription]", isPartial: false, confidence: nil))

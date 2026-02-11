@@ -24,6 +24,9 @@ final class HotkeyMonitor {
     /// Fired once when the monitored key is released.
     var onHoldEnded: (() -> Void)?
 
+    /// Fired when the event tap cannot be created (Accessibility permission missing).
+    var onStartFailed: ((HotkeyMonitorError) -> Void)?
+
     // MARK: - Configuration
 
     /// The active binding describing which key/modifiers to watch.
@@ -94,17 +97,25 @@ final class HotkeyMonitor {
 
     // MARK: - Lifecycle
 
+    /// Returns `true` when the app is a trusted accessibility client.
+    /// Pass `promptIfNeeded: true` to show the system permission dialog.
+    static func checkAccessibilityTrust(promptIfNeeded: Bool) -> Bool {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): promptIfNeeded] as CFDictionary
+        return AXIsProcessTrustedWithOptions(options)
+    }
+
     /// Installs the global event tap. Requires Accessibility permission.
     func start() {
         guard eventTap == nil else { return }
+
+        if !Self.checkAccessibilityTrust(promptIfNeeded: false) {
+            logger.error("Accessibility trust not granted — event tap will likely fail")
+        }
 
         let eventMask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
             | (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
 
-        // TODO: Handle the case where CGEvent.tapCreate returns nil
-        //       (Accessibility permission not granted). Surface an error
-        //       via a delegate/callback so the UI layer can prompt the user.
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -118,7 +129,9 @@ final class HotkeyMonitor {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("[HotkeyMonitor] Failed to create event tap – check Accessibility permissions.")
+            let err = HotkeyMonitorError.eventTapCreationFailed
+            logger.error("Failed to create event tap — Accessibility permission likely missing")
+            onStartFailed?(err)
             return
         }
 
@@ -127,6 +140,7 @@ final class HotkeyMonitor {
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         isRunning = true
+        logger.info("Event tap installed, monitoring: \(self.binding.displayString)")
     }
 
     /// Removes the event tap.
@@ -251,6 +265,19 @@ final class HotkeyMonitor {
             return flags.contains(.maskSecondaryFn)
         default:
             return false
+        }
+    }
+}
+
+// MARK: - Errors
+
+enum HotkeyMonitorError: Error, LocalizedError {
+    case eventTapCreationFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .eventTapCreationFailed:
+            return "Cannot monitor hotkeys — grant Accessibility permission in System Settings → Privacy & Security → Accessibility."
         }
     }
 }

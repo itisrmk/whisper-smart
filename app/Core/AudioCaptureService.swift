@@ -1,4 +1,7 @@
 import AVFoundation
+import os.log
+
+private let logger = Logger(subsystem: "com.visperflow", category: "AudioCapture")
 
 /// Captures raw audio from the default input device and streams PCM buffers
 /// to a consumer (typically an STTProvider).
@@ -38,18 +41,35 @@ final class AudioCaptureService {
 
     // MARK: - Lifecycle
 
-    /// Requests microphone permission, configures the audio engine, installs
-    /// a tap on the input node, and starts capture.
+    /// Checks the current microphone authorization status.
+    /// Returns `.authorized` when recording is allowed immediately.
+    static func microphoneAuthorizationStatus() -> AVAuthorizationStatus {
+        AVCaptureDevice.authorizationStatus(for: .audio)
+    }
+
+    /// Requests microphone access. Calls `completion` on the main queue with the result.
+    static func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            DispatchQueue.main.async { completion(granted) }
+        }
+    }
+
+    /// Configures the audio engine, installs a tap on the input node,
+    /// and starts capture.
     ///
-    /// - Throws: If the audio session cannot be configured or the engine
-    ///           fails to start.
+    /// - Throws: If mic permission is denied, the audio session cannot be
+    ///           configured, or the engine fails to start.
     func start() throws {
         guard !isRunning else { return }
 
-        // TODO: Check & request microphone permission before proceeding.
-        //       AVCaptureDevice.requestAccess(for: .audio) is async; consider
-        //       making this method async or adding a permission-check step
-        //       to the DictationStateMachine.
+        // Gate on microphone permission — callers should pre-request via
+        // requestMicrophoneAccess(), but we enforce here as a safety net.
+        let authStatus = Self.microphoneAuthorizationStatus()
+        guard authStatus == .authorized else {
+            logger.error("Microphone access not authorized (status: \(authStatus.rawValue))")
+            throw AudioCaptureError.microphonePermissionDenied
+        }
+        logger.info("Microphone authorized, starting capture")
 
         let inputNode = engine.inputNode
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
@@ -134,6 +154,7 @@ enum AudioCaptureError: Error, LocalizedError {
     case noInputDevice
     case interrupted
     case conversionFailed
+    case microphonePermissionDenied
 
     var errorDescription: String? {
         switch self {
@@ -145,6 +166,8 @@ enum AudioCaptureError: Error, LocalizedError {
             return "Audio capture was interrupted by the system."
         case .conversionFailed:
             return "Failed to create audio format converter."
+        case .microphonePermissionDenied:
+            return "Microphone access denied — grant permission in System Settings → Privacy & Security → Microphone."
         }
     }
 }
