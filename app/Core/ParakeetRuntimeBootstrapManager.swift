@@ -52,13 +52,23 @@ final class ParakeetRuntimeBootstrapManager {
 
     func ensureRuntimeReady(forceRepair: Bool = false) throws -> String {
         if let override = pythonOverrideCommand() {
-            updateStatus(
-                phase: .ready,
-                detail: "Using VISPERFLOW_PARAKEET_PYTHON override (\(override)).",
-                runtimeDirectory: nil,
-                pythonCommand: override
-            )
-            return override
+            // Never trust override blindly. Validate required imports first.
+            do {
+                try runCommand(
+                    executablePath: "/usr/bin/env",
+                    arguments: [override, "-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+                    step: "verify VISPERFLOW_PARAKEET_PYTHON override"
+                )
+                updateStatus(
+                    phase: .ready,
+                    detail: "Using VISPERFLOW_PARAKEET_PYTHON override (\(override)).",
+                    runtimeDirectory: nil,
+                    pythonCommand: override
+                )
+                return override
+            } catch {
+                bootstrapLogger.warning("Python override failed dependency validation; falling back to managed runtime: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         return try queue.sync {
