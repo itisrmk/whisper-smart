@@ -162,10 +162,17 @@ final class HotkeyMonitor {
 
         if binding.isModifierOnly {
             // Modifier-only binding: watch for the modifier key itself.
-            guard matchingKeyCodes.contains(code) else { return }
             let flags = event.flags
-            let isPressed = isModifierPressed(flags: flags, keyCode: code)
-            if isPressed { onKeyDown() } else { onKeyUp() }
+            let isPressed = isModifierPressed(flags: flags, keyCode: binding.keyCode)
+
+            if matchingKeyCodes.contains(code) {
+                if isPressed { onKeyDown() } else { onKeyUp() }
+            } else if !isPressed && (keyDownTimestamp != nil || holdFired) {
+                // Safety: another flagsChanged arrived (e.g. a different modifier was
+                // tapped) while our modifier is no longer held. Force release to
+                // prevent stuck-key states.
+                onKeyUp()
+            }
         }
         // For modifier+key combos, flagsChanged is irrelevant — we track keyDown/keyUp.
     }

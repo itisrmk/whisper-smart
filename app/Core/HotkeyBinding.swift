@@ -57,6 +57,13 @@ struct HotkeyBinding: Equatable, Codable {
         isModifierOnly: false
     )
 
+    static let controlHold = HotkeyBinding(
+        keyCode: kVK_Control,
+        modifierFlags: [],
+        displayString: "⌃ Hold",
+        isModifierOnly: true
+    )
+
     static let fnKey = HotkeyBinding(
         keyCode: kVK_Function,
         modifierFlags: [],
@@ -70,6 +77,7 @@ struct HotkeyBinding: Equatable, Codable {
     /// All built-in presets offered in the Settings UI.
     static let presets: [HotkeyBinding] = [
         .rightCommandHold,
+        .controlHold,
         .optionSpace,
         .controlSpace,
         .fnKey,
@@ -95,6 +103,31 @@ struct HotkeyBinding: Equatable, Codable {
     }
 
     // MARK: - Build from NSEvent (for shortcut recorder)
+
+    /// Creates a modifier-only HotkeyBinding from a `flagsChanged` NSEvent.
+    /// Returns nil if the event doesn't represent a single modifier key.
+    static func fromModifierOnly(event: NSEvent) -> HotkeyBinding? {
+        let keyCode = Int(event.keyCode)
+        guard let (symbol, _) = modifierKeyInfo(for: keyCode) else { return nil }
+        return HotkeyBinding(
+            keyCode: keyCode,
+            modifierFlags: [],
+            displayString: "\(symbol) Hold",
+            isModifierOnly: true
+        )
+    }
+
+    /// Returns (symbol, CGEventFlags) for modifier key codes, nil for non-modifiers.
+    private static func modifierKeyInfo(for keyCode: Int) -> (String, CGEventFlags)? {
+        switch keyCode {
+        case kVK_Command, kVK_RightCommand: return ("⌘", .maskCommand)
+        case kVK_Shift, kVK_RightShift:     return ("⇧", .maskShift)
+        case kVK_Option, kVK_RightOption:    return ("⌥", .maskAlternate)
+        case kVK_Control, kVK_RightControl:  return ("⌃", .maskControl)
+        case kVK_Function:                   return ("Fn", .maskSecondaryFn)
+        default:                             return nil
+        }
+    }
 
     /// Creates a HotkeyBinding from a captured NSEvent key-down.
     /// Returns nil if the event has no usable key information.

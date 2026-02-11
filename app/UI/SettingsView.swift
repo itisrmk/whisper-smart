@@ -179,6 +179,8 @@ private struct HotkeySettingsTab: View {
     @State private var validationError: String? = nil
     @State private var keyMonitor: Any? = nil
     @State private var flagsMonitor: Any? = nil
+    /// Tracks the last lone modifier event so we can finalize on release.
+    @State private var pendingModifierEvent: NSEvent? = nil
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
@@ -236,7 +238,7 @@ private struct HotkeySettingsTab: View {
 
                     // Hint / error row
                     if isRecording {
-                        Text("Press modifier + key (e.g. ⌥ Space). Esc to cancel.")
+                        Text("Press modifier + key (e.g. ⌥ Space) or tap a modifier alone (e.g. ⌃). Esc to cancel.")
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.accentFallback.opacity(0.8))
                     }
@@ -323,6 +325,7 @@ private struct HotkeySettingsTab: View {
         tearDownMonitors()
         isRecording = false
         liveModifiers = ""
+        pendingModifierEvent = nil
     }
 
     private func tearDownMonitors() {
@@ -335,9 +338,29 @@ private struct HotkeySettingsTab: View {
     private func handleFlagsChanged(_ event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         liveModifiers = Self.modifierSymbols(from: flags)
+
+        if flags.isEmpty {
+            // All modifiers released — if we were tracking a lone modifier, finalize it.
+            if let modEvent = pendingModifierEvent,
+               let binding = HotkeyBinding.fromModifierOnly(event: modEvent) {
+                pendingModifierEvent = nil
+                tearDownMonitors()
+                isRecording = false
+                liveModifiers = ""
+                validationError = nil
+                applyBinding(binding)
+            }
+            pendingModifierEvent = nil
+        } else {
+            // A modifier is held. Record the event so we can finalize on release.
+            pendingModifierEvent = event
+        }
     }
 
     private func handleKeyDown(_ event: NSEvent) {
+        // A regular key was pressed — this is not a modifier-only shortcut.
+        pendingModifierEvent = nil
+
         // Esc cancels recording
         if event.keyCode == UInt16(kVK_Escape) {
             cancelRecording()
