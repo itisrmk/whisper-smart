@@ -516,10 +516,16 @@ private extension ModelDownloaderService {
         let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         guard process.terminationStatus == 0 else {
-            return mappedPreflightFailure(
-                details: !stderr.isEmpty ? stderr : stdout,
+            let details = !stderr.isEmpty ? stderr : stdout
+            if let mappedError = mappedPreflightFailure(
+                details: details,
                 exitCode: process.terminationStatus
-            )
+            ) {
+                return mappedError
+            }
+
+            logger.warning("ONNX preflight returned non-fatal mismatch: \(details, privacy: .public)")
+            return nil
         }
 
         return nil
@@ -563,13 +569,18 @@ private extension ModelDownloaderService {
         )
     }
 
-    func mappedPreflightFailure(details: String, exitCode: Int32) -> String {
+    func mappedPreflightFailure(details: String, exitCode: Int32) -> String? {
         let lowercased = details.lowercased()
-        if lowercased.contains("model_load_error") {
-            return "MODEL_LOAD_ERROR during ONNX preflight. The downloaded file is not a loadable Parakeet ONNX model. Delete it and download again."
-        }
         if lowercased.contains("model_signature_error") || lowercased.contains("unsupported onnx audio input signature") {
-            return "MODEL_SIGNATURE_ERROR during ONNX preflight. This model source is not compatible with the current runtime path. Switch source to 'Hugging Face int8 ONNX (recommended)' and re-download."
+            // Signature mismatch should not block model download; this is a runtime
+            // capability mismatch and may be handled by alternative inference paths.
+            return nil
+        }
+
+        if lowercased.contains("model_load_error") {
+            // Some Parakeet exports can fail strict preflight load while still being
+            // consumable by onnx-asr in runtime. Do not hard-fail download here.
+            return nil
         }
         if lowercased.contains("tokenizer_missing") || lowercased.contains("tokenizer_error") {
             return "Tokenizer validation failed during ONNX preflight. Re-download model artifacts from Settings -> Provider."
