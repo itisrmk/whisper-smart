@@ -36,10 +36,11 @@ enum VFColor {
     static let depthRadialBottom = Color(red: 0.26, green: 0.10, blue: 0.42).opacity(0.10)
     static let depthVignette     = Color(red: 0.06, green: 0.05, blue: 0.14).opacity(0.35)
 
-    // Surface / chrome (backward compat)
-    static let surfacePrimary   = Color(nsColor: .windowBackgroundColor)
+    // Surface / chrome (backward compat) — fixed dark values to avoid
+    // system-appearance leaking light colors into our forced-dark UI.
+    static let surfacePrimary   = Color(white: 0.10)
     static let surfaceOverlay   = Color.black.opacity(0.72)
-    static let surfaceElevated  = Color(nsColor: .controlBackgroundColor)
+    static let surfaceElevated  = Color(white: 0.14)
 
     // ── Accent gradients ─────────────────────────────────────────
     static let accentGradient = LinearGradient(

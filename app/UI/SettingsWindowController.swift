@@ -16,6 +16,8 @@ final class SettingsWindowController {
             return
         }
 
+        let darkAppearance = NSAppearance(named: .darkAqua)
+
         let settingsView = SettingsView()
         let hostingController = NSHostingController(rootView: settingsView)
 
@@ -25,7 +27,10 @@ final class SettingsWindowController {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        window.appearance = NSAppearance(named: .darkAqua)
+        // Force dark appearance on window and content so SwiftUI resolves
+        // all adaptive colors against the dark palette.
+        window.appearance = darkAppearance
+        window.contentView?.appearance = darkAppearance
         window.backgroundColor = NSColor(white: 0.08, alpha: 1.0)
         window.setContentSize(NSSize(width: VFSize.settingsWidth, height: VFSize.settingsHeight))
         window.center()

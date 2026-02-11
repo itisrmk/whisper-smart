@@ -45,6 +45,7 @@ struct SettingsView: View {
         }
         .frame(width: VFSize.settingsWidth, height: VFSize.settingsHeight)
         .layeredDepthBackground()
+        .preferredColorScheme(.dark)
         .animation(VFAnimation.fadeMedium, value: selectedTab)
     }
 }
