@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var bindingObserver: NSObjectProtocol?
     private var providerObserver: NSObjectProtocol?
+    private var parakeetBootstrapObserver: NSObjectProtocol?
 
     // MARK: - Lifecycle
 
@@ -53,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wireCallbacks()
         observeBindingChanges()
         observeProviderChanges()
+        observeParakeetBootstrapChanges()
 
         // Request all permissions in the correct order, then activate
         // the hotkey monitor once we know the permission landscape.
@@ -120,6 +122,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = providerObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = parakeetBootstrapObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -202,15 +207,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            let kind = STTProviderKind.loadSelection()
-            logger.info("Provider changed in settings to kind: \(kind.rawValue, privacy: .public)")
-            let resolution = STTProviderResolver.resolve(for: kind)
-            self.publishProviderDiagnostics(resolution.diagnostics)
-            self.sttProvider = resolution.provider
-            logger.info("Replacing state-machine provider with: \(self.sttProvider.displayName, privacy: .public)")
-            self.stateMachine.replaceProvider(self.sttProvider)
+            self?.refreshProviderResolution(logReason: "Provider changed in settings")
         }
+    }
+
+    private func observeParakeetBootstrapChanges() {
+        parakeetBootstrapObserver = NotificationCenter.default.addObserver(
+            forName: .parakeetRuntimeBootstrapDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleParakeetBootstrapStatusChange()
+        }
+    }
+
+    private func handleParakeetBootstrapStatusChange() {
+        let bootstrapPhase = ParakeetRuntimeBootstrapManager.shared.statusSnapshot().phase
+        switch bootstrapPhase {
+        case .idle, .bootstrapping:
+            refreshProviderDiagnostics(logReason: "Parakeet runtime bootstrap status changed")
+        case .ready, .failed:
+            switch stateMachine.state {
+            case .idle, .error:
+                refreshProviderResolution(logReason: "Parakeet runtime bootstrap status changed")
+            case .recording, .transcribing:
+                refreshProviderDiagnostics(logReason: "Parakeet runtime bootstrap status changed")
+            }
+        }
+    }
+
+    private func refreshProviderDiagnostics(logReason: String) {
+        let kind = STTProviderKind.loadSelection()
+        logger.info("\(logReason, privacy: .public): diagnostics-only refresh kind=\(kind.rawValue, privacy: .public)")
+        let diagnostics = STTProviderResolver.diagnostics(for: kind)
+        publishProviderDiagnostics(diagnostics)
+    }
+
+    private func refreshProviderResolution(logReason: String) {
+        let kind = STTProviderKind.loadSelection()
+        logger.info("\(logReason, privacy: .public): kind=\(kind.rawValue, privacy: .public)")
+        let resolution = STTProviderResolver.resolve(for: kind)
+        publishProviderDiagnostics(resolution.diagnostics)
+        self.sttProvider = resolution.provider
+        logger.info("Replacing state-machine provider with: \(self.sttProvider.displayName, privacy: .public)")
+        self.stateMachine.replaceProvider(self.sttProvider)
     }
 
     private func publishProviderDiagnostics(_ diagnostics: ProviderRuntimeDiagnostics) {

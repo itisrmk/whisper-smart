@@ -198,6 +198,13 @@ enum STTProviderResolver {
             fallbackReason = "Parakeet inference runtime is not integrated yet."
         }
 
+        let bootstrapAssessment = parakeetRuntimeBootstrapCheck()
+        checks.append(bootstrapAssessment.check)
+        if bootstrapAssessment.blocksParakeet, fallbackReason == nil {
+            canUseParakeet = false
+            fallbackReason = bootstrapAssessment.failureReason
+        }
+
         return finalizeParakeetDiagnostics(
             requestedKind: requestedKind,
             checks: checks,
@@ -314,6 +321,62 @@ enum STTProviderResolver {
     }
 
     // MARK: - Shared checks
+
+    private static func parakeetRuntimeBootstrapCheck() -> (
+        check: ProviderHealthCheck,
+        blocksParakeet: Bool,
+        failureReason: String?
+    ) {
+        let status = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+        let detail = status.detail
+
+        switch status.phase {
+        case .idle:
+            return (
+                ProviderHealthCheck(
+                    id: "parakeet.runtime_bootstrap",
+                    title: "Parakeet Runtime Bootstrap",
+                    isPassing: true,
+                    detail: detail
+                ),
+                false,
+                nil
+            )
+        case .bootstrapping:
+            return (
+                ProviderHealthCheck(
+                    id: "parakeet.runtime_bootstrap",
+                    title: "Parakeet Runtime Bootstrap",
+                    isPassing: false,
+                    detail: detail
+                ),
+                false,
+                nil
+            )
+        case .ready:
+            return (
+                ProviderHealthCheck(
+                    id: "parakeet.runtime_bootstrap",
+                    title: "Parakeet Runtime Bootstrap",
+                    isPassing: true,
+                    detail: detail
+                ),
+                false,
+                nil
+            )
+        case .failed:
+            return (
+                ProviderHealthCheck(
+                    id: "parakeet.runtime_bootstrap",
+                    title: "Parakeet Runtime Bootstrap",
+                    isPassing: false,
+                    detail: detail
+                ),
+                true,
+                "Parakeet runtime bootstrap failed. Use Repair Parakeet Runtime in Settings → Provider."
+            )
+        }
+    }
 
     private static func microphoneCheck() -> ProviderHealthCheck {
         let micStatus = PermissionDiagnostics.microphoneStatus()

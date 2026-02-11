@@ -17,6 +17,7 @@ final class ParakeetSTTProvider: STTProvider {
     private let samplesLock = NSLock()
     private let inferenceQueue = DispatchQueue(label: "com.visperflow.parakeet.inference", qos: .userInitiated)
     private let expectedSampleRate = 16_000
+    private let runtimeBootstrapManager = ParakeetRuntimeBootstrapManager.shared
 
     private var sessionActive = false
     private var inferenceInFlight = false
@@ -68,7 +69,12 @@ final class ParakeetSTTProvider: STTProvider {
         }
 
         let scriptURL = try resolveRunnerScriptURL()
-        let pythonCommand = pythonRuntimeCommand
+        let pythonCommand: String
+        do {
+            pythonCommand = try runtimePythonCommand()
+        } catch {
+            throw STTError.providerError(message: error.localizedDescription)
+        }
 
         if !currentRuntimeValidated {
             do {
@@ -134,7 +140,14 @@ final class ParakeetSTTProvider: STTProvider {
             return
         }
 
-        let pythonCommand = pythonRuntimeCommand
+        let pythonCommand: String
+        do {
+            pythonCommand = try runtimePythonCommand()
+        } catch {
+            updateInferenceInFlight(false)
+            onError?(.providerError(message: error.localizedDescription))
+            return
+        }
         logger.info("Parakeet session ended, launching local inference (samples=\(samples.count))")
 
         inferenceQueue.async { [weak self] in
@@ -258,9 +271,8 @@ private extension ParakeetSTTProvider {
 // MARK: - Argument Builders
 
 private extension ParakeetSTTProvider {
-    var pythonRuntimeCommand: String {
-        let value = ProcessInfo.processInfo.environment["VISPERFLOW_PARAKEET_PYTHON"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (value?.isEmpty == false) ? value! : "python3"
+    func runtimePythonCommand() throws -> String {
+        try runtimeBootstrapManager.ensureRuntimeReady()
     }
 
     func tokenizerOverridePath() -> String? {
@@ -373,7 +385,7 @@ private extension ParakeetSTTProvider {
     func mappedRunnerFailure(pythonCommand: String, exitCode: Int32, details: String) -> String {
         let lowercased = details.lowercased()
         if (lowercased.contains("no such file") || lowercased.contains("not found")) && lowercased.contains(pythonCommand.lowercased()) {
-            return "Python runtime '\(pythonCommand)' is unavailable. Install Python 3 and set VISPERFLOW_PARAKEET_PYTHON if it is not on PATH."
+            return "Python runtime '\(pythonCommand)' is unavailable. Run Repair Parakeet Runtime in Settings → Provider."
         }
         if lowercased.contains("modulenotfounderror") || lowercased.contains("dependency_missing") {
             return details

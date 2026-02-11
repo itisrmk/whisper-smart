@@ -25,7 +25,7 @@ def raise_dependency_error(module_name: str, exc: Exception) -> None:
     raise RunnerError(
         "DEPENDENCY_MISSING: Python package "
         f"'{module_name}' is required ({exc}). "
-        "Install with: python3 -m pip install numpy onnxruntime sentencepiece"
+        "Use Visperflow Settings → Provider → Repair Parakeet Runtime."
     )
 
 

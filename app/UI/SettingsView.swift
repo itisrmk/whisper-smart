@@ -752,7 +752,7 @@ private struct ProviderSettingsTab: View {
         case .appleSpeech:
             return "Real transcription via Apple Speech framework. Works on-device with no setup required."
         case .parakeet:
-            return "Local ONNX inference via NVIDIA Parakeet. Requires Python 3 with numpy + onnxruntime, plus tokenizer assets next to the model."
+            return "Local ONNX inference via NVIDIA Parakeet. Runtime is auto-bootstrapped by the app; use Repair Parakeet Runtime if diagnostics report issues."
         case .whisper:
             return "Experimental — Whisper.cpp integration not yet implemented. Coming in a future release."
         case .openaiAPI:
@@ -766,6 +766,7 @@ private struct ProviderSettingsTab: View {
 private struct ProviderDiagnosticsView: View {
     let diagnostics: ProviderRuntimeDiagnostics
     let selectedKind: STTProviderKind
+    @State private var runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.sm) {
@@ -802,6 +803,42 @@ private struct ProviderDiagnosticsView: View {
                 }
             }
 
+            if shouldShowParakeetRepairAction {
+                HStack(spacing: VFSpacing.sm) {
+                    Button {
+                        ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
+                    } label: {
+                        HStack(spacing: VFSpacing.xs) {
+                            if runtimeBootstrapStatus.phase == .bootstrapping {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "wrench.and.screwdriver.fill")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            Text(repairButtonLabel)
+                                .font(VFFont.pillLabel)
+                        }
+                        .foregroundStyle(VFColor.textPrimary)
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(
+                            Capsule()
+                                .fill(VFColor.glass3)
+                                .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                                .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(runtimeBootstrapStatus.phase == .bootstrapping)
+
+                    Text("One-click repair reinstalls the local Parakeet Python runtime.")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
+                }
+            }
+
             ForEach(diagnostics.checks) { check in
                 HStack(alignment: .top, spacing: VFSpacing.xs) {
                     Image(systemName: check.isPassing ? "checkmark.circle.fill" : "xmark.octagon.fill")
@@ -822,6 +859,12 @@ private struct ProviderDiagnosticsView: View {
                 .font(VFFont.settingsCaption)
                 .foregroundStyle(VFColor.textTertiary)
         }
+        .onAppear {
+            runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .parakeetRuntimeBootstrapDidChange)) { _ in
+            runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+        }
     }
 
     private var healthColor: Color {
@@ -832,6 +875,21 @@ private struct ProviderDiagnosticsView: View {
             return VFColor.accentFallback
         case .unavailable:
             return VFColor.error
+        }
+    }
+
+    private var shouldShowParakeetRepairAction: Bool {
+        selectedKind == .parakeet || diagnostics.requestedKind == .parakeet || diagnostics.effectiveKind == .parakeet
+    }
+
+    private var repairButtonLabel: String {
+        switch runtimeBootstrapStatus.phase {
+        case .idle, .failed:
+            return "Repair Parakeet Runtime"
+        case .bootstrapping:
+            return "Repairing…"
+        case .ready:
+            return "Reinstall Runtime"
         }
     }
 
