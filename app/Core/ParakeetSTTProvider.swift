@@ -242,7 +242,7 @@ private extension ParakeetSTTProvider {
             try process.run()
         } catch {
             throw STTError.providerError(
-                message: "Failed to launch Python runtime '\(pythonCommand)'. Install Python 3 and set VISPERFLOW_PARAKEET_PYTHON if needed. Underlying error: \(error.localizedDescription)"
+                message: "Failed to launch Python runtime '\(pythonCommand)'. Use Repair Parakeet Runtime in Settings -> Provider. Underlying error: \(error.localizedDescription)"
             )
         }
 
@@ -275,15 +275,21 @@ private extension ParakeetSTTProvider {
         try runtimeBootstrapManager.ensureRuntimeReady()
     }
 
-    func tokenizerOverridePath() -> String? {
-        guard let raw = ProcessInfo.processInfo.environment["VISPERFLOW_PARAKEET_TOKENIZER"] else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+    func resolvedTokenizerPath() -> String? {
+        guard let source = variant.configuredSource else {
+            return variant.tokenizerLocalURL?.path
+        }
+
+        if source.tokenizerURL != nil {
+            return variant.tokenizerLocalURL(using: source)?.path
+        }
+
+        return variant.tokenizerLocalURL(using: source)?.path
     }
 
     func checkArguments(modelURL: URL) -> [String] {
         var args = ["--check", "--model", modelURL.path]
-        if let tokenizer = tokenizerOverridePath() {
+        if let tokenizer = resolvedTokenizerPath() {
             args += ["--tokenizer", tokenizer]
         }
         return args
@@ -291,7 +297,7 @@ private extension ParakeetSTTProvider {
 
     func inferenceArguments(modelURL: URL, audioURL: URL) -> [String] {
         var args = ["--model", modelURL.path, "--audio", audioURL.path]
-        if let tokenizer = tokenizerOverridePath() {
+        if let tokenizer = resolvedTokenizerPath() {
             args += ["--tokenizer", tokenizer]
         }
         return args
@@ -326,7 +332,7 @@ private extension ParakeetSTTProvider {
 
         let checkedPaths = candidates.map(\.path).joined(separator: ", ")
         throw STTError.providerError(
-            message: "Parakeet inference runner script not found. Checked: \(checkedPaths). Set VISPERFLOW_PARAKEET_SCRIPT to the script path."
+            message: "Parakeet inference runner script not found. Checked: \(checkedPaths). Reinstall or repair the app bundle resources."
         )
     }
 }
@@ -389,6 +395,9 @@ private extension ParakeetSTTProvider {
         }
         if lowercased.contains("model_load_error") {
             return "MODEL_LOAD_ERROR: Parakeet ONNX preflight failed. The model file is corrupt or incompatible. Re-download the model in Settings → Provider."
+        }
+        if lowercased.contains("tokenizer_missing") || lowercased.contains("tokenizer_error") {
+            return "Tokenizer validation failed. Re-download model artifacts in Settings -> Provider and verify the selected source."
         }
         if lowercased.contains("modulenotfounderror") || lowercased.contains("dependency_missing") {
             return details

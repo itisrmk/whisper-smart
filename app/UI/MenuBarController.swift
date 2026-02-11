@@ -94,14 +94,25 @@ final class MenuBarController {
     func updateProviderDiagnostics(_ diagnostics: ProviderRuntimeDiagnostics) {
         let summary: String
         if diagnostics.usesFallback {
-            summary = "Provider: \(diagnostics.effectiveKind.displayName) (fallback)"
+            if let fallbackReason = diagnostics.fallbackReason, !fallbackReason.isEmpty {
+                let shortReason = fallbackReason.count > 56
+                    ? String(fallbackReason.prefix(53)) + "..."
+                    : fallbackReason
+                summary = "Provider: \(diagnostics.effectiveKind.displayName) (fallback: \(shortReason))"
+            } else {
+                summary = "Provider: \(diagnostics.effectiveKind.displayName) (fallback)"
+            }
         } else {
             summary = "Provider: \(diagnostics.effectiveKind.displayName)"
         }
         providerDiagnosticsItem?.title = summary
 
-        let tooltip = diagnostics.fallbackReason
-            ?? "Health: \(diagnostics.healthLevel.rawValue)"
+        let tooltip: String
+        if let fallbackReason = diagnostics.fallbackReason {
+            tooltip = "Fallback reason: \(fallbackReason)"
+        } else {
+            tooltip = "Health: \(diagnostics.healthLevel.rawValue)"
+        }
         providerDiagnosticsItem?.toolTip = tooltip
     }
 

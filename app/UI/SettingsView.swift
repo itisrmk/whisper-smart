@@ -923,6 +923,26 @@ private struct DiagnosticLine: View {
 private struct ModelDownloadRow: View {
     let kind: STTProviderKind
     @ObservedObject var downloadState: ModelDownloadState
+    private let sourceStore = ParakeetModelSourceConfigurationStore.shared
+
+    @State private var selectedSourceID: String
+    @State private var customModelURL: String
+    @State private var customTokenizerURL: String
+    @State private var sourceConfigurationError: String?
+
+    init(kind: STTProviderKind, downloadState: ModelDownloadState) {
+        self.kind = kind
+        _downloadState = ObservedObject(wrappedValue: downloadState)
+
+        let sourceStore = ParakeetModelSourceConfigurationStore.shared
+        let variantID = downloadState.variant.id
+        let draft = sourceStore.customSourceDraft(for: variantID)
+
+        _selectedSourceID = State(initialValue: sourceStore.selectedSourceID(for: variantID))
+        _customModelURL = State(initialValue: draft.modelURL)
+        _customTokenizerURL = State(initialValue: draft.tokenizerURL)
+        _sourceConfigurationError = State(initialValue: nil)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.sm) {
@@ -939,6 +959,46 @@ private struct ModelDownloadRow: View {
                 Spacer()
 
                 downloadButton
+            }
+
+            NeuDivider()
+
+            HStack {
+                Text("Source")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+                Spacer()
+                sourcePickerMenu
+            }
+
+            DiagnosticLine(label: "Source URL", value: downloadState.variant.configuredSourceURLDisplay)
+            DiagnosticLine(label: "Tokenizer URL", value: downloadState.variant.configuredTokenizerURLDisplay)
+            DiagnosticLine(label: "Download Status", value: downloadStatusDetail)
+
+            if selectedSourceID == ParakeetModelSourceOption.customSourceID {
+                customSourceEditor
+            }
+
+            if let sourceError = downloadState.variant.downloadUnavailableReason {
+                HStack(alignment: .top, spacing: VFSpacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(VFColor.error)
+                    Text(sourceError)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.error)
+                }
+            }
+
+            if let sourceConfigurationError {
+                HStack(alignment: .top, spacing: VFSpacing.xs) {
+                    Image(systemName: "xmark.octagon.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(VFColor.error)
+                    Text(sourceConfigurationError)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.error)
+                }
             }
 
             // Progress bar
@@ -967,6 +1027,12 @@ private struct ModelDownloadRow: View {
                     .font(VFFont.settingsCaption)
                     .foregroundStyle(VFColor.textTertiary)
             }
+        }
+        .onAppear {
+            refreshSourceStateFromStore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .parakeetModelSourceDidChange)) { _ in
+            refreshSourceStateFromStore()
         }
     }
 
@@ -1058,6 +1124,128 @@ private struct ModelDownloadRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
+    }
+
+    private var sourcePickerMenu: some View {
+        Menu {
+            ForEach(sourceOptions) { source in
+                Button(source.displayName) {
+                    selectSource(source.id)
+                }
+            }
+        } label: {
+            HStack(spacing: VFSpacing.sm) {
+                Text(selectedSourceDisplayName)
+                    .font(VFFont.pillLabel)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(VFColor.textPrimary)
+            .padding(.horizontal, VFSpacing.md)
+            .padding(.vertical, VFSpacing.sm)
+            .background(
+                Capsule()
+                    .fill(VFColor.glass3)
+                    .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                    .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(isDownloading)
+        .opacity(isDownloading ? 0.5 : 1.0)
+    }
+
+    private var customSourceEditor: some View {
+        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+            Text("Custom source")
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textSecondary)
+
+            TextField("https://example.com/model.onnx", text: $customModelURL)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isDownloading)
+
+            TextField("https://example.com/vocab.txt (optional)", text: $customTokenizerURL)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isDownloading)
+
+            HStack {
+                Button("Save Custom Source") {
+                    saveCustomSource()
+                }
+                .buttonStyle(.plain)
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textPrimary)
+                .padding(.horizontal, VFSpacing.md)
+                .padding(.vertical, VFSpacing.xs)
+                .background(
+                    Capsule()
+                        .fill(VFColor.accentFallback)
+                        .overlay(
+                            Capsule()
+                                .stroke(VFColor.glassBorder, lineWidth: 1)
+                        )
+                )
+                .disabled(isDownloading)
+                .opacity(isDownloading ? 0.5 : 1.0)
+
+                Text("Model must be .onnx; tokenizer supports .model, .json, or .txt.")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+            }
+        }
+    }
+
+    private var sourceOptions: [ParakeetModelSourceOption] {
+        sourceStore.availableSources(for: downloadState.variant.id)
+    }
+
+    private var selectedSourceDisplayName: String {
+        sourceOptions.first(where: { $0.id == selectedSourceID })?.displayName
+            ?? downloadState.variant.configuredSourceDisplayName
+    }
+
+    private var isDownloading: Bool {
+        if case .downloading = downloadState.phase { return true }
+        return false
+    }
+
+    private var downloadStatusDetail: String {
+        switch downloadState.phase {
+        case .notReady:
+            return "Not downloaded"
+        case .downloading(let progress):
+            return "Downloading (\(Int(progress * 100))%)"
+        case .ready:
+            return "Ready - \(downloadState.variant.validationStatus)"
+        case .failed(let message):
+            return "Failed - \(message)"
+        }
+    }
+
+    private func refreshSourceStateFromStore() {
+        selectedSourceID = sourceStore.selectedSourceID(for: downloadState.variant.id)
+        let draft = sourceStore.customSourceDraft(for: downloadState.variant.id)
+        customModelURL = draft.modelURL
+        customTokenizerURL = draft.tokenizerURL
+    }
+
+    private func selectSource(_ sourceID: String) {
+        let error = sourceStore.selectSource(id: sourceID, for: downloadState.variant.id)
+        sourceConfigurationError = error
+        refreshSourceStateFromStore()
+        downloadState.reset()
+    }
+
+    private func saveCustomSource() {
+        let error = sourceStore.saveCustomSource(
+            modelURLString: customModelURL,
+            tokenizerURLString: customTokenizerURL,
+            for: downloadState.variant.id
+        )
+        sourceConfigurationError = error
+        refreshSourceStateFromStore()
+        downloadState.reset()
     }
 }
 

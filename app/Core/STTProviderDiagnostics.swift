@@ -172,7 +172,7 @@ enum STTProviderResolver {
         let sourceConfigured = variant.hasDownloadSource || modelReady
         let sourceDetail: String
         if variant.hasDownloadSource {
-            sourceDetail = "Remote model source is configured."
+            sourceDetail = "Using source '\(variant.configuredSourceDisplayName)'."
         } else if modelReady {
             sourceDetail = "Model file is already present on disk."
         } else {
@@ -186,9 +186,41 @@ enum STTProviderResolver {
                 detail: sourceDetail
             )
         )
+        checks.append(
+            ProviderHealthCheck(
+                id: "parakeet.model_source_url",
+                title: "Model Source URL",
+                isPassing: sourceConfigured,
+                detail: variant.configuredSourceURLDisplay
+            )
+        )
+
+        if let source = variant.configuredSource {
+            if let tokenizerStatus = variant.tokenizerValidationStatus(using: source) {
+                checks.append(
+                    ProviderHealthCheck(
+                        id: "parakeet.tokenizer",
+                        title: "Tokenizer Artifact",
+                        isPassing: tokenizerStatus.isReady,
+                        detail: tokenizerStatus.detail
+                    )
+                )
+            } else {
+                checks.append(
+                    ProviderHealthCheck(
+                        id: "parakeet.tokenizer",
+                        title: "Tokenizer Artifact",
+                        isPassing: true,
+                        detail: "Tokenizer download is optional for this source."
+                    )
+                )
+            }
+        }
+
         if !sourceConfigured, fallbackReason == nil {
             canUseParakeet = false
-            fallbackReason = variant.downloadUnavailableReason ?? "Model source not configured."
+            fallbackReason = variant.downloadUnavailableReason
+                ?? "Model source not configured. Open Settings -> Provider and choose a source."
         }
 
         checks.append(
@@ -201,7 +233,7 @@ enum STTProviderResolver {
         )
         if !modelReady, fallbackReason == nil {
             canUseParakeet = false
-            fallbackReason = "Parakeet model not ready (\(variant.validationStatus)). Download it in Settings -> Provider."
+            fallbackReason = "Parakeet model is not ready (\(variant.validationStatus)). Download from '\(variant.configuredSourceDisplayName)' in Settings -> Provider."
         }
 
         let runtimeImplemented = ParakeetSTTProvider.inferenceImplemented

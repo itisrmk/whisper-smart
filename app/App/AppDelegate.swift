@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var bindingObserver: NSObjectProtocol?
     private var providerObserver: NSObjectProtocol?
     private var parakeetBootstrapObserver: NSObjectProtocol?
+    private var parakeetModelSourceObserver: NSObjectProtocol?
 
     // MARK: - Lifecycle
 
@@ -55,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeBindingChanges()
         observeProviderChanges()
         observeParakeetBootstrapChanges()
+        observeParakeetModelSourceChanges()
 
         // Request all permissions in the correct order, then activate
         // the hotkey monitor once we know the permission landscape.
@@ -125,6 +127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = parakeetBootstrapObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = parakeetModelSourceObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -218,6 +223,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             self?.handleParakeetBootstrapStatusChange()
+        }
+    }
+
+    private func observeParakeetModelSourceChanges() {
+        parakeetModelSourceObserver = NotificationCenter.default.addObserver(
+            forName: .parakeetModelSourceDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshProviderResolution(logReason: "Parakeet model source changed")
         }
     }
 

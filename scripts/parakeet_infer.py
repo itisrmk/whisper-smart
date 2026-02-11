@@ -365,7 +365,7 @@ def decode_tokens(
         raise RunnerError(
             "TOKENIZER_MISSING: Could not decode token IDs because no vocabulary metadata or tokenizer file was found. "
             "Provide tokenizer.model, tokenizer.json, or vocab.txt next to the ONNX model, "
-            "or set VISPERFLOW_PARAKEET_TOKENIZER."
+            "or re-download model artifacts from Visperflow Settings -> Provider."
         )
 
     suffix = tokenizer_path.name.lower()

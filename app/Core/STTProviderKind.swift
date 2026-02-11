@@ -43,7 +43,7 @@ enum STTProviderKind: String, CaseIterable, Codable, Identifiable {
 // MARK: - Model Variant
 
 /// A specific model file that can be downloaded for a local provider.
-struct ModelVariant: Equatable, Codable, Identifiable {
+struct ModelVariant: Equatable, Identifiable {
     let id: String
     let displayName: String
     /// Expected file size in bytes (for progress UI / validation).
@@ -52,20 +52,53 @@ struct ModelVariant: Equatable, Codable, Identifiable {
     let minimumValidBytes: Int64
     /// Relative path inside the app's Application Support directory.
     let relativePath: String
+
+    var configuredSource: ParakeetResolvedModelSource? {
+        switch id {
+        case ParakeetModelCatalog.ctc06BVariantID:
+            return ParakeetModelSourceConfigurationStore.shared.resolvedSource(for: id)
+        default:
+            return nil
+        }
+    }
+
     /// Remote source for downloading this model, if configured.
-    let remoteURL: URL?
-    /// Reason why download source is unavailable.
-    let sourceConfigurationError: String?
+    var remoteURL: URL? {
+        configuredSource?.modelURL
+    }
+
+    var tokenizerRemoteURL: URL? {
+        configuredSource?.tokenizerURL
+    }
+
+    var configuredSourceDisplayName: String {
+        configuredSource?.selectedSourceName ?? "Unavailable"
+    }
+
+    var configuredSourceURLDisplay: String {
+        configuredSource?.modelURLDisplay ?? "Unavailable"
+    }
+
+    var configuredTokenizerURLDisplay: String {
+        configuredSource?.tokenizerURLDisplay ?? "Not configured"
+    }
 
     var hasDownloadSource: Bool {
-        remoteURL != nil
+        guard let source = configuredSource else { return false }
+        return source.modelURL != nil && source.error == nil
     }
 
     var downloadUnavailableReason: String? {
-        if hasDownloadSource {
-            return nil
+        guard let source = configuredSource else {
+            return "Model source is unavailable for variant '\(id)'."
         }
-        return sourceConfigurationError ?? "Model source not configured."
+        if let error = source.error {
+            return "\(error) Open Settings -> Provider to choose a valid source."
+        }
+        if source.modelURL == nil {
+            return "Model source URL is not configured. Open Settings -> Provider and choose a source."
+        }
+        return nil
     }
 
     /// Resolved path on disk. Returns `nil` if Application Support is unavailable.
@@ -77,52 +110,128 @@ struct ModelVariant: Equatable, Codable, Identifiable {
         return resolved
     }
 
+    /// Resolved tokenizer path on disk for the active source, when available.
+    var tokenizerLocalURL: URL? {
+        tokenizerLocalURL(using: configuredSource)
+    }
+
+    func tokenizerLocalURL(using source: ParakeetResolvedModelSource?) -> URL? {
+        guard let modelURL = localURL else { return nil }
+        let modelDirectory = modelURL.deletingLastPathComponent()
+
+        if let filename = source?.tokenizerFilename,
+           !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return modelDirectory.appendingPathComponent(filename)
+        }
+
+        for fallbackName in ["tokenizer.model", "tokenizer.json", "vocab.txt"] {
+            let candidate = modelDirectory.appendingPathComponent(fallbackName)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+
+        return nil
+    }
+
     /// Whether the model file is present on disk and passes basic size validation.
     var isDownloaded: Bool {
-        guard let url = localURL else { return false }
-        guard FileManager.default.fileExists(atPath: url.path) else { return false }
-        // Validate the file is at least the minimum expected size.
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+        guard let modelURL = localURL else { return false }
+        guard FileManager.default.fileExists(atPath: modelURL.path) else { return false }
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
               let fileSize = attrs[.size] as? Int64 else {
-            logger.warning("Cannot read attributes for model at \(url.path)")
+            logger.warning("Cannot read attributes for model at \(modelURL.path)")
             return false
         }
+
         if fileSize < minimumValidBytes {
             logger.warning("Model file too small (\(fileSize) bytes < \(self.minimumValidBytes) min), treating as incomplete")
             return false
         }
+
+        if let tokenizerStatus = tokenizerValidationStatus(using: configuredSource),
+           tokenizerStatus.isReady == false {
+            logger.warning("Tokenizer not ready for \(self.id): \(tokenizerStatus.detail)")
+            return false
+        }
+
         return true
     }
 
     /// Human-readable validation status for UI diagnostics.
     var validationStatus: String {
-        guard let url = localURL else { return "Path unavailable" }
-        guard FileManager.default.fileExists(atPath: url.path) else { return "Not downloaded" }
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+        if let sourceError = downloadUnavailableReason {
+            return sourceError
+        }
+
+        guard let modelURL = localURL else { return "Path unavailable" }
+        guard FileManager.default.fileExists(atPath: modelURL.path) else { return "Not downloaded" }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
               let fileSize = attrs[.size] as? Int64 else {
             return "Cannot read file"
         }
+
         if fileSize < minimumValidBytes {
             return "Incomplete (\(fileSize / 1_000_000) MB / \(sizeBytes / 1_000_000) MB expected)"
         }
+
+        if let tokenizerStatus = tokenizerValidationStatus(using: configuredSource),
+           tokenizerStatus.isReady == false {
+            return tokenizerStatus.detail
+        }
+
         return "Ready (\(fileSize / 1_000_000) MB)"
+    }
+
+    func tokenizerValidationStatus(using source: ParakeetResolvedModelSource?) -> (isReady: Bool, detail: String)? {
+        guard let source, source.tokenizerURL != nil else { return nil }
+        guard let tokenizerURL = tokenizerLocalURL(using: source) else {
+            return (
+                false,
+                "Tokenizer path unavailable. Download again to fetch tokenizer artifact."
+            )
+        }
+
+        guard FileManager.default.fileExists(atPath: tokenizerURL.path) else {
+            return (
+                false,
+                "Tokenizer file is missing. Re-download model from the selected source."
+            )
+        }
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: tokenizerURL.path),
+              let fileSize = attrs[.size] as? Int64 else {
+            return (
+                false,
+                "Tokenizer file cannot be read. Re-download model artifacts."
+            )
+        }
+
+        if fileSize < 128 {
+            return (
+                false,
+                "Tokenizer file appears incomplete (\(fileSize) bytes). Re-download model artifacts."
+            )
+        }
+
+        return (
+            true,
+            "Tokenizer ready (\(tokenizerURL.lastPathComponent), \(fileSize / 1_000) KB)"
+        )
     }
 }
 
 // MARK: - Known Model Variants
 
 extension ModelVariant {
-    private static let parakeetSource = parakeetModelSourceConfiguration()
-
-    /// NVIDIA Parakeet CTC 0.6B — compact, fast, English-only.
+    /// NVIDIA Parakeet CTC 0.6B (INT8 ONNX) — compact, fast, English-focused.
     static let parakeetCTC06B = ModelVariant(
-        id: "parakeet-ctc-0.6b",
+        id: ParakeetModelCatalog.ctc06BVariantID,
         displayName: "Parakeet CTC 0.6B",
-        sizeBytes: 640_000_000,
+        sizeBytes: 653_436_437,
         minimumValidBytes: 250_000_000,
-        relativePath: "models/parakeet-ctc-0.6b.onnx",
-        remoteURL: parakeetSource.url,
-        sourceConfigurationError: parakeetSource.error
+        relativePath: "models/parakeet-ctc-0.6b.onnx"
     )
 
     /// All variants available for a given provider kind.
@@ -132,35 +241,6 @@ extension ModelVariant {
         case .whisper:   return [] // TODO: add Whisper model variants
         case .appleSpeech, .stub, .openaiAPI: return []
         }
-    }
-
-    private static func parakeetModelSourceConfiguration() -> (url: URL?, error: String?) {
-        let environment = ProcessInfo.processInfo.environment
-        let keys = [
-            "VISPERFLOW_PARAKEET_MODEL_URL",
-            "VISPERFLOW_PARAKEET_MODEL_SOURCE_URL",
-        ]
-
-        for key in keys {
-            guard let raw = environment[key] else { continue }
-            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-
-            guard let url = URL(string: trimmed),
-                  let scheme = url.scheme?.lowercased(),
-                  scheme == "https" || scheme == "http" else {
-                return (
-                    nil,
-                    "Model source not configured. \(key) must be a valid http(s) URL."
-                )
-            }
-            return (url, nil)
-        }
-
-        return (
-            nil,
-            "Model source not configured. Set VISPERFLOW_PARAKEET_MODEL_URL to a direct Parakeet ONNX URL."
-        )
     }
 }
 
