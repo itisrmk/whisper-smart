@@ -20,12 +20,18 @@ All Swift files under `app/` are compiled with `swiftc -typecheck`. No binary is
 ## Build & Run (swiftc)
 
 ```bash
+cd /path/to/VisperflowClone
+```
+
+```bash
 swiftc \
   -sdk "$(xcrun --show-sdk-path)" \
   -target "$(uname -m)-apple-macosx14.0" \
   -o VisperflowClone \
   app/**/*.swift
+```
 
+```bash
 ./VisperflowClone
 ```
 
@@ -72,6 +78,39 @@ The app starts as a menu-bar-only process (no Dock icon).
 
 ### 7. Quit
 - [ ] Click menu bar icon → "Quit Visperflow" terminates the process cleanly
+
+## Troubleshooting
+
+### "Input HW format and tap format not matching" crash
+
+This crash occurs when `installTap(format:)` is called with a format that
+differs from the input node's native hardware output format. For example, the
+hardware may run at 48 kHz stereo while the tap requests 16 kHz mono.
+
+**Fix (applied):** The tap is now installed using the hardware format returned by
+`inputNode.outputFormat(forBus: 0)`. An `AVAudioConverter` converts each buffer
+to the desired 16 kHz mono Float32 format before forwarding it to consumers.
+
+If you see this crash after future changes, verify that the format passed to
+`installTap` matches `inputNode.outputFormat(forBus: 0)`.
+
+### Rebuild after code changes
+
+```bash
+cd /path/to/VisperflowClone
+```
+
+```bash
+bash scripts/typecheck.sh
+```
+
+```bash
+swiftc \
+  -sdk "$(xcrun --show-sdk-path)" \
+  -target "$(uname -m)-apple-macosx14.0" \
+  -o VisperflowClone \
+  app/**/*.swift
+```
 
 ## Architecture Reference
 

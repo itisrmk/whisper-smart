@@ -33,6 +33,7 @@ final class AudioCaptureService {
     // MARK: - Private state
 
     private let engine = AVAudioEngine()
+    private var converter: AVAudioConverter?
     private var isRunning = false
 
     // MARK: - Lifecycle
@@ -63,20 +64,47 @@ final class AudioCaptureService {
             throw AudioCaptureError.unsupportedFormat
         }
 
-        // If hardware sample-rate differs, install a converter.
-        // AVAudioEngine handles rate conversion automatically when the
-        // tap format differs from the hardware format.
-        let bufferSize: AVAudioFrameCount = AVAudioFrameCount(desiredSampleRate * 0.1) // ~100 ms
-
-        // TODO: Validate that the hardware format is compatible. On some
-        //       Macs the input node may have zero channels if no mic is
-        //       connected. Guard against that and surface a clear error.
+        // Validate that the hardware format has at least one channel.
         guard hardwareFormat.channelCount > 0 else {
             throw AudioCaptureError.noInputDevice
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: captureFormat) { [weak self] buffer, time in
-            self?.onBuffer?(buffer, time)
+        // Build a converter from the hardware format to the desired STT format.
+        // Installing the tap with the hardware format avoids the
+        // "Input HW format and tap format not matching" crash.
+        guard let audioConverter = AVAudioConverter(from: hardwareFormat, to: captureFormat) else {
+            throw AudioCaptureError.conversionFailed
+        }
+        self.converter = audioConverter
+
+        let bufferSize: AVAudioFrameCount = AVAudioFrameCount(hardwareFormat.sampleRate * 0.1) // ~100 ms
+
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: hardwareFormat) { [weak self] buffer, time in
+            guard let self = self, let converter = self.converter else { return }
+
+            let ratio = captureFormat.sampleRate / hardwareFormat.sampleRate
+            let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+            guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: captureFormat, frameCapacity: outputFrameCapacity) else { return }
+
+            var error: NSError?
+            var hasData = true
+            converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
+                if hasData {
+                    hasData = false
+                    outStatus.pointee = .haveData
+                    return buffer
+                }
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+
+            if let error = error {
+                let reportError = self.onError
+                DispatchQueue.main.async { reportError?(error) }
+                return
+            }
+
+            self.onBuffer?(convertedBuffer, time)
         }
 
         engine.prepare()
@@ -94,6 +122,7 @@ final class AudioCaptureService {
         guard isRunning else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        converter = nil
         isRunning = false
     }
 }
@@ -104,6 +133,7 @@ enum AudioCaptureError: Error, LocalizedError {
     case unsupportedFormat
     case noInputDevice
     case interrupted
+    case conversionFailed
 
     var errorDescription: String? {
         switch self {
@@ -113,6 +143,8 @@ enum AudioCaptureError: Error, LocalizedError {
             return "No audio input device is available."
         case .interrupted:
             return "Audio capture was interrupted by the system."
+        case .conversionFailed:
+            return "Failed to create audio format converter."
         }
     }
 }
