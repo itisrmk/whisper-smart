@@ -12,9 +12,9 @@ enum VFColor {
     // subtle light and shadow edges. These layers step up from
     // the deepest well to the most elevated control.
     static let glass0 = Color(white: 0.08)                      // window / deepest bg
-    static let glass1 = Color(white: 0.12)                      // card background
-    static let glass2 = Color(white: 0.16)                      // elevated card / hover
-    static let glass3 = Color(white: 0.20)                      // pill / control fill
+    static let glass1 = Color(red: 0.13, green: 0.14, blue: 0.18) // card background (fixed RGB to avoid adaptive gray shifts)
+    static let glass2 = Color(red: 0.16, green: 0.17, blue: 0.22) // elevated card / hover
+    static let glass3 = Color(red: 0.19, green: 0.20, blue: 0.26) // pill / control fill
 
     /// 1-px separator between layers
     static let glassBorder = Color.white.opacity(0.08)
