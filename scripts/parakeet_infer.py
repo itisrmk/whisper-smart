@@ -424,12 +424,25 @@ def run_inference(
     # Preferred path: onnx-asr handles Parakeet preprocessing/signature variants.
     try:
         onnx_asr = load_onnx_asr()
-        model = onnx_asr.load_model(
-            "nemo-parakeet-ctc-0.6b",
-            path=str(model_path.parent),
-            quantization="int8" if model_path.name.endswith(".int8.onnx") else None,
-            providers=["CPUExecutionProvider"],
-        )
+        model = None
+        last_error: Exception | None = None
+        for quant in (None, "int8"):
+            try:
+                model = onnx_asr.load_model(
+                    "nemo-parakeet-ctc-0.6b",
+                    path=str(model_path.parent),
+                    quantization=quant,
+                    providers=["CPUExecutionProvider"],
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+
+        if model is None and last_error is not None:
+            raise last_error
+        if model is None:
+            raise RunnerError("INFERENCE_ERROR: Failed to initialize onnx-asr model.")
+
         result = model.recognize(str(audio_path), sample_rate=16000)
         text = str(result).strip()
         if text:
@@ -476,13 +489,20 @@ def check_runtime(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
     # Preferred check path via onnx-asr (supports Parakeet preprocessing graph requirements).
     try:
         onnx_asr = load_onnx_asr()
-        _ = onnx_asr.load_model(
-            "nemo-parakeet-ctc-0.6b",
-            path=str(model_path.parent),
-            quantization="int8" if model_path.name.endswith(".int8.onnx") else None,
-            providers=["CPUExecutionProvider"],
-        )
-        return
+        last_error: Exception | None = None
+        for quant in (None, "int8"):
+            try:
+                _ = onnx_asr.load_model(
+                    "nemo-parakeet-ctc-0.6b",
+                    path=str(model_path.parent),
+                    quantization=quant,
+                    providers=["CPUExecutionProvider"],
+                )
+                return
+            except Exception as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
     except RunnerError:
         raise
     except Exception:
