@@ -39,6 +39,11 @@ final class DictationStateMachine {
                 return false
             }
         }
+
+        var isError: Bool {
+            if case .error = self { return true }
+            return false
+        }
     }
 
     /// The machine's current state. Observable by the UI layer.
@@ -152,6 +157,30 @@ final class DictationStateMachine {
         guard state == .idle else { return }
         sttProvider = newProvider
         wireSTTCallbacks()
+    }
+
+    /// Starts a one-shot recording session bypassing the hotkey monitor.
+    /// Used as a recovery path when the hotkey event tap cannot be created
+    /// (e.g. Accessibility permission missing for unsigned binaries).
+    ///
+    /// The caller is responsible for calling `stopOneShotRecording()` to end it.
+    func startOneShotRecording() {
+        guard state == .idle || state.isError else {
+            logger.warning("One-shot recording: not idle/error, ignoring (state=\(String(describing: self.state)))")
+            return
+        }
+
+        // Reset error state so we can attempt recording
+        if state.isError {
+            transition(to: .idle)
+        }
+
+        handleHoldStarted()
+    }
+
+    /// Ends a one-shot recording session (simulates hotkey release).
+    func stopOneShotRecording() {
+        handleHoldEnded()
     }
 
     // MARK: - State transitions

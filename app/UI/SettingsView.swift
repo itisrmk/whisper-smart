@@ -229,6 +229,8 @@ private struct GeneralSettingsTab: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("showBubble")    private var showBubble = true
 
+    @State private var permSnap = PermissionDiagnostics.snapshot()
+
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
             NeuSection(icon: "slider.horizontal.3", title: "Behavior") {
@@ -243,6 +245,97 @@ private struct GeneralSettingsTab: View {
                     subtitle: "Overlay indicator on screen",
                     isOn: $showBubble
                 )
+            }
+
+            NeuSection(icon: "lock.shield", title: "Permission Diagnostics") {
+                VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                    PermissionRow(
+                        name: "Accessibility",
+                        status: permSnap.accessibility,
+                        settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                    )
+                    NeuDivider()
+                    PermissionRow(
+                        name: "Microphone",
+                        status: permSnap.microphone,
+                        settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+                    )
+                    NeuDivider()
+                    PermissionRow(
+                        name: "Speech Recognition",
+                        status: permSnap.speechRecognition,
+                        settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
+                    )
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            permSnap = PermissionDiagnostics.snapshot()
+                        } label: {
+                            HStack(spacing: VFSpacing.xs) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11, weight: .medium))
+                                Text("Refresh")
+                                    .font(VFFont.pillLabel)
+                            }
+                            .foregroundStyle(VFColor.textPrimary)
+                            .padding(.horizontal, VFSpacing.md)
+                            .padding(.vertical, VFSpacing.sm)
+                            .background(
+                                Capsule()
+                                    .fill(VFColor.glass3)
+                                    .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                                    .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, VFSpacing.xs)
+                }
+            }
+        }
+        .onAppear {
+            permSnap = PermissionDiagnostics.snapshot()
+        }
+    }
+}
+
+/// A single row showing a permission's name, status dot, and action hint.
+private struct PermissionRow: View {
+    let name: String
+    let status: PermissionDiagnostics.Status
+    let settingsURL: String
+
+    var body: some View {
+        HStack {
+            Circle()
+                .fill(status.isUsable ? VFColor.success : VFColor.error)
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                Text(name)
+                    .font(VFFont.settingsBody)
+                    .foregroundStyle(VFColor.textPrimary)
+                Text(status.actionHint)
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(
+                        status.isUsable ? VFColor.textSecondary : VFColor.error
+                    )
+            }
+
+            Spacer()
+
+            if !status.isUsable {
+                Button {
+                    if let url = URL(string: settingsURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Text("Open")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.accentFallback)
+                }
+                .buttonStyle(.plain)
             }
         }
     }

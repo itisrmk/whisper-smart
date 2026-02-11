@@ -135,7 +135,7 @@ enum VFSize {
     static let bubbleDiameter:  CGFloat = 56
     static let menuBarIcon:     CGFloat = 18
     static let settingsWidth:   CGFloat = 520
-    static let settingsHeight:  CGFloat = 520
+    static let settingsHeight:  CGFloat = 640
 
     // Waveform bar layout
     static let waveformBarCount: Int = 5

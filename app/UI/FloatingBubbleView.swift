@@ -155,9 +155,12 @@ struct FloatingBubbleWithLabel: View {
             )
 
             // ── Neumorphic pill label ──
-            Text(stateSubject.state.label)
+            Text(bubbleLabelText)
                 .font(VFFont.bubbleStatus)
                 .foregroundStyle(VFColor.textOnOverlay)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 200)
                 .padding(.horizontal, VFSpacing.md)
                 .padding(.vertical, VFSpacing.xs + 1)
                 .background(
@@ -183,6 +186,20 @@ struct FloatingBubbleWithLabel: View {
                 .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
         }
         .animation(VFAnimation.fadeMedium, value: stateSubject.state)
+    }
+
+    /// When in error state, show the specific error detail instead of
+    /// the generic "Error" label.
+    private var bubbleLabelText: String {
+        if stateSubject.state == .error && !stateSubject.errorDetail.isEmpty {
+            // Truncate for the pill — full message is in the menu/settings.
+            let detail = stateSubject.errorDetail
+            if detail.count > 60 {
+                return String(detail.prefix(57)) + "..."
+            }
+            return detail
+        }
+        return stateSubject.state.label
     }
 }
 

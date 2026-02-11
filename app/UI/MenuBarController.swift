@@ -4,7 +4,8 @@ import SwiftUI
 /// Owns the `NSStatusItem` that lives in the macOS menu bar.
 ///
 /// The menu provides quick access to start/stop dictation, open
-/// settings, and quit the app.
+/// settings, and quit the app.  Includes recovery items for when
+/// the hotkey monitor cannot start (e.g. missing Accessibility).
 final class MenuBarController {
 
     private var statusItem: NSStatusItem?
@@ -14,6 +15,18 @@ final class MenuBarController {
     var onToggleDictation: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onQuit: (() -> Void)?
+    var onRetryHotkeyMonitor: (() -> Void)?
+    var onOneShotRecording: (() -> Void)?
+    var onStopOneShotRecording: (() -> Void)?
+
+    /// Menu item that shows the current error detail (hidden when no error).
+    private var errorDetailItem: NSMenuItem?
+    /// Menu item for one-shot recording.
+    private var oneShotItem: NSMenuItem?
+    /// Menu item for retrying the hotkey monitor.
+    private var retryItem: NSMenuItem?
+
+    private var isOneShotActive = false
 
     init(stateSubject: BubbleStateSubject) {
         self.stateSubject = stateSubject
@@ -54,6 +67,25 @@ final class MenuBarController {
         )
         button.image?.size = NSSize(width: VFSize.menuBarIcon, height: VFSize.menuBarIcon)
         button.image?.isTemplate = true
+
+        // Show/hide recovery items based on error state
+        let showRecovery = (state == .error)
+        errorDetailItem?.isHidden = !showRecovery
+        retryItem?.isHidden = !showRecovery
+
+        if state == .idle {
+            isOneShotActive = false
+            oneShotItem?.title = "One-Shot Recording (no hotkey)"
+        }
+    }
+
+    /// Update the error detail shown in the menu.
+    func updateErrorDetail(_ detail: String) {
+        let truncated = detail.count > 80
+            ? String(detail.prefix(77)) + "..."
+            : detail
+        errorDetailItem?.title = truncated
+        errorDetailItem?.isHidden = false
     }
 
     // MARK: - Menu Construction
@@ -71,8 +103,37 @@ final class MenuBarController {
 
         menu.addItem(.separator())
 
+        // ── Recovery items ──
+
+        let errItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        errItem.isEnabled = false
+        errItem.isHidden = true
+        menu.addItem(errItem)
+        self.errorDetailItem = errItem
+
+        let retry = NSMenuItem(
+            title: "Retry Hotkey Monitor",
+            action: #selector(handleRetryHotkeyMonitor),
+            keyEquivalent: "r"
+        )
+        retry.target = self
+        retry.isHidden = true
+        menu.addItem(retry)
+        self.retryItem = retry
+
+        let oneShot = NSMenuItem(
+            title: "One-Shot Recording (no hotkey)",
+            action: #selector(handleOneShotRecording),
+            keyEquivalent: "d"
+        )
+        oneShot.target = self
+        menu.addItem(oneShot)
+        self.oneShotItem = oneShot
+
+        menu.addItem(.separator())
+
         let settingsItem = NSMenuItem(
-            title: "Settings…",
+            title: "Settings...",
             action: #selector(handleOpenSettings),
             keyEquivalent: ","
         )
@@ -104,5 +165,21 @@ final class MenuBarController {
 
     @objc private func handleQuit() {
         onQuit?()
+    }
+
+    @objc private func handleRetryHotkeyMonitor() {
+        onRetryHotkeyMonitor?()
+    }
+
+    @objc private func handleOneShotRecording() {
+        if isOneShotActive {
+            isOneShotActive = false
+            oneShotItem?.title = "One-Shot Recording (no hotkey)"
+            onStopOneShotRecording?()
+        } else {
+            isOneShotActive = true
+            oneShotItem?.title = "Stop One-Shot Recording"
+            onOneShotRecording?()
+        }
     }
 }

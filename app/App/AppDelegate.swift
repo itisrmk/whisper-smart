@@ -41,27 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Menu-bar-only app: no Dock icon
         NSApp.setActivationPolicy(.accessory)
 
-        // Proactively prompt for Accessibility permission if not yet granted.
-        // This surfaces the system dialog early rather than failing silently
-        // when the event tap is first installed.
-        if !HotkeyMonitor.checkAccessibilityTrust(promptIfNeeded: true) {
-            logger.warning("Accessibility trust not yet granted — hotkey monitoring may fail until approved")
-        }
-
-        // Pre-request microphone permission so it's ready when the user
-        // first holds the hotkey (avoids a delay on first dictation).
-        if AudioCaptureService.microphoneAuthorizationStatus() == .notDetermined {
-            AudioCaptureService.requestMicrophoneAccess { granted in
-                logger.info("Microphone permission prompt result: \(granted ? "granted" : "denied")")
-            }
-        }
-
-        // Pre-request speech recognition permission for Apple Speech provider.
-        if AppleSpeechSTTProvider.authorizationStatus() == .notDetermined {
-            AppleSpeechSTTProvider.requestAuthorization { status in
-                logger.info("Speech recognition permission result: \(status.rawValue)")
-            }
-        }
+        // ── Startup permission diagnostics ──
+        PermissionDiagnostics.logAll()
 
         menuBar.install()
         bubblePanel.show()
@@ -69,7 +50,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wireCallbacks()
         observeBindingChanges()
         observeProviderChanges()
-        stateMachine.activate()
+
+        // Request all permissions in the correct order, then activate
+        // the hotkey monitor once we know the permission landscape.
+        PermissionDiagnostics.requestAllInOrder { [weak self] snap in
+            guard let self else { return }
+            PermissionDiagnostics.logAll()
+
+            if snap.accessibility.isUsable {
+                self.stateMachine.activate()
+            } else {
+                logger.warning("Accessibility not granted at launch — hotkey monitor deferred")
+                self.bubbleState.transition(
+                    to: .error,
+                    errorDetail: "Accessibility permission required. Grant access in System Settings → Privacy & Security → Accessibility, then use Retry Hotkey Monitor from the menu."
+                )
+                self.menuBar.updateIcon(for: .error)
+                self.menuBar.updateErrorDetail("Accessibility permission not granted")
+                // Schedule a retry: accessibility may be granted after the user
+                // clicks Allow in System Settings.
+                self.scheduleAccessibilityRetry()
+            }
+        }
+    }
+
+    /// Periodically checks if Accessibility was granted after the initial
+    /// prompt. Retries hotkey monitor start once permission appears.
+    private func scheduleAccessibilityRetry() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            guard let self else { return }
+            if PermissionDiagnostics.accessibilityStatus().isUsable {
+                logger.info("Accessibility permission now granted — starting hotkey monitor")
+                self.retryHotkeyMonitor()
+            } else if case .error = self.stateMachine.state {
+                // Still waiting — keep polling
+                self.scheduleAccessibilityRetry()
+            }
+        }
+    }
+
+    /// Public entry point for manually retrying the hotkey monitor
+    /// (e.g. from a menu item after granting Accessibility).
+    func retryHotkeyMonitor() {
+        let snap = PermissionDiagnostics.snapshot()
+        if snap.accessibility.isUsable {
+            stateMachine.deactivate()
+            stateMachine.activate()
+            logger.info("Hotkey monitor retry triggered (accessibility=\(snap.accessibility.rawValue))")
+        } else {
+            let msg = "Accessibility permission still missing. Grant access in System Settings → Privacy & Security → Accessibility."
+            bubbleState.transition(to: .error, errorDetail: msg)
+            menuBar.updateIcon(for: .error)
+            menuBar.updateErrorDetail(msg)
+        }
+    }
+
+    /// Runs a one-shot recording session without the hotkey.
+    /// This is the recovery path when the hotkey monitor cannot start.
+    func runOneShotRecording() {
+        stateMachine.startOneShotRecording()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -89,8 +128,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateMachine.onStateChange = { [weak self] coreState in
             guard let self else { return }
             let uiState = self.mapCoreState(coreState)
-            self.bubbleState.transition(to: uiState)
+            let detail = self.errorDetail(for: coreState)
+            self.bubbleState.transition(to: uiState, errorDetail: detail)
             self.menuBar.updateIcon(for: uiState)
+            if let detail {
+                self.menuBar.updateErrorDetail(detail)
+            }
         }
 
         // Menu bar "Start/Stop Dictation" toggles the state machine
@@ -111,6 +154,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBar.onQuit = {
             NSApp.terminate(nil)
+        }
+
+        menuBar.onRetryHotkeyMonitor = { [weak self] in
+            self?.retryHotkeyMonitor()
+        }
+
+        menuBar.onOneShotRecording = { [weak self] in
+            self?.stateMachine.startOneShotRecording()
+        }
+
+        menuBar.onStopOneShotRecording = { [weak self] in
+            self?.stateMachine.stopOneShotRecording()
         }
 
         bubbleState.onTap = { [weak self] in
@@ -187,5 +242,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .transcribing: return .transcribing
         case .error:        return .error
         }
+    }
+
+    /// Returns the error detail string when core state is `.error`, nil otherwise.
+    private func errorDetail(for state: DictationStateMachine.State) -> String? {
+        if case .error(let msg) = state { return msg }
+        return nil
     }
 }

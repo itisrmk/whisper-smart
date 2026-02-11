@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The five visual states of the floating dictation bubble.
-enum BubbleState: String, CaseIterable, Identifiable {
+enum BubbleState: String, CaseIterable, Identifiable, Hashable {
     case idle
     case listening
     case transcribing

@@ -78,6 +78,10 @@ final class BubbleStateSubject: ObservableObject {
     /// Drives the waveform bar heights when `state == .listening`.
     @Published var audioLevel: CGFloat = 0
 
+    /// When `state == .error`, this contains the specific error description
+    /// (e.g. "Microphone access denied …"). Used by the bubble label and menu.
+    @Published var errorDetail: String = ""
+
     /// Called when the user taps the bubble. Override via `onTap` closure.
     var onTap: (() -> Void)?
 
@@ -85,9 +89,10 @@ final class BubbleStateSubject: ObservableObject {
         onTap?()
     }
 
-    func transition(to newState: BubbleState) {
+    func transition(to newState: BubbleState, errorDetail: String? = nil) {
         DispatchQueue.main.async { [weak self] in
             self?.state = newState
+            self?.errorDetail = errorDetail ?? ""
         }
     }
 
