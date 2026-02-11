@@ -3,13 +3,13 @@ import os.log
 
 private let logger = Logger(subsystem: "com.visperflow", category: "ParakeetSTT")
 
-/// STT provider for NVIDIA Parakeet.
+/// STT provider for NVIDIA Parakeet (experimental).
 ///
-/// Today this delivers a fixed placeholder result. Once the ONNX Runtime
-/// integration is wired up, this class will load the Parakeet model from
-/// disk and run real inference.
+/// ONNX Runtime inference is not yet implemented. Selecting this provider
+/// will report an actionable error directing the user to choose Apple Speech
+/// or wait for a future release.
 final class ParakeetSTTProvider: STTProvider {
-    let displayName = "NVIDIA Parakeet (local)"
+    let displayName = "NVIDIA Parakeet (experimental)"
 
     var onResult: ((STTResult) -> Void)?
     var onError: ((STTError) -> Void)?
@@ -23,7 +23,7 @@ final class ParakeetSTTProvider: STTProvider {
     }
 
     func feedAudio(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        // TODO: Accumulate PCM buffers for batch inference.
+        // TODO: Accumulate PCM buffers for batch inference once ONNX Runtime is integrated.
     }
 
     func beginSession() throws {
@@ -42,9 +42,10 @@ final class ParakeetSTTProvider: STTProvider {
             )
         }
 
-        logger.info("Parakeet session started, model at: \(modelURL.path)")
-        sessionActive = true
-        // TODO: Load ONNX model from modelURL for real inference.
+        // ONNX inference not yet wired — fail with actionable message.
+        throw STTError.providerError(
+            message: "Parakeet inference is not yet implemented (experimental). Use Apple Speech for real transcription."
+        )
     }
 
     func endSession() {
@@ -54,7 +55,7 @@ final class ParakeetSTTProvider: STTProvider {
         }
         sessionActive = false
         logger.info("Parakeet session ended")
-        // Deliver a placeholder result (same as Stub for now).
-        onResult?(STTResult(text: "[parakeet stub transcription]", isPartial: false, confidence: nil))
+        // No placeholder output — real inference not implemented.
+        onError?(.providerError(message: "Parakeet session ended without inference (not implemented)."))
     }
 }

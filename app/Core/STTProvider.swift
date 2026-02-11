@@ -79,29 +79,27 @@ protocol STTProvider: AnyObject {
     var onError: ((STTError) -> Void)? { get set }
 }
 
-// MARK: - Placeholder implementation (for compile-testing)
+// MARK: - Stub (testing only — never emits fake transcription text)
 
-// TODO: Remove this stub once a real provider is implemented.
-//       This exists solely so the project compiles without a concrete
-//       STTProvider.
-
-/// A no-op provider used during development and testing.
+/// A no-op provider used only for pipeline testing. Reports an error
+/// if the user attempts a real transcription session.
 final class StubSTTProvider: STTProvider {
-    let displayName = "Stub (no-op)"
+    let displayName = "Stub (testing only)"
 
     var onResult: ((STTResult) -> Void)?
     var onError: ((STTError) -> Void)?
 
     func feedAudio(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        // TODO: Forward buffers to a real STT engine.
+        // No-op: stub does not process audio.
     }
 
     func beginSession() throws {
-        // TODO: Initialize provider session.
+        throw STTError.providerError(
+            message: "Stub provider cannot transcribe. Select a real provider (e.g. Apple Speech) in Settings → Provider."
+        )
     }
 
     func endSession() {
-        // Deliver a placeholder result so downstream code exercises the path.
-        onResult?(STTResult(text: "[stub transcription]", isPartial: false, confidence: nil))
+        // No-op: stub never has a real session.
     }
 }

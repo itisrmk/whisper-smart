@@ -648,14 +648,16 @@ private struct ProviderSettingsTab: View {
 
     private var providerCaption: String {
         switch selectedKind {
-        case .stub:
-            return "Stub provider returns a fixed placeholder. Useful for testing the pipeline."
-        case .whisper:
-            return "On-device transcription via Whisper.cpp. Download a model to get started."
+        case .appleSpeech:
+            return "Real transcription via Apple Speech framework. Works on-device with no setup required."
         case .parakeet:
-            return "On-device transcription via NVIDIA Parakeet. Download the model for one-click setup."
+            return "Experimental — NVIDIA Parakeet ONNX inference not yet implemented. Download model to prepare for future release."
+        case .whisper:
+            return "Experimental — Whisper.cpp integration not yet implemented. Coming in a future release."
         case .openaiAPI:
-            return "Cloud transcription via OpenAI Whisper API. Requires an API key (coming soon)."
+            return "Experimental — OpenAI Whisper API not yet implemented. Coming in a future release."
+        case .stub:
+            return "Testing only — does not transcribe. Select Apple Speech for real transcription."
         }
     }
 }

@@ -56,6 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Pre-request speech recognition permission for Apple Speech provider.
+        if AppleSpeechSTTProvider.authorizationStatus() == .notDetermined {
+            AppleSpeechSTTProvider.requestAuthorization { status in
+                logger.info("Speech recognition permission result: \(status.rawValue)")
+            }
+        }
+
         menuBar.install()
         bubblePanel.show()
 
@@ -148,20 +155,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Factory that returns the concrete ``STTProvider`` for a given kind.
     private static func makeProvider(for kind: STTProviderKind) -> STTProvider {
         switch kind {
+        case .appleSpeech:
+            logger.info("Creating AppleSpeechSTTProvider")
+            return AppleSpeechSTTProvider()
         case .parakeet:
             guard let variant = kind.defaultVariant else {
-                logger.error("No model variant available for \(kind.rawValue) — falling back to stub")
-                return StubSTTProvider()
+                logger.error("No model variant available for \(kind.rawValue) — falling back to Apple Speech")
+                return AppleSpeechSTTProvider()
             }
-            logger.info("Creating ParakeetSTTProvider, model status: \(variant.validationStatus)")
+            logger.info("Creating ParakeetSTTProvider (experimental), model status: \(variant.validationStatus)")
             return ParakeetSTTProvider(variant: variant)
         case .whisper:
-            if kind.defaultVariant == nil {
-                logger.warning("Whisper model variants not yet configured — using stub provider")
-            }
-            return StubSTTProvider()
-        case .stub, .openaiAPI:
-            logger.info("Creating StubSTTProvider for kind: \(kind.rawValue)")
+            logger.warning("Whisper not yet implemented — falling back to Apple Speech")
+            return AppleSpeechSTTProvider()
+        case .openaiAPI:
+            logger.warning("OpenAI API not yet implemented — falling back to Apple Speech")
+            return AppleSpeechSTTProvider()
+        case .stub:
+            logger.info("Creating StubSTTProvider (testing only)")
             return StubSTTProvider()
         }
     }

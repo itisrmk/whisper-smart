@@ -8,19 +8,21 @@ private let logger = Logger(subsystem: "com.visperflow", category: "STTProviderK
 /// Identifies the available STT backend engines.
 /// Persisted to UserDefaults so the user's choice survives restarts.
 enum STTProviderKind: String, CaseIterable, Codable, Identifiable {
-    case stub       = "stub"
-    case whisper    = "whisper_local"
-    case parakeet   = "nvidia_parakeet"
-    case openaiAPI  = "openai_api"
+    case appleSpeech = "apple_speech"
+    case parakeet    = "nvidia_parakeet"
+    case whisper     = "whisper_local"
+    case openaiAPI   = "openai_api"
+    case stub        = "stub"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .stub:      return "Stub (no-op)"
-        case .whisper:   return "Whisper (local)"
-        case .parakeet:  return "NVIDIA Parakeet (local)"
-        case .openaiAPI: return "OpenAI Whisper API"
+        case .appleSpeech: return "Apple Speech (on-device)"
+        case .parakeet:    return "NVIDIA Parakeet (local)"
+        case .whisper:     return "Whisper (local)"
+        case .openaiAPI:   return "OpenAI Whisper API"
+        case .stub:        return "Stub (testing only)"
         }
     }
 
@@ -28,7 +30,7 @@ enum STTProviderKind: String, CaseIterable, Codable, Identifiable {
     var requiresModelDownload: Bool {
         switch self {
         case .parakeet, .whisper: return true
-        case .stub, .openaiAPI:   return false
+        case .appleSpeech, .stub, .openaiAPI: return false
         }
     }
 
@@ -114,7 +116,7 @@ extension ModelVariant {
         switch kind {
         case .parakeet:  return [.parakeetCTC06B]
         case .whisper:   return [] // TODO: add Whisper model variants
-        case .stub, .openaiAPI: return []
+        case .appleSpeech, .stub, .openaiAPI: return []
         }
     }
 }
@@ -124,12 +126,12 @@ extension ModelVariant {
 extension STTProviderKind {
     private static let defaultsKey = "selectedSTTProvider"
 
-    /// Load the user's persisted provider choice, defaulting to `.stub`.
+    /// Load the user's persisted provider choice, defaulting to `.appleSpeech`.
     static func loadSelection() -> STTProviderKind {
         guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
               let kind = STTProviderKind(rawValue: raw) else {
-            logger.info("No saved STT provider, defaulting to stub")
-            return .stub
+            logger.info("No saved STT provider, defaulting to Apple Speech")
+            return .appleSpeech
         }
         logger.info("Loaded STT provider selection: \(kind.rawValue)")
         return kind
