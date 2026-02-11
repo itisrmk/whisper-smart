@@ -104,7 +104,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let binding = notification.object as? HotkeyBinding else { return }
+            guard let data = notification.userInfo?["binding"] as? Data,
+                  let binding = HotkeyBinding.fromUserInfo(data) else {
+                logger.warning("hotkeyBindingDidChange: failed to decode binding from userInfo")
+                return
+            }
+            logger.info("Hotkey binding updated to: \(binding.displayString)")
             self?.hotkeyMonitor.updateBinding(binding)
         }
     }

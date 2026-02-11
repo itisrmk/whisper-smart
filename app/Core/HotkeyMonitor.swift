@@ -1,5 +1,8 @@
 import Cocoa
 import Carbon.HIToolbox
+import os.log
+
+private let logger = Logger(subsystem: "com.visperflow", category: "HotkeyMonitor")
 
 /// Monitors a global hotkey for press-and-hold dictation activation.
 ///
@@ -78,6 +81,7 @@ final class HotkeyMonitor {
     func updateBinding(_ newBinding: HotkeyBinding) {
         guard newBinding != binding else { return }
 
+        logger.info("Updating binding: \(self.binding.displayString) → \(newBinding.displayString)")
         let wasRunning = isRunning
         if wasRunning { stop() }
 
@@ -85,6 +89,7 @@ final class HotkeyMonitor {
         matchingKeyCodes = Self.pairedKeyCodes(for: newBinding.keyCode)
 
         if wasRunning { start() }
+        logger.info("Binding active: \(newBinding.displayString), running: \(wasRunning)")
     }
 
     // MARK: - Lifecycle
@@ -208,6 +213,7 @@ final class HotkeyMonitor {
 
     private func onKeyUp() {
         if holdFired {
+            logger.info("Hold ended (\(self.binding.displayString))")
             onHoldEnded?()
         }
         resetState()
@@ -218,6 +224,7 @@ final class HotkeyMonitor {
         let elapsed = Date().timeIntervalSince(downTime)
         if elapsed >= minimumHoldDuration {
             holdFired = true
+            logger.info("Hold started (\(self.binding.displayString))")
             onHoldStarted?()
         }
     }

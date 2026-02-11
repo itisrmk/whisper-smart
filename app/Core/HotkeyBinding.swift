@@ -203,4 +203,16 @@ struct HotkeyBinding: Equatable, Codable {
     var presetIndex: Int? {
         HotkeyBinding.presets.firstIndex(of: self)
     }
+
+    // MARK: - Notification transport
+
+    /// Encodes to Data for safe transport through Notification.userInfo.
+    func toUserInfo() -> Data {
+        (try? JSONEncoder().encode(self)) ?? Data()
+    }
+
+    /// Decodes from the Data produced by `toUserInfo()`.
+    static func fromUserInfo(_ data: Data) -> HotkeyBinding? {
+        try? JSONDecoder().decode(HotkeyBinding.self, from: data)
+    }
 }

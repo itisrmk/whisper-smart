@@ -484,7 +484,11 @@ private struct HotkeySettingsTab: View {
         currentBinding = binding
         selectedPresetIndex = binding.presetIndex ?? -1
         binding.save()
-        NotificationCenter.default.post(name: .hotkeyBindingDidChange, object: binding)
+        NotificationCenter.default.post(
+            name: .hotkeyBindingDidChange,
+            object: nil,
+            userInfo: ["binding": binding.toUserInfo()]
+        )
     }
 
     private func applyPreset(at index: Int) {
