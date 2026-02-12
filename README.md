@@ -2,6 +2,10 @@
 
 Whisper Smart is a lightweight macOS menu-bar dictation app that supports local speech-to-text workflows.
 
+## App icon
+
+![Whisper Smart app icon](docs/screenshots/00-app-icon-reference.jpg)
+
 ## Download
 
 - Grab the latest DMG from **GitHub Releases**.
