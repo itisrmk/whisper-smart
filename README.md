@@ -4,7 +4,7 @@ Whisper Smart is a lightweight macOS menu-bar dictation app that supports local 
 
 ## App icon
 
-![Whisper Smart app icon](docs/screenshots/00-app-icon-reference.jpg)
+![Whisper Smart app icon](docs/screenshots/00-app-icon-reference.png)
 
 ## Download
 
