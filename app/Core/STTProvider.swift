@@ -1,4 +1,5 @@
 import AVFoundation
+import Foundation
 
 /// A speech-to-text result delivered by an ``STTProvider``.
 struct STTResult {
@@ -77,6 +78,14 @@ protocol STTProvider: AnyObject {
 
     /// Callback delivering errors during transcription.
     var onError: ((STTError) -> Void)? { get set }
+
+    /// Maximum time allowed after `endSession()` for final transcription.
+    /// Providers with slower local inference can request a larger value.
+    var transcriptionTimeout: TimeInterval { get }
+}
+
+extension STTProvider {
+    var transcriptionTimeout: TimeInterval { 30 }
 }
 
 // MARK: - Stub (testing only — never emits fake transcription text)

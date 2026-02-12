@@ -14,7 +14,7 @@ struct SettingsView: View {
                 Text("Settings")
                     .font(VFFont.settingsHeading)
                     .foregroundStyle(VFColor.textPrimary)
-                Text("Configure Visperflow to your liking")
+                Text("Configure Whisper Smart to your liking")
                     .font(VFFont.settingsBody)
                     .foregroundStyle(VFColor.textSecondary)
             }
@@ -32,16 +32,20 @@ struct SettingsView: View {
             .padding(.bottom, VFSpacing.xl)
 
             // ── Tab content ──
-            Group {
-                switch selectedTab {
-                case .general:  GeneralSettingsTab()
-                case .hotkey:   HotkeySettingsTab()
-                case .provider: ProviderSettingsTab()
+            ScrollView(.vertical, showsIndicators: true) {
+                Group {
+                    switch selectedTab {
+                    case .general:  GeneralSettingsTab()
+                    case .hotkey:   HotkeySettingsTab()
+                    case .provider: ProviderSettingsTab()
+                    case .history:  TranscriptHistoryTab()
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .top)
+                .padding(.horizontal, VFSpacing.xxl)
+                .padding(.bottom, VFSpacing.xxl)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.horizontal, VFSpacing.xxl)
-            .padding(.bottom, VFSpacing.xxl)
         }
         .frame(width: VFSize.settingsWidth, height: VFSize.settingsHeight)
         .layeredDepthBackground()
@@ -53,7 +57,7 @@ struct SettingsView: View {
 // MARK: - Tab Enum
 
 private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
-    case general, hotkey, provider
+    case general, hotkey, provider, history
 
     var id: String { rawValue }
 
@@ -62,6 +66,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
         case .general:  return "General"
         case .hotkey:   return "Hotkey"
         case .provider: return "Provider"
+        case .history:  return "History"
         }
     }
 
@@ -70,6 +75,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
         case .general:  return "gearshape.fill"
         case .hotkey:   return "command"
         case .provider: return "cloud.fill"
+        case .history:  return "list.bullet.rectangle.portrait"
         }
     }
 }
@@ -196,7 +202,14 @@ private struct NeuSection<Content: View>: View {
         }
         .padding(VFSpacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard()
+        .background(
+            RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
+                .fill(Color(red: 0.08, green: 0.08, blue: 0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
     }
 }
 
@@ -227,9 +240,41 @@ private struct NeuDivider: View {
 
 private struct GeneralSettingsTab: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @AppStorage("showBubble")    private var showBubble = true
+    @AppStorage("dictationOverlayMode") private var overlayModeRaw = DictationOverlayMode.topCenterWaveform.rawValue
+    @AppStorage("recordingSoundsEnabled") private var recordingSoundsEnabled = true
+    @AppStorage("postProcessingPipelineEnabled") private var postProcessingPipelineEnabled = true
+    @AppStorage("commandModeScaffoldEnabled") private var commandModeScaffoldEnabled = false
+
+    @State private var silenceTimeoutSeconds = DictationWorkflowSettings.silenceTimeoutSeconds
+    @State private var insertionMode = DictationWorkflowSettings.insertionMode
+    @State private var perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
+    @State private var snippetsJSON = DictationWorkflowSettings.snippetsJSON
+    @State private var correctionDictionaryJSON = DictationWorkflowSettings.correctionDictionaryJSON
+    @State private var customAIInstructions = DictationWorkflowSettings.customAIInstructions
+    @State private var developerModeEnabled = DictationWorkflowSettings.developerModeEnabled
+    @State private var voiceCommandFormattingEnabled = DictationWorkflowSettings.voiceCommandFormattingEnabled
 
     @State private var permSnap = PermissionDiagnostics.snapshot()
+
+    @State private var perAppProfiles: [PerAppProfileDraft] = []
+    @State private var snippetRows: [PhraseMappingDraft] = []
+    @State private var correctionRows: [PhraseMappingDraft] = []
+
+    private struct PerAppProfileDraft: Identifiable, Equatable {
+        var id = UUID()
+        var bundleID: String = ""
+        var style: String = "casual"
+        var prefix: String = ""
+        var suffix: String = ""
+    }
+
+    private struct PhraseMappingDraft: Identifiable, Equatable {
+        var id = UUID()
+        var key: String = ""
+        var value: String = ""
+    }
+
+    private let profileStyles = ["formal", "casual", "concise", "developer"]
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
@@ -240,11 +285,157 @@ private struct GeneralSettingsTab: View {
                     isOn: $launchAtLogin
                 )
                 NeuDivider()
+                HStack {
+                    VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                        Text("Recording overlay")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+                        Text("Choose how recording feedback appears")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                    }
+                    Spacer()
+                    Menu {
+                        ForEach(DictationOverlayMode.allCases) { mode in
+                            Button(mode.displayName) {
+                                overlayModeRaw = mode.rawValue
+                            }
+                        }
+                    } label: {
+                        Text(selectedOverlayMode.displayName)
+                            .font(VFFont.pillLabel)
+                            .foregroundStyle(VFColor.textPrimary)
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+                NeuDivider()
                 NeuToggleRow(
-                    title: "Show floating bubble",
-                    subtitle: "Overlay indicator on screen",
-                    isOn: $showBubble
+                    title: "Recording sounds",
+                    subtitle: "Play a short sound when recording starts and stops",
+                    isOn: $recordingSoundsEnabled
                 )
+                NeuDivider()
+                NeuToggleRow(
+                    title: "Transcript cleanup pipeline",
+                    subtitle: "Apply conservative text cleanup after transcription",
+                    isOn: $postProcessingPipelineEnabled
+                )
+                NeuDivider()
+                NeuToggleRow(
+                    title: "Command mode scaffold",
+                    subtitle: "Route command-style phrases through a safe passthrough scaffold",
+                    isOn: $commandModeScaffoldEnabled
+                )
+            }
+
+            NeuSection(icon: "wand.and.stars", title: "Workflow") {
+                VStack(alignment: .leading, spacing: VFSpacing.md) {
+                    HStack {
+                        Text("Silence timeout")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+                        Spacer()
+                        Text(String(format: "%.1fs", silenceTimeoutSeconds))
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                    }
+
+                    Slider(value: $silenceTimeoutSeconds, in: 0.35...8.0, step: 0.1)
+                        .onChange(of: silenceTimeoutSeconds) { _, newValue in
+                            DictationWorkflowSettings.silenceTimeoutSeconds = newValue
+                        }
+
+                    Text("Used by one-shot dictation to auto-stop when no speech is detected.")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
+
+                    NeuDivider()
+
+                    HStack {
+                        Text("Insertion mode")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+                        Spacer()
+                        Menu {
+                            ForEach(DictationWorkflowSettings.InsertionMode.allCases) { mode in
+                                Button(mode.displayName) {
+                                    insertionMode = mode
+                                    DictationWorkflowSettings.insertionMode = mode
+                                }
+                            }
+                        } label: {
+                            Text(insertionMode.displayName)
+                                .font(VFFont.pillLabel)
+                                .foregroundStyle(VFColor.textPrimary)
+                        }
+                        .menuStyle(.borderlessButton)
+                    }
+
+                    NeuDivider()
+
+                    perAppProfilesEditor
+                }
+            }
+
+            NeuSection(icon: "sparkles.rectangle.stack", title: "Intelligence") {
+                VStack(alignment: .leading, spacing: VFSpacing.md) {
+                    NeuToggleRow(
+                        title: "Voice punctuation commands",
+                        subtitle: "Recognize commands like comma, period, new paragraph, or 'replace X with Y in ...'",
+                        isOn: $voiceCommandFormattingEnabled
+                    )
+                    .onChange(of: voiceCommandFormattingEnabled) { _, newValue in
+                        DictationWorkflowSettings.voiceCommandFormattingEnabled = newValue
+                    }
+
+                    NeuDivider()
+
+                    NeuToggleRow(
+                        title: "Developer dictation mode",
+                        subtitle: "Convert spoken coding tokens (open paren, underscore, brace)",
+                        isOn: $developerModeEnabled
+                    )
+                    .onChange(of: developerModeEnabled) { _, newValue in
+                        DictationWorkflowSettings.developerModeEnabled = newValue
+                    }
+
+                    NeuDivider()
+
+                    VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                        Text("Custom AI instructions (cloud)")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+
+                        TextEditor(text: $customAIInstructions)
+                            .font(.system(size: 11, design: .rounded))
+                            .frame(height: 78)
+                            .padding(6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(VFColor.glass3.opacity(0.45))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(VFColor.glassBorder, lineWidth: 0.5)
+                                    )
+                            )
+                            .onChange(of: customAIInstructions) { _, newValue in
+                                DictationWorkflowSettings.customAIInstructions = newValue
+                            }
+
+                        Text("Used as transcription prompt when OpenAI cloud provider is active.")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                            .lineSpacing(2)
+                    }
+
+                    NeuDivider()
+
+                    snippetsEditor
+
+                    NeuDivider()
+
+                    correctionDictionaryEditor
+                }
             }
 
             NeuSection(icon: "lock.shield", title: "Permission Diagnostics") {
@@ -295,8 +486,428 @@ private struct GeneralSettingsTab: View {
             }
         }
         .onAppear {
+            // Ensure old `showBubble` users get migrated to the new mode key.
+            overlayModeRaw = DictationOverlaySettings.overlayMode.rawValue
+            recordingSoundsEnabled = DictationOverlaySettings.recordingSoundsEnabled
             permSnap = PermissionDiagnostics.snapshot()
+            silenceTimeoutSeconds = DictationWorkflowSettings.silenceTimeoutSeconds
+            insertionMode = DictationWorkflowSettings.insertionMode
+            perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
+            snippetsJSON = DictationWorkflowSettings.snippetsJSON
+            correctionDictionaryJSON = DictationWorkflowSettings.correctionDictionaryJSON
+            customAIInstructions = DictationWorkflowSettings.customAIInstructions
+            developerModeEnabled = DictationWorkflowSettings.developerModeEnabled
+            voiceCommandFormattingEnabled = DictationWorkflowSettings.voiceCommandFormattingEnabled
+
+            perAppProfiles = parsePerAppProfiles(from: perAppDefaultsJSON)
+            snippetRows = parsePhraseMap(from: snippetsJSON)
+            correctionRows = parsePhraseMap(from: correctionDictionaryJSON)
         }
+        .onChange(of: overlayModeRaw) { _, newValue in
+            DictationOverlaySettings.overlayMode = DictationOverlayMode(rawValue: newValue) ?? .topCenterWaveform
+        }
+        .onChange(of: perAppProfiles) { _, newValue in
+            persistPerAppProfiles(newValue)
+        }
+        .onChange(of: snippetRows) { _, newValue in
+            persistPhraseMap(newValue, target: .snippets)
+        }
+        .onChange(of: correctionRows) { _, newValue in
+            persistPhraseMap(newValue, target: .corrections)
+        }
+    }
+
+    private var selectedOverlayMode: DictationOverlayMode {
+        DictationOverlayMode(rawValue: overlayModeRaw) ?? .topCenterWaveform
+    }
+
+    @ViewBuilder
+    private var perAppProfilesEditor: some View {
+        editorContainer(
+            title: "Per-app profiles",
+            subtitle: "Applied automatically by active app."
+        ) {
+            VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                if perAppProfiles.isEmpty {
+                    Text("No app profiles yet.")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
+                }
+
+                ForEach(Array(perAppProfiles.indices), id: \.self) { index in
+                    editorRowContainer {
+                        HStack(spacing: VFSpacing.sm) {
+                            TextField(
+                                "Bundle ID (e.g. com.apple.mail)",
+                                text: Binding(
+                                    get: { perAppProfiles[index].bundleID },
+                                    set: { perAppProfiles[index].bundleID = $0 }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            Picker(
+                                "Style",
+                                selection: Binding(
+                                    get: { perAppProfiles[index].style },
+                                    set: { perAppProfiles[index].style = $0 }
+                                )
+                            ) {
+                                ForEach(profileStyles, id: \.self) { style in
+                                    Text(style.capitalized).tag(style)
+                                }
+                            }
+                            .pickerStyle(.menu)
+
+                            Button(role: .destructive) {
+                                perAppProfiles.remove(at: index)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        HStack(spacing: VFSpacing.sm) {
+                            TextField(
+                                "Optional prefix",
+                                text: Binding(
+                                    get: { perAppProfiles[index].prefix },
+                                    set: { perAppProfiles[index].prefix = $0 }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            TextField(
+                                "Optional suffix",
+                                text: Binding(
+                                    get: { perAppProfiles[index].suffix },
+                                    set: { perAppProfiles[index].suffix = $0 }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                }
+
+                Button {
+                    perAppProfiles.append(PerAppProfileDraft())
+                } label: {
+                    Label("Add app profile", systemImage: "plus.circle.fill")
+                        .font(VFFont.pillLabel)
+                }
+                .buttonStyle(addActionButtonStyle)
+                .padding(.top, VFSpacing.xs)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var snippetsEditor: some View {
+        editorContainer(
+            title: "Voice snippets",
+            subtitle: "Say the phrase, and Whisper Smart inserts the expansion."
+        ) {
+            VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                if snippetRows.isEmpty {
+                    Text("No snippets yet.")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
+                }
+
+                ForEach(Array(snippetRows.indices), id: \.self) { index in
+                    editorRowContainer {
+                        HStack(spacing: VFSpacing.sm) {
+                            TextField(
+                                "Spoken phrase",
+                                text: Binding(
+                                    get: { snippetRows[index].key },
+                                    set: { snippetRows[index].key = $0 }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            TextField(
+                                "Expansion text",
+                                text: Binding(
+                                    get: { snippetRows[index].value },
+                                    set: { snippetRows[index].value = $0 }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            Button(role: .destructive) {
+                                snippetRows.remove(at: index)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                Button {
+                    snippetRows.append(PhraseMappingDraft())
+                } label: {
+                    Label("Add snippet", systemImage: "plus.circle.fill")
+                        .font(VFFont.pillLabel)
+                }
+                .buttonStyle(addActionButtonStyle)
+                .padding(.top, VFSpacing.xs)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var correctionDictionaryEditor: some View {
+        editorContainer(
+            title: "Correction dictionary",
+            subtitle: "Applied after transcription to normalize words and names."
+        ) {
+            VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                if correctionRows.isEmpty {
+                    Text("No corrections yet.")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
+                }
+
+                ForEach(Array(correctionRows.indices), id: \.self) { index in
+                    editorRowContainer {
+                        HStack(spacing: VFSpacing.sm) {
+                            TextField(
+                                "From",
+                                text: Binding(
+                                    get: { correctionRows[index].key },
+                                    set: { correctionRows[index].key = $0 }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            TextField(
+                                "To",
+                                text: Binding(
+                                    get: { correctionRows[index].value },
+                                    set: { correctionRows[index].value = $0 }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            Button(role: .destructive) {
+                                correctionRows.remove(at: index)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                Button {
+                    correctionRows.append(PhraseMappingDraft())
+                } label: {
+                    Label("Add correction", systemImage: "plus.circle.fill")
+                        .font(VFFont.pillLabel)
+                }
+                .buttonStyle(addActionButtonStyle)
+                .padding(.top, VFSpacing.xs)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func editorContainer<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: VFSpacing.md) {
+            VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                Text(title)
+                    .font(VFFont.settingsBody)
+                    .foregroundStyle(VFColor.textPrimary)
+                Text(subtitle)
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+            }
+
+            content()
+        }
+        .padding(VFSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: VFRadius.field, style: .continuous)
+                .fill(VFColor.glass2.opacity(0.55))
+                .overlay(
+                    RoundedRectangle(cornerRadius: VFRadius.field, style: .continuous)
+                        .stroke(VFColor.glassBorder.opacity(0.85), lineWidth: 0.6)
+                )
+                .overlay(
+                    GrainTexture(opacity: 0.012, cellSize: 2)
+                        .clipShape(RoundedRectangle(cornerRadius: VFRadius.field, style: .continuous))
+                )
+        )
+    }
+
+    @ViewBuilder
+    private func editorRowContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: VFSpacing.sm) {
+            content()
+        }
+        .padding(VFSpacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: VFRadius.field - 1, style: .continuous)
+                .fill(VFColor.glass3.opacity(0.40))
+                .overlay(
+                    RoundedRectangle(cornerRadius: VFRadius.field - 1, style: .continuous)
+                        .stroke(VFColor.glassBorder.opacity(0.75), lineWidth: 0.5)
+                )
+        )
+    }
+
+    private var addActionButtonStyle: some ButtonStyle {
+        ProminentAddButtonStyle()
+    }
+
+    private func deleteIconButton(action: @escaping () -> Void) -> some View {
+        Button(role: .destructive, action: action) {
+            Image(systemName: "trash")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(VFColor.error)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(VFColor.error.opacity(0.12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(VFColor.error.opacity(0.35), lineWidth: 0.6)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func emptyStateCard(_ text: String) -> some View {
+        Text(text)
+            .font(VFFont.settingsCaption)
+            .foregroundStyle(VFColor.textSecondary)
+            .padding(VFSpacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(VFColor.controlInset.opacity(0.8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(VFColor.glassBorder, lineWidth: 0.5)
+                    )
+            )
+    }
+
+    private func parsePerAppProfiles(from json: String) -> [PerAppProfileDraft] {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let map = object as? [String: [String: Any]] else {
+            return []
+        }
+
+        return map.keys.sorted().map { bundleID in
+            let payload = map[bundleID] ?? [:]
+            let rawStyle = (payload["style"] as? String ?? "casual").lowercased()
+            let style = profileStyles.contains(rawStyle) ? rawStyle : "casual"
+            return PerAppProfileDraft(
+                bundleID: bundleID,
+                style: style,
+                prefix: payload["prefix"] as? String ?? "",
+                suffix: payload["suffix"] as? String ?? ""
+            )
+        }
+    }
+
+    private func parsePhraseMap(from json: String) -> [PhraseMappingDraft] {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let map = object as? [String: String] else {
+            return []
+        }
+
+        return map.keys.sorted().map { key in
+            PhraseMappingDraft(key: key, value: map[key] ?? "")
+        }
+    }
+
+    private func persistPerAppProfiles(_ profiles: [PerAppProfileDraft]) {
+        var result: [String: [String: String]] = [:]
+
+        for profile in profiles {
+            let bundleID = profile.bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !bundleID.isEmpty else { continue }
+
+            var payload: [String: String] = ["style": profile.style]
+            let prefix = profile.prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+            let suffix = profile.suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !prefix.isEmpty { payload["prefix"] = prefix }
+            if !suffix.isEmpty { payload["suffix"] = suffix }
+            result[bundleID] = payload
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+
+        perAppDefaultsJSON = json
+        DictationWorkflowSettings.perAppDefaultsJSON = json
+    }
+
+    private enum PhraseMapTarget {
+        case snippets
+        case corrections
+    }
+
+    private func persistPhraseMap(_ rows: [PhraseMappingDraft], target: PhraseMapTarget) {
+        var result: [String: String] = [:]
+
+        for row in rows {
+            let key = row.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = row.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, !value.isEmpty else { continue }
+            result[key] = value
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+
+        switch target {
+        case .snippets:
+            snippetsJSON = json
+            DictationWorkflowSettings.snippetsJSON = json
+        case .corrections:
+            correctionDictionaryJSON = json
+            DictationWorkflowSettings.correctionDictionaryJSON = json
+        }
+    }
+}
+
+private struct ProminentAddButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(VFColor.textOnAccent)
+            .padding(.horizontal, VFSpacing.md)
+            .padding(.vertical, VFSpacing.sm)
+            .background(
+                Capsule()
+                    .fill(VFColor.accentGradient)
+                    .shadow(color: VFColor.neuDark.opacity(configuration.isPressed ? 0.20 : 0.35), radius: configuration.isPressed ? 2 : 5, x: 0, y: configuration.isPressed ? 1 : 3)
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.20), lineWidth: 0.6)
+                    )
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(VFAnimation.fadeFast, value: configuration.isPressed)
     }
 }
 
@@ -647,90 +1258,528 @@ extension Notification.Name {
 // MARK: - Provider Settings
 
 private struct ProviderSettingsTab: View {
+    private enum QualityProfile: String, CaseIterable, Identifiable {
+        case localFast
+        case localBest
+        case cloudBest
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .localFast: return "Local Fast"
+            case .localBest: return "Local Best"
+            case .cloudBest: return "Cloud Best"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .localFast: return "Parakeet INT8 · lower storage"
+            case .localBest: return "Whisper large-v3 turbo · best local quality"
+            case .cloudBest: return "OpenAI cloud · best consistency"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .localFast:
+                return "hare.fill"
+            case .localBest:
+                return "waveform.and.mic"
+            case .cloudBest:
+                return "cloud.sun.fill"
+            }
+        }
+
+        var vendorLabel: String {
+            switch self {
+            case .localFast:
+                return "NVIDIA"
+            case .localBest:
+                return "WHISPER"
+            case .cloudBest:
+                return "OPENAI"
+            }
+        }
+
+        var installHint: String {
+            switch self {
+            case .localFast:
+                return "~623 MB"
+            case .localBest:
+                return "~1.6 GB"
+            case .cloudBest:
+                return "No local download"
+            }
+        }
+    }
+
     @State private var selectedKind: STTProviderKind = STTProviderKind.loadSelection()
     /// Shared download state — rebound to the active variant when the provider changes.
     @StateObject private var downloadState = ModelDownloadState(variant: .parakeetCTC06B)
-    @ObservedObject private var diagnosticsStore = ProviderRuntimeDiagnosticsStore.shared
+    @StateObject private var whisperInstaller = WhisperModelInstaller.shared
+    @StateObject private var whisperRuntimeInstaller = WhisperRuntimeInstaller.shared
+    @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
+    @State private var whisperCLIPath = DictationProviderPolicy.whisperCLIPath
+    @State private var whisperModelPath = DictationProviderPolicy.whisperModelPath
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
-            NeuSection(icon: "cloud.fill", title: "Transcription Provider") {
-                VStack(alignment: .leading, spacing: VFSpacing.md) {
-                    // Provider picker
-                    HStack {
-                        Text("Provider")
-                            .font(VFFont.settingsBody)
-                            .foregroundStyle(VFColor.textPrimary)
-
-                        Spacer()
-
-                        Menu {
-                            ForEach(STTProviderKind.allCases) { kind in
-                                Button(kind.displayName) {
-                                    selectProvider(kind)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: VFSpacing.sm) {
-                                Text(selectedKind.displayName)
-                                    .font(VFFont.pillLabel)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 9, weight: .semibold))
-                            }
-                            .foregroundStyle(VFColor.textPrimary)
-                            .padding(.horizontal, VFSpacing.md)
-                            .padding(.vertical, VFSpacing.sm)
-                            .background(
-                                Capsule()
-                                    .fill(VFColor.glass3)
-                                    .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
-                                    .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(
-                                                LinearGradient(
-                                                    stops: [
-                                                        .init(color: Color.white.opacity(0.08), location: 0),
-                                                        .init(color: .clear, location: 0.4),
-                                                    ],
-                                                    startPoint: .top,
-                                                    endPoint: .bottom
-                                                ),
-                                                lineWidth: 0.5
-                                            )
-                                    )
-                            )
-                        }
-                        .menuStyle(.borderlessButton)
-                    }
-
-                    // Model download section (only for providers that need it)
-                    if selectedKind.requiresModelDownload {
-                        NeuDivider()
-                        ModelDownloadRow(
-                            kind: selectedKind,
-                            downloadState: downloadState
-                        )
-                    }
-
-                    Text(providerCaption)
+            NeuSection(icon: "cloud.fill", title: "Speech to Text") {
+                VStack(alignment: .leading, spacing: VFSpacing.lg) {
+                    Text("Pick a profile, then use explicit install/download buttons")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
-                        .padding(.top, VFSpacing.xxs)
 
-                    NeuDivider()
+                    VStack(spacing: VFSpacing.md) {
+                        qualityProfileCard(.localFast)
+                        qualityProfileCard(.localBest)
+                        qualityProfileCard(.cloudBest)
+                    }
 
-                    ProviderDiagnosticsView(
-                        diagnostics: diagnosticsStore.latest,
-                        selectedKind: selectedKind
-                    )
+                    if selectedKind == .parakeet {
+                        VStack(alignment: .leading, spacing: VFSpacing.md) {
+                            Text("Advanced Parakeet Controls")
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+
+                            ModelDownloadRow(kind: .parakeet, downloadState: downloadState)
+
+                            HStack(spacing: VFSpacing.sm) {
+                                Button("Reinstall Parakeet Local") {
+                                    reinstallParakeetLocal()
+                                }
+                                .buttonStyle(.plain)
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textPrimary)
+                                .padding(.horizontal, VFSpacing.md)
+                                .padding(.vertical, VFSpacing.sm)
+                                .background(Capsule().fill(VFColor.glass3))
+
+                                Button("Repair Runtime") {
+                                    ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
+                                }
+                                .buttonStyle(.plain)
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textPrimary)
+                                .padding(.horizontal, VFSpacing.md)
+                                .padding(.vertical, VFSpacing.sm)
+                                .background(Capsule().fill(VFColor.glass3))
+                            }
+                        }
+                    }
+
+                    if selectedKind == .openaiAPI || selectedKind == .whisper {
+                        providerConfigurationSection
+                    }
                 }
             }
         }
         .onAppear {
             // Sync download state to the persisted provider on appear.
             syncDownloadState(for: selectedKind)
+            // Product default: keep cloud path available when API key is provided.
+            DictationProviderPolicy.cloudFallbackEnabled = true
+            openAIAPIKey = DictationProviderPolicy.openAIAPIKey
+            whisperCLIPath = DictationProviderPolicy.whisperCLIPath
+            whisperModelPath = DictationProviderPolicy.whisperModelPath
+
+            // Keep the user's requested provider visible in settings even when
+            // runtime/model prerequisites are missing, so install actions remain accessible.
+            _ = STTProviderResolver.diagnostics(for: selectedKind)
         }
+    }
+
+    @ViewBuilder
+    private var providerConfigurationSection: some View {
+        if selectedKind == .openaiAPI {
+            VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                Text("OpenAI API key")
+                    .font(VFFont.settingsBody)
+                    .foregroundStyle(VFColor.textPrimary)
+                SecureField("sk-...", text: $openAIAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save API Key") {
+                    DictationProviderPolicy.openAIAPIKey = openAIAPIKey
+                    NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+                }
+                .buttonStyle(.plain)
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textPrimary)
+            }
+        } else if selectedKind == .whisper {
+            VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                Text("Whisper Local setup")
+                    .font(VFFont.settingsBody)
+                    .foregroundStyle(VFColor.textPrimary)
+
+                HStack(spacing: VFSpacing.sm) {
+                    switch whisperRuntimeInstaller.phase {
+                    case .notInstalled:
+                        Button("Install runtime") {
+                            whisperRuntimeInstaller.installWithHomebrew()
+                        }
+                        .buttonStyle(.plain)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textPrimary)
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(Capsule().fill(VFColor.glass3))
+                        Text("Installs whisper.cpp (whisper-cli) via Homebrew.")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+
+                    case .installing:
+                        Button("Cancel") {
+                            whisperRuntimeInstaller.cancelInstall()
+                        }
+                        .buttonStyle(.plain)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textPrimary)
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(Capsule().fill(VFColor.glass3))
+                        Text("Installing runtime…")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+
+                    case .ready(let path):
+                        Text("Runtime installed")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.success)
+                        Text(path)
+                            .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            .foregroundStyle(VFColor.textTertiary)
+
+                    case .failed(let message):
+                        Text(message)
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.error)
+                    }
+                }
+
+                HStack(spacing: VFSpacing.sm) {
+                    Menu {
+                        ForEach(WhisperModelTier.allCases) { tier in
+                            Button("\(tier.displayName) (\(tier.approxSizeLabel))") {
+                                whisperInstaller.setTier(tier)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: VFSpacing.xs) {
+                            Text(whisperInstaller.selectedTier.displayName)
+                                .font(VFFont.settingsCaption)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundStyle(VFColor.textPrimary)
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(Capsule().fill(VFColor.glass3))
+                    }
+                    .menuStyle(.borderlessButton)
+
+                    switch whisperInstaller.phase {
+                    case .notInstalled(_):
+                        Button("Download model") {
+                            whisperInstaller.downloadSelectedModel()
+                        }
+                        .buttonStyle(.plain)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textPrimary)
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(Capsule().fill(VFColor.glass3))
+
+                    case .downloading(_, let progress):
+                        Button("Cancel") {
+                            whisperInstaller.cancel()
+                        }
+                        .buttonStyle(.plain)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textPrimary)
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(Capsule().fill(VFColor.glass3))
+
+                        Text("\(Int(progress * 100))%")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+
+                    case .ready(_):
+                        Text("Model installed")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.success)
+
+                    case .failed(let message):
+                        Text(message)
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.error)
+                    }
+                }
+
+                Text("Whisper Local becomes active when runtime + model are both installed.")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+            }
+            .onAppear {
+                whisperRuntimeInstaller.refreshState()
+                whisperInstaller.refreshState()
+                whisperCLIPath = DictationProviderPolicy.whisperCLIPath
+                whisperModelPath = DictationProviderPolicy.whisperModelPath
+            }
+        }
+    }
+
+    private func qualityProfileCard(_ profile: QualityProfile) -> some View {
+        let isActive = (activeQualityProfile == profile)
+
+        return VStack(alignment: .leading, spacing: VFSpacing.md) {
+            HStack(spacing: VFSpacing.sm) {
+                Image(systemName: profile.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isActive ? VFColor.textOnAccent : VFColor.accentFallback)
+                    .frame(width: 24, height: 24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(isActive ? VFColor.accentFallback : VFColor.accentFallback.opacity(0.16))
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.title)
+                        .font(VFFont.settingsBody)
+                        .foregroundStyle(VFColor.textPrimary)
+                    Text(profile.vendorLabel)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(VFColor.textTertiary)
+                }
+
+                Spacer()
+
+                Circle()
+                    .fill(isActive ? VFColor.accentFallback : VFColor.controlInset)
+                    .frame(width: 10, height: 10)
+            }
+
+            Text(profile.subtitle)
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textSecondary)
+                .lineLimit(2)
+                .lineSpacing(2)
+
+            Text(profile.installHint)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(VFColor.textTertiary)
+                .padding(.horizontal, VFSpacing.sm)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(VFColor.controlInset)
+                        .overlay(
+                            Capsule()
+                                .stroke(VFColor.glassBorder, lineWidth: 0.6)
+                        )
+                )
+
+            Rectangle()
+                .fill(VFColor.glassBorder.opacity(0.45))
+                .frame(height: 1)
+
+            HStack(spacing: VFSpacing.sm) {
+                if isActive {
+                    installedChip(label: "Selected", color: VFColor.accentFallback)
+                } else {
+                    profileActionButton(
+                        title: "Use",
+                        isPrimary: true,
+                        enabled: true
+                    ) {
+                        applyQualityProfile(profile)
+                    }
+                }
+
+                switch profile {
+                case .localFast:
+                    if !isParakeetInstalled {
+                        profileActionButton(title: "Download", enabled: true) {
+                            downloadParakeetProfile()
+                        }
+                    } else {
+                        installedChip(label: "Installed")
+                    }
+
+                case .localBest:
+                    if !whisperRuntimeIsReady {
+                        profileActionButton(title: "Install runtime", enabled: true) {
+                            whisperRuntimeInstaller.installWithHomebrew()
+                        }
+                    }
+
+                    if !isWhisperLargeInstalled {
+                        profileActionButton(title: "Download", enabled: true) {
+                            downloadWhisperLargeProfile()
+                        }
+                    } else {
+                        installedChip(label: "Installed")
+                    }
+
+                case .cloudBest:
+                    profileActionButton(title: "API Key", enabled: true) {
+                        selectProvider(.openaiAPI)
+                    }
+                }
+            }
+        }
+        .padding(VFSpacing.lg)
+        .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
+                .fill(isActive ? VFColor.glass3 : VFColor.glass1)
+                .overlay(
+                    RoundedRectangle(cornerRadius: VFRadius.button)
+                        .stroke(isActive ? VFColor.accentFallback.opacity(0.6) : VFColor.glassBorder, lineWidth: 1)
+                )
+        )
+    }
+
+    private func profileActionButton(
+        title: String,
+        isPrimary: Bool = false,
+        enabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(isPrimary ? VFColor.textOnAccent : VFColor.textPrimary)
+                .padding(.horizontal, VFSpacing.sm)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(isPrimary ? VFColor.accentFallback : VFColor.glass3)
+                        .overlay(
+                            Capsule()
+                                .stroke(VFColor.glassBorder, lineWidth: 0.7)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1.0 : 0.5)
+    }
+
+    private func installedChip(label: String, color: Color = VFColor.success) -> some View {
+        Text(label)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(color)
+            .padding(.horizontal, VFSpacing.sm)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(color.opacity(0.14))
+                    .overlay(
+                        Capsule()
+                            .stroke(color.opacity(0.4), lineWidth: 0.7)
+                    )
+            )
+    }
+
+    private func downloadParakeetProfile() {
+        _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
+            id: "hf_parakeet_ctc06b_int8",
+            for: ModelVariant.parakeetCTC06B.id
+        )
+        selectProvider(.parakeet)
+        syncDownloadState(for: .parakeet)
+        downloadState.reset()
+        ModelDownloaderService.shared.download(variant: .parakeetCTC06B, state: downloadState)
+    }
+
+    private func downloadWhisperLargeProfile() {
+        whisperInstaller.setTier(.largeV3Turbo)
+        selectProvider(.whisper)
+        whisperInstaller.downloadSelectedModel()
+    }
+
+    private var whisperRuntimeIsReady: Bool {
+        if case .ready = whisperRuntimeInstaller.phase {
+            return true
+        }
+        return false
+    }
+
+    private var isParakeetInstalled: Bool {
+        guard let modelURL = ModelVariant.parakeetCTC06B.localURL,
+              FileManager.default.fileExists(atPath: modelURL.path),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
+              let size = attrs[.size] as? Int64,
+              size > 100_000_000 else {
+            return false
+        }
+
+        let tokenizerURL = modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt")
+        return FileManager.default.fileExists(atPath: tokenizerURL.path)
+    }
+
+    private var isWhisperLargeInstalled: Bool {
+        let largeURL = whisperInstaller.localModelURL(for: .largeV3Turbo)
+        guard FileManager.default.fileExists(atPath: largeURL.path),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: largeURL.path),
+              let size = attrs[.size] as? Int64 else {
+            return false
+        }
+        return size > 10_000_000
+    }
+
+    private var activeQualityProfile: QualityProfile {
+        switch selectedKind {
+        case .openaiAPI:
+            return .cloudBest
+        case .whisper:
+            return .localBest
+        case .parakeet:
+            return .localFast
+        case .appleSpeech, .stub:
+            return .localFast
+        }
+    }
+
+    private func applyQualityProfile(_ profile: QualityProfile) {
+        switch profile {
+        case .cloudBest:
+            selectProvider(.openaiAPI)
+
+        case .localFast:
+            _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
+                id: "hf_parakeet_ctc06b_int8",
+                for: ModelVariant.parakeetCTC06B.id
+            )
+            selectProvider(.parakeet)
+            syncDownloadState(for: .parakeet)
+            downloadState.reset()
+
+        case .localBest:
+            whisperInstaller.setTier(.largeV3Turbo)
+            selectProvider(.whisper)
+            whisperInstaller.refreshState()
+        }
+    }
+
+    private func reinstallParakeetLocal() {
+        let fm = FileManager.default
+        if let modelURL = ModelVariant.parakeetCTC06B.localURL {
+            try? fm.removeItem(at: modelURL)
+            try? fm.removeItem(at: modelURL.appendingPathExtension("data"))
+            try? fm.removeItem(at: modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt"))
+        }
+
+        for runtimeRoot in AppStoragePaths.runtimeRootCandidates(fileManager: fm) {
+            try? fm.removeItem(at: runtimeRoot)
+        }
+
+        downloadState.reset()
+        ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
     }
 
     private func selectProvider(_ kind: STTProviderKind) {
@@ -754,9 +1803,9 @@ private struct ProviderSettingsTab: View {
         case .parakeet:
             return "Local ONNX inference via NVIDIA Parakeet. Runtime is auto-bootstrapped by the app; use Repair Parakeet Runtime if diagnostics report issues."
         case .whisper:
-            return "Experimental — Whisper.cpp integration not yet implemented. Coming in a future release."
+            return "Local whisper-cli runtime. Requires explicit CLI + model paths and passes capability checks before it becomes selectable."
         case .openaiAPI:
-            return "Experimental — OpenAI Whisper API not yet implemented. Coming in a future release."
+            return "Cloud fallback provider. Requires explicit opt-in and a valid OpenAI API key before it becomes selectable."
         case .stub:
             return "Testing only — does not transcribe. Select Apple Speech for real transcription."
         }
@@ -778,6 +1827,18 @@ private struct ProviderDiagnosticsView: View {
                     .font(VFFont.settingsBody)
                     .foregroundStyle(VFColor.textPrimary)
                 Spacer()
+                if diagnostics.usesFallback {
+                    Text("Fallback")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(VFColor.textPrimary)
+                        .padding(.horizontal, VFSpacing.sm)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(VFColor.error.opacity(0.22))
+                                .overlay(Capsule().stroke(VFColor.error.opacity(0.45), lineWidth: 0.5))
+                        )
+                }
                 Text(diagnostics.healthLevel.rawValue)
                     .font(VFFont.settingsCaption)
                     .foregroundStyle(healthColor)
@@ -963,21 +2024,7 @@ private struct ModelDownloadRow: View {
 
             NeuDivider()
 
-            HStack {
-                Text("Source")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
-                Spacer()
-                sourcePickerMenu
-            }
-
-            DiagnosticLine(label: "Source URL", value: downloadState.variant.configuredSourceURLDisplay)
-            DiagnosticLine(label: "Tokenizer URL", value: downloadState.variant.configuredTokenizerURLDisplay)
-            DiagnosticLine(label: "Download Status", value: downloadStatusDetail)
-
-            if selectedSourceID == ParakeetModelSourceOption.customSourceID {
-                customSourceEditor
-            }
+            DiagnosticLine(label: "Status", value: downloadStatusDetail)
 
             if let sourceError = downloadState.variant.downloadUnavailableReason {
                 HStack(alignment: .top, spacing: VFSpacing.xs) {
@@ -985,17 +2032,6 @@ private struct ModelDownloadRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(VFColor.error)
                     Text(sourceError)
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.error)
-                }
-            }
-
-            if let sourceConfigurationError {
-                HStack(alignment: .top, spacing: VFSpacing.xs) {
-                    Image(systemName: "xmark.octagon.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(VFColor.error)
-                    Text(sourceConfigurationError)
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.error)
                 }
@@ -1033,6 +2069,7 @@ private struct ModelDownloadRow: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .parakeetModelSourceDidChange)) { _ in
             refreshSourceStateFromStore()
+            downloadState.reset()
         }
     }
 
@@ -1247,6 +2284,194 @@ private struct ModelDownloadRow: View {
         refreshSourceStateFromStore()
         downloadState.reset()
     }
+}
+
+// MARK: - Transcript History
+
+private struct TranscriptHistoryTab: View {
+    @ObservedObject private var store = TranscriptLogStore.shared
+    @State private var query: String = ""
+
+    private var filteredEntries: [TranscriptLogEntry] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return store.entries }
+        return store.entries.filter {
+            $0.text.lowercased().contains(q) ||
+            $0.provider.lowercased().contains(q) ||
+            $0.appName.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: VFSpacing.lg) {
+            NeuSection(icon: "list.bullet.rectangle.portrait", title: "Transcript Log") {
+                VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                    HStack(spacing: VFSpacing.sm) {
+                        TextField("Search transcripts", text: $query)
+                            .textFieldStyle(.roundedBorder)
+
+                        iconActionButton(systemName: "doc.on.doc", accessibilityLabel: "Copy all") {
+                            store.copy(filteredEntries.map(\.text).joined(separator: "\n"))
+                        }
+
+                        iconActionButton(systemName: "trash", accessibilityLabel: "Clear") {
+                            store.clearAll()
+                        }
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: VFSpacing.sm) {
+                            metricChip(title: "Entries", value: "\(store.entries.count)")
+                            metricChip(title: "Success", value: "\(successRatePercent)%")
+                            metricChip(title: "Avg STT", value: averageLatencyLabel)
+                            if !topProviderLabel.isEmpty {
+                                metricChip(title: "Top provider", value: topProviderLabel)
+                            }
+                            if !topAppLabel.isEmpty {
+                                metricChip(title: "Top app", value: topAppLabel)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    if filteredEntries.isEmpty {
+                        Text("No transcripts yet.")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                            .padding(.vertical, VFSpacing.sm)
+                    } else {
+                        VStack(spacing: VFSpacing.sm) {
+                            ForEach(filteredEntries.prefix(100)) { entry in
+                                HStack(alignment: .top, spacing: VFSpacing.md) {
+                                    Text(Self.timeFormatter.string(from: entry.timestamp))
+                                        .font(VFFont.settingsCaption)
+                                        .foregroundStyle(VFColor.textTertiary)
+                                        .frame(width: 70, alignment: .leading)
+
+                                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                                        Text(entry.provider)
+                                            .font(VFFont.settingsCaption)
+                                            .foregroundStyle(VFColor.accentFallback)
+                                        Text(entry.appName)
+                                            .font(.system(size: 10, weight: .regular, design: .rounded))
+                                            .foregroundStyle(VFColor.textTertiary)
+                                    }
+                                    .frame(width: 120, alignment: .leading)
+
+                                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                                        Text(entry.text)
+                                            .font(VFFont.settingsCaption)
+                                            .foregroundStyle(VFColor.textPrimary)
+                                            .lineLimit(2)
+
+                                        HStack(spacing: VFSpacing.sm) {
+                                            Text(entry.status)
+                                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                                .foregroundStyle(VFColor.textSecondary)
+                                            if let duration = entry.durationMs {
+                                                Text("\(duration)ms")
+                                                    .font(.system(size: 10, weight: .regular, design: .rounded))
+                                                    .foregroundStyle(VFColor.textTertiary)
+                                            }
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    HStack(spacing: VFSpacing.xs) {
+                                        iconActionButton(systemName: "arrow.uturn.backward", accessibilityLabel: "Re-insert transcript") {
+                                            store.requestReinsert(entry.text)
+                                        }
+                                        iconActionButton(systemName: "doc.on.doc", accessibilityLabel: "Copy transcript") {
+                                            store.copy(entry.text)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, VFSpacing.xs)
+
+                                NeuDivider()
+                            }
+                        }
+                        .padding(.top, VFSpacing.xs)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func iconActionButton(systemName: String, accessibilityLabel: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(VFColor.textPrimary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(VFColor.glass3)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(VFColor.glassBorder, lineWidth: 0.5)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func metricChip(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundStyle(VFColor.textTertiary)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(VFColor.textPrimary)
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.horizontal, VFSpacing.sm)
+        .padding(.vertical, VFSpacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(VFColor.glass3)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(VFColor.glassBorder, lineWidth: 0.5)
+                )
+        )
+    }
+
+    private var successRatePercent: Int {
+        guard !store.entries.isEmpty else { return 0 }
+        let successCount = store.entries.filter { $0.status == "inserted" }.count
+        return Int((Double(successCount) / Double(store.entries.count)) * 100)
+    }
+
+    private var averageLatencyLabel: String {
+        let durations = store.entries.compactMap(\.durationMs)
+        guard !durations.isEmpty else { return "—" }
+        let avg = durations.reduce(0, +) / durations.count
+        return "\(avg)ms"
+    }
+
+    private var topProviderLabel: String {
+        let grouped = Dictionary(grouping: store.entries, by: { $0.provider })
+        guard let top = grouped.max(by: { $0.value.count < $1.value.count }) else { return "" }
+        return "\(top.key) (\(top.value.count))"
+    }
+
+    private var topAppLabel: String {
+        let grouped = Dictionary(grouping: store.entries, by: { $0.appName })
+        guard let top = grouped.max(by: { $0.value.count < $1.value.count }) else { return "" }
+        return "\(top.key) (\(top.value.count))"
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
 }
 
 // MARK: - Neumorphic Toggle Row

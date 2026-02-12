@@ -1,99 +1,236 @@
 import Cocoa
+import ApplicationServices
+import os.log
 
-/// Injects transcribed text into the frontmost application.
+private let logger = Logger(subsystem: "com.visperflow", category: "TextInjector")
+
+/// Injects transcribed text into the frontmost focused text input.
 ///
-/// The injector supports two strategies:
-///   1. **Pasteboard + Cmd-V** – copies text to the system pasteboard and
-///      synthesises a ⌘V keystroke. Works everywhere but overwrites the
-///      user's clipboard (we save & restore it).
-///   2. **CGEvent key-by-key** – synthesises individual key-down/up events.
-///      Avoids touching the pasteboard but is slower and limited to ASCII.
-///
-/// Strategy 1 is the default and recommended approach.
+/// Strategy order (Phase 1 reliability core):
+///   1. Accessibility insertion (AX) into the focused element.
+///   2. Pasteboard + Cmd-V fallback with best-effort full pasteboard snapshot/restore.
 final class ClipboardInjector {
 
     enum Strategy {
-        /// Copy to pasteboard then synthesise ⌘V. Fast, supports Unicode.
+        case accessibility
         case pasteboard
-        /// Synthesise individual key events. Slow, ASCII-only fallback.
-        case keyEvents
     }
 
-    /// Which injection strategy to use.
-    var strategy: Strategy = .pasteboard
+    /// Ordered strategies attempted for each injection.
+    var strategyOrder: [Strategy] = [.accessibility, .pasteboard]
 
-    /// Small delay (seconds) between setting the pasteboard and sending ⌘V.
-    /// Some apps need a moment to notice the pasteboard change.
+    /// Delay between pasteboard write and ⌘V synthesis.
     var pasteDelay: TimeInterval = 0.05
 
-    // MARK: - Public API
+    /// Delay before attempting clipboard restore.
+    var restoreDelay: TimeInterval = 0.2
 
-    /// Injects `text` into the currently focused text field.
-    ///
-    /// - Parameter text: The transcription string to inject.
     func inject(text: String) {
-        switch strategy {
-        case .pasteboard:
-            injectViaPasteboard(text: text)
-        case .keyEvents:
-            injectViaKeyEvents(text: text)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let activeStrategyOrder: [Strategy]
+        switch DictationWorkflowSettings.insertionMode {
+        case .smart:
+            activeStrategyOrder = strategyOrder
+        case .accessibilityOnly:
+            activeStrategyOrder = [.accessibility]
+        case .pasteboardOnly:
+            activeStrategyOrder = [.pasteboard]
         }
+
+        for strategy in activeStrategyOrder {
+            switch strategy {
+            case .accessibility:
+                if injectViaAccessibility(text: trimmed) {
+                    logger.info("Text injection succeeded via accessibility")
+                    return
+                }
+                logger.info("Accessibility insertion unavailable/failed; falling back")
+
+            case .pasteboard:
+                injectViaPasteboard(text: trimmed)
+                return
+            }
+        }
+
+        logger.error("No viable text injection strategy configured")
     }
 
-    // MARK: - Pasteboard strategy
+    // MARK: - Accessibility strategy
+
+    private func injectViaAccessibility(text: String) -> Bool {
+        let systemWide = AXUIElementCreateSystemWide()
+
+        var focusedRef: CFTypeRef?
+        let focusedResult = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef)
+        guard focusedResult == .success,
+              let focusedRef,
+              CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else {
+            return false
+        }
+
+        let focusedElement = unsafeBitCast(focusedRef, to: AXUIElement.self)
+
+        // We currently support insert/replace only for text controls exposing
+        // AXValue + AXSelectedTextRange.
+        guard var value = valueString(for: focusedElement),
+              let selectedRange = selectedTextRange(for: focusedElement) else {
+            return false
+        }
+
+        let nsValue = value as NSString
+        let safeLocation = max(0, min(selectedRange.location, nsValue.length))
+        let safeLength = max(0, min(selectedRange.length, nsValue.length - safeLocation))
+        let safeRange = NSRange(location: safeLocation, length: safeLength)
+
+        value = nsValue.replacingCharacters(in: safeRange, with: text)
+
+        guard AXUIElementSetAttributeValue(focusedElement, kAXValueAttribute as CFString, value as CFTypeRef) == .success else {
+            return false
+        }
+
+        let insertionLocation = safeLocation + (text as NSString).length
+        var updatedRange = CFRange(location: insertionLocation, length: 0)
+        guard let updatedRangeValue = AXValueCreate(.cfRange, &updatedRange) else {
+            return false
+        }
+
+        _ = AXUIElementSetAttributeValue(
+            focusedElement,
+            kAXSelectedTextRangeAttribute as CFString,
+            updatedRangeValue
+        )
+
+        return true
+    }
+
+    private func valueString(for element: AXUIElement) -> String? {
+        var valueRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef)
+        guard result == .success else { return nil }
+        return valueRef as? String
+    }
+
+    private func selectedTextRange(for element: AXUIElement) -> CFRange? {
+        var rangeRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef)
+        guard result == .success,
+              let rangeRef,
+              CFGetTypeID(rangeRef) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let value = unsafeBitCast(rangeRef, to: AXValue.self)
+        guard AXValueGetType(value) == .cfRange else { return nil }
+
+        var range = CFRange()
+        guard AXValueGetValue(value, .cfRange, &range) else { return nil }
+        return range
+    }
+
+    // MARK: - Pasteboard fallback
 
     private func injectViaPasteboard(text: String) {
         let pasteboard = NSPasteboard.general
+        let snapshot = PasteboardSnapshot.capture(from: pasteboard)
 
-        // Save current pasteboard contents so we can restore them.
-        let previousContents = pasteboard.string(forType: .string)
-
-        // Write our text.
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        let injectionChangeCount = pasteboard.changeCount
 
-        // Synthesise ⌘V after a short delay.
         DispatchQueue.main.asyncAfter(deadline: .now() + pasteDelay) { [weak self] in
             self?.synthesisePaste()
 
-            // Restore previous pasteboard contents after a generous delay
-            // to allow the target app to read the paste.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                if let prev = previousContents {
-                    pasteboard.clearContents()
-                    pasteboard.setString(prev, forType: .string)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (self?.restoreDelay ?? 0.2)) {
+                guard let snapshot else { return }
+                // If clipboard changed after injection (e.g. user copied
+                // something else), do not overwrite user intent.
+                guard pasteboard.changeCount == injectionChangeCount else {
+                    logger.info("Skipping pasteboard restore; clipboard changed externally")
+                    return
                 }
+                snapshot.restore(to: pasteboard)
             }
         }
     }
 
-    /// Posts a ⌘V key event pair.
     private func synthesisePaste() {
-        // Virtual key code for 'V'.
         let vKeyCode: CGKeyCode = 0x09
-
         guard let source = CGEventSource(stateID: .hidSystemState) else { return }
 
         let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true)
-        let keyUp   = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
 
         keyDown?.flags = .maskCommand
-        keyUp?.flags   = .maskCommand
+        keyUp?.flags = .maskCommand
 
         keyDown?.post(tap: .cghidEventTap)
         keyUp?.post(tap: .cghidEventTap)
     }
+}
 
-    // MARK: - Key-events strategy
+// MARK: - Pasteboard snapshot
 
-    private func injectViaKeyEvents(text: String) {
-        // TODO: Implement character-by-character key event synthesis.
-        //       This requires mapping each Character to a CGKeyCode +
-        //       modifier set, which is non-trivial for non-ASCII. Consider
-        //       using CGEvent(keyboardEventSource:…) with
-        //       kCGEventKeyboardEventKeyboardType and UniChar posting.
-        //
-        //       For now, fall back to the pasteboard strategy.
-        injectViaPasteboard(text: text)
+private struct PasteboardSnapshot {
+    private enum StoredValue {
+        case data(Data)
+        case propertyList(Any)
+    }
+
+    private struct StoredItem {
+        let valuesByType: [(NSPasteboard.PasteboardType, StoredValue)]
+    }
+
+    private let items: [StoredItem]
+
+    static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot? {
+        guard let pasteboardItems = pasteboard.pasteboardItems else {
+            return PasteboardSnapshot(items: [])
+        }
+
+        let storedItems: [StoredItem] = pasteboardItems.map { item in
+            var values: [(NSPasteboard.PasteboardType, StoredValue)] = []
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    values.append((type, .data(data)))
+                } else if let plist = item.propertyList(forType: type) {
+                    values.append((type, .propertyList(plist)))
+                }
+            }
+            return StoredItem(valuesByType: values)
+        }
+
+        return PasteboardSnapshot(items: storedItems)
+    }
+
+    func restore(to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+
+        guard !items.isEmpty else { return }
+
+        let restoredItems: [NSPasteboardItem] = items.compactMap { stored in
+            let item = NSPasteboardItem()
+            var wroteAnyType = false
+
+            for (type, storedValue) in stored.valuesByType {
+                switch storedValue {
+                case .data(let data):
+                    if item.setData(data, forType: type) {
+                        wroteAnyType = true
+                    }
+                case .propertyList(let plist):
+                    if item.setPropertyList(plist, forType: type) {
+                        wroteAnyType = true
+                    }
+                }
+            }
+
+            return wroteAnyType ? item : nil
+        }
+
+        if !restoredItems.isEmpty {
+            pasteboard.writeObjects(restoredItems as [NSPasteboardWriting])
+        }
     }
 }

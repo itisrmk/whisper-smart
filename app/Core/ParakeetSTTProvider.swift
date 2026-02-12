@@ -8,6 +8,7 @@ private let logger = Logger(subsystem: "com.visperflow", category: "ParakeetSTT"
 final class ParakeetSTTProvider: STTProvider {
     let displayName = "NVIDIA Parakeet (local)"
     static let inferenceImplemented = true
+    let transcriptionTimeout: TimeInterval = 120
 
     var onResult: ((STTResult) -> Void)?
     var onError: ((STTError) -> Void)?
@@ -18,6 +19,10 @@ final class ParakeetSTTProvider: STTProvider {
     private let inferenceQueue = DispatchQueue(label: "com.visperflow.parakeet.inference", qos: .userInitiated)
     private let expectedSampleRate = 16_000
     private let runtimeBootstrapManager = ParakeetRuntimeBootstrapManager.shared
+    private let runnerTimeout: TimeInterval = 90
+
+    private static let validationLock = NSLock()
+    private static var validationCache: Set<String> = []
 
     private var sessionActive = false
     private var inferenceInFlight = false
@@ -76,21 +81,27 @@ final class ParakeetSTTProvider: STTProvider {
             throw STTError.providerError(message: error.localizedDescription)
         }
 
+        let validationKey = modelURL.path
         if !currentRuntimeValidated {
-            do {
-                _ = try runRunner(
-                    pythonCommand: pythonCommand,
-                    scriptURL: scriptURL,
-                    arguments: checkArguments(modelURL: modelURL)
-                )
+            if Self.isValidationCached(for: validationKey) {
                 updateRuntimeValidated(true)
-                logger.info("Parakeet runtime validation passed")
-            } catch let error as STTError {
-                throw error
-            } catch {
-                throw STTError.providerError(
-                    message: "Parakeet runtime validation failed: \(error.localizedDescription)"
-                )
+            } else {
+                do {
+                    _ = try runRunner(
+                        pythonCommand: pythonCommand,
+                        scriptURL: scriptURL,
+                        arguments: checkArguments(modelURL: modelURL)
+                    )
+                    updateRuntimeValidated(true)
+                    Self.cacheValidation(for: validationKey)
+                    logger.info("Parakeet runtime validation passed")
+                } catch let error as STTError {
+                    throw error
+                } catch {
+                    throw STTError.providerError(
+                        message: "Parakeet runtime validation failed: \(error.localizedDescription)"
+                    )
+                }
             }
         }
 
@@ -104,7 +115,6 @@ final class ParakeetSTTProvider: STTProvider {
 
     func endSession() {
         guard currentSessionActive else {
-            logger.warning("[SESSION_END] endSession called but no session was active — ignoring")
             return
         }
 
@@ -242,6 +252,28 @@ private extension ParakeetSTTProvider {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        let stdoutData = NSMutableData()
+        let stderrData = NSMutableData()
+        let completion = DispatchSemaphore(value: 0)
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty {
+                stdoutData.append(chunk)
+            }
+        }
+
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty {
+                stderrData.append(chunk)
+            }
+        }
+
+        process.terminationHandler = { _ in
+            completion.signal()
+        }
+
         do {
             try process.run()
         } catch {
@@ -250,12 +282,29 @@ private extension ParakeetSTTProvider {
             )
         }
 
-        process.waitUntilExit()
+        let didFinish = completion.wait(timeout: .now() + runnerTimeout) == .success
+        if !didFinish {
+            logger.error("[INFERENCE_TIMEOUT] Parakeet runner exceeded \(self.runnerTimeout)s; terminating process")
+            process.terminate()
+            _ = completion.wait(timeout: .now() + 2)
+            if process.isRunning {
+                process.interrupt()
+            }
+            throw STTError.providerError(
+                message: "Parakeet local inference timed out. Try again, or use Repair Parakeet Runtime in Settings → Provider."
+            )
+        }
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+        let trailingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let trailingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        if !trailingStdout.isEmpty { stdoutData.append(trailingStdout) }
+        if !trailingStderr.isEmpty { stderrData.append(trailingStderr) }
+
+        let stdout = String(data: stdoutData as Data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stderr = String(data: stderrData as Data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         guard process.terminationStatus == 0 else {
             let details = !stderr.isEmpty ? stderr : stdout
@@ -344,6 +393,18 @@ private extension ParakeetSTTProvider {
 // MARK: - State Helpers
 
 private extension ParakeetSTTProvider {
+    static func isValidationCached(for key: String) -> Bool {
+        validationLock.lock()
+        defer { validationLock.unlock() }
+        return validationCache.contains(key)
+    }
+
+    static func cacheValidation(for key: String) {
+        validationLock.lock()
+        validationCache.insert(key)
+        validationLock.unlock()
+    }
+
     var currentSessionActive: Bool {
         stateLock.lock()
         defer { stateLock.unlock() }

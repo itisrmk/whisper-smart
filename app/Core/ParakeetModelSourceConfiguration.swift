@@ -227,14 +227,6 @@ private extension ParakeetModelSourceConfigurationStore {
                     modelDataURLString: nil,
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/vocab.txt",
                     isBuiltIn: true
-                ),
-                ParakeetModelSourceOption(
-                    id: "hf_parakeet_ctc06b_full",
-                    displayName: "Hugging Face full ONNX (alternate)",
-                    modelURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.onnx",
-                    modelDataURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.onnx.data",
-                    tokenizerURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/vocab.txt",
-                    isBuiltIn: true
                 )
             ]
         default:

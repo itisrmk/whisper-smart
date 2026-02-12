@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private lazy var menuBar = MenuBarController(stateSubject: bubbleState)
     private lazy var bubblePanel = BubblePanelController(stateSubject: bubbleState)
+    private lazy var topCenterOverlayPanel = TopCenterOverlayPanelController(stateSubject: bubbleState)
     private lazy var settingsWindow = SettingsWindowController()
 
     // MARK: - Core
@@ -25,18 +26,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var initialProviderResolution = STTProviderResolver.resolve(for: STTProviderKind.loadSelection())
     private lazy var sttProvider: STTProvider = initialProviderResolution.provider
     private lazy var injector = ClipboardInjector()
+    private lazy var postProcessingPipeline = TranscriptPostProcessingPipeline(
+        processors: [
+            VoiceCommandFormattingProcessor(),
+            BaselineFillerWordTrimmer(),
+            BaselineSpacingAndPunctuationNormalizer(),
+            SmartSentenceCasingProcessor(),
+            CorrectionDictionaryProcessor(),
+            SnippetExpansionProcessor(),
+            AppStyleProfileProcessor(),
+            DeveloperDictationProcessor(),
+        ],
+        isEnabled: { DictationFeatureFlags.postProcessingPipelineEnabled }
+    )
+    private lazy var commandModeRouter = FeatureFlaggedCommandModeRouter(
+        isEnabled: { DictationFeatureFlags.commandModeScaffoldEnabled }
+    )
 
     private lazy var stateMachine = DictationStateMachine(
         hotkeyMonitor: hotkeyMonitor,
         audioCapture: audioCapture,
         sttProvider: sttProvider,
-        injector: injector
+        injector: injector,
+        postProcessingPipeline: postProcessingPipeline,
+        commandModeRouter: commandModeRouter
     )
 
     private var bindingObserver: NSObjectProtocol?
     private var providerObserver: NSObjectProtocol?
     private var parakeetBootstrapObserver: NSObjectProtocol?
     private var parakeetModelSourceObserver: NSObjectProtocol?
+    private var transcriptLogObserver: NSObjectProtocol?
+    private var userDefaultsObserver: NSObjectProtocol?
+
+    private let recordingSoundPlayer = RecordingSoundPlayer.shared
+    private var previousCoreState: DictationStateMachine.State = .idle
+
+    private var accessibilityRetryWork: DispatchWorkItem?
+    private var accessibilityRetryAttempt = 0
+    private let maxAccessibilityRetryAttempts = 5
+    private let accessibilityRetryDelay: TimeInterval = 3.0
+
+    private var recordStartAt: Date?
+    private var transcribeStartAt: Date?
+    private var latestTranscriptForLog: String = ""
+    private var activeAppNameForLog: String = "Unknown"
+    private var usesProviderFallback = false
+    private var healthBadgeLabel = ""
+    private var activityBadgeLabel = ""
 
     // MARK: - Lifecycle
 
@@ -48,7 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PermissionDiagnostics.logAll()
 
         menuBar.install()
-        bubblePanel.show()
+        menuBar.updateDictationAction(for: stateMachine.state)
+        updateBubbleVisibility(for: stateMachine.state)
 
         publishProviderDiagnostics(initialProviderResolution.diagnostics)
 
@@ -57,6 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeProviderChanges()
         observeParakeetBootstrapChanges()
         observeParakeetModelSourceChanges()
+        observeTranscriptLogActions()
+        observeOverlaySettingsChanges()
+        scheduleProviderWarmupIfNeeded()
 
         // Request all permissions in the correct order, then activate
         // the hotkey monitor once we know the permission landscape.
@@ -84,31 +125,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Periodically checks if Accessibility was granted after the initial
     /// prompt. Retries hotkey monitor start once permission appears.
     private func scheduleAccessibilityRetry() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+        guard accessibilityRetryWork == nil else { return }
+        guard accessibilityRetryAttempt < maxAccessibilityRetryAttempts else {
+            logger.warning("Accessibility auto-retry exhausted (\(self.maxAccessibilityRetryAttempts) attempts)")
+            return
+        }
+
+        accessibilityRetryAttempt += 1
+        let attempt = accessibilityRetryAttempt
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            self.accessibilityRetryWork = nil
+
             if PermissionDiagnostics.accessibilityStatus().isUsable {
-                logger.info("Accessibility permission now granted — starting hotkey monitor")
-                self.retryHotkeyMonitor()
+                logger.info("Accessibility permission granted during auto-retry attempt \(attempt)")
+                self.retryHotkeyMonitor(source: "auto")
             } else if case .error = self.stateMachine.state {
-                // Still waiting — keep polling
                 self.scheduleAccessibilityRetry()
             }
         }
+
+        accessibilityRetryWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + accessibilityRetryDelay, execute: work)
     }
 
     /// Public entry point for manually retrying the hotkey monitor
     /// (e.g. from a menu item after granting Accessibility).
-    func retryHotkeyMonitor() {
+    func retryHotkeyMonitor(source: String = "manual") {
+        accessibilityRetryWork?.cancel()
+        accessibilityRetryWork = nil
+
         let snap = PermissionDiagnostics.snapshot()
         if snap.accessibility.isUsable {
             stateMachine.deactivate()
             stateMachine.activate()
-            logger.info("Hotkey monitor retry triggered (accessibility=\(snap.accessibility.rawValue))")
+            accessibilityRetryAttempt = 0
+            logger.info("Hotkey monitor retry triggered source=\(source, privacy: .public) accessibility=\(snap.accessibility.rawValue)")
         } else {
-            let msg = "Accessibility permission still missing. Grant access in System Settings → Privacy & Security → Accessibility."
+            let msg = "Accessibility permission still missing. Grant access in System Settings → Privacy & Security → Accessibility, then retry manually from the menu."
             bubbleState.transition(to: .error, errorDetail: msg)
             menuBar.updateIcon(for: .error)
             menuBar.updateErrorDetail(msg)
+            logger.info("Hotkey monitor retry skipped source=\(source, privacy: .public); accessibility missing")
         }
     }
 
@@ -119,6 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        accessibilityRetryWork?.cancel()
+        accessibilityRetryWork = nil
         stateMachine.deactivate()
         if let observer = bindingObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -132,6 +192,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let observer = parakeetModelSourceObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = transcriptLogObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = userDefaultsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Wiring
@@ -140,24 +206,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Bridge DictationStateMachine.State → BubbleState for UI
         stateMachine.onStateChange = { [weak self] coreState in
             guard let self else { return }
+            self.playRecordingSoundsIfNeeded(next: coreState)
+
             let uiState = self.mapCoreState(coreState)
             let detail = self.errorDetail(for: coreState)
             self.bubbleState.transition(to: uiState, errorDetail: detail)
+            self.updateBubbleVisibility(for: coreState)
             self.menuBar.updateIcon(for: uiState)
+            self.menuBar.updateDictationAction(for: coreState)
+            self.updateActivityBadge(for: coreState)
             if let detail {
                 self.menuBar.updateErrorDetail(detail)
             }
+
+            self.previousCoreState = coreState
         }
 
-        // Menu bar "Start/Stop Dictation" toggles the state machine
+        stateMachine.onAudioLevelChange = { [weak self] level in
+            self?.bubbleState.updateAudioLevel(level)
+        }
+
+        stateMachine.onTranscriptChange = { [weak self] text in
+            self?.bubbleState.updateLiveTranscript(text)
+            self?.latestTranscriptForLog = text
+        }
+
+        // Menu bar dictation action runs a one-shot dictation session so
+        // the action label always matches behavior.
         menuBar.onToggleDictation = { [weak self] in
             guard let self else { return }
-            if self.stateMachine.state == .idle {
-                // Manually trigger a hold-start for menu-driven activation.
-                // In normal use the hotkey monitor drives this.
-                self.stateMachine.activate()
-            } else {
-                self.stateMachine.deactivate()
+            switch self.stateMachine.state {
+            case .recording:
+                self.stateMachine.stopOneShotRecording()
+            case .idle, .success, .error:
+                self.stateMachine.startOneShotRecording()
+            case .transcribing:
+                break
             }
         }
 
@@ -236,19 +320,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleParakeetBootstrapStatusChange() {
-        let bootstrapPhase = ParakeetRuntimeBootstrapManager.shared.statusSnapshot().phase
-        switch bootstrapPhase {
-        case .idle, .bootstrapping:
-            refreshProviderDiagnostics(logReason: "Parakeet runtime bootstrap status changed")
-        case .ready, .failed:
-            switch stateMachine.state {
-            case .idle, .error:
-                refreshProviderResolution(logReason: "Parakeet runtime bootstrap status changed")
-            case .recording, .transcribing:
-                refreshProviderDiagnostics(logReason: "Parakeet runtime bootstrap status changed")
-            }
+    private func observeTranscriptLogActions() {
+        transcriptLogObserver = NotificationCenter.default.addObserver(
+            forName: .transcriptLogReinsertRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let text = notification.userInfo?["text"] as? String else { return }
+            self.injector.inject(text: text)
         }
+    }
+
+    private func observeOverlaySettingsChanges() {
+        userDefaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.updateBubbleVisibility(for: self.stateMachine.state)
+        }
+    }
+
+    private func handleParakeetBootstrapStatusChange() {
+        // Important: never hot-swap the provider purely because bootstrap phase
+        // changed. Doing so can race with an in-flight beginSession() and cause
+        // endSession() to run on a different provider instance.
+        refreshProviderDiagnostics(logReason: "Parakeet runtime bootstrap status changed")
     }
 
     private func refreshProviderDiagnostics(logReason: String) {
@@ -256,6 +355,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logger.info("\(logReason, privacy: .public): diagnostics-only refresh kind=\(kind.rawValue, privacy: .public)")
         let diagnostics = STTProviderResolver.diagnostics(for: kind)
         publishProviderDiagnostics(diagnostics)
+    }
+
+    private func scheduleProviderWarmupIfNeeded() {
+        let selected = STTProviderKind.loadSelection()
+        guard selected == .parakeet else { return }
+
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                _ = try ParakeetRuntimeBootstrapManager.shared.ensureRuntimeReady()
+                logger.info("Parakeet warmup complete")
+            } catch {
+                logger.warning("Parakeet warmup failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     private func refreshProviderResolution(logReason: String) {
@@ -268,20 +381,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logger.info("Replacing state-machine provider with: \(self.sttProvider.displayName, privacy: .public)")
         self.stateMachine.replaceProvider(self.sttProvider)
 
-        // When state was left in error from a prior provider, clear stale
-        // error state and stale UI once we have a usable replacement.
-        if stateMachine.state.isError && resolution.diagnostics.healthLevel != .unavailable {
-            logger.info("Clearing stale error state/UI after provider refresh")
-            stateMachine.replaceProvider(self.sttProvider)
-            let uiState: BubbleState = .idle
-            bubbleState.transition(to: uiState)
-            menuBar.updateIcon(for: uiState)
-        }
+        // A successful provider swap forces non-idle/error states back to
+        // idle inside `replaceProvider`, so we intentionally avoid a second
+        // replacement pass here.
     }
 
     private func publishProviderDiagnostics(_ diagnostics: ProviderRuntimeDiagnostics) {
         ProviderRuntimeDiagnosticsStore.shared.publish(diagnostics)
         menuBar.updateProviderDiagnostics(diagnostics)
+
+        usesProviderFallback = diagnostics.usesFallback
+        healthBadgeLabel = diagnostics.usesFallback ? "Fallback" : diagnostics.healthLevel.rawValue
+        bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
 
         logger.info(
             "Provider diagnostics health=\(diagnostics.healthLevel.rawValue, privacy: .public) requested=\(diagnostics.requestedKind.rawValue, privacy: .public) effective=\(diagnostics.effectiveKind.rawValue, privacy: .public)"
@@ -289,6 +400,120 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let fallbackReason = diagnostics.fallbackReason {
             logger.warning("Provider fallback reason: \(fallbackReason, privacy: .public)")
+        }
+    }
+
+    // MARK: - Bubble Badges
+
+    private func updateActivityBadge(for state: DictationStateMachine.State) {
+        let now = Date()
+        switch state {
+        case .recording:
+            recordStartAt = now
+            transcribeStartAt = nil
+            latestTranscriptForLog = ""
+            activeAppNameForLog = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
+            activityBadgeLabel = "REC"
+            bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
+        case .transcribing:
+            transcribeStartAt = now
+            activityBadgeLabel = "STT"
+            bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
+        case .success:
+            let latencyMs: Int?
+            if let transcribeStartAt {
+                let ms = Int(now.timeIntervalSince(transcribeStartAt) * 1_000)
+                latencyMs = ms
+                activityBadgeLabel = "\(ms)ms"
+            } else {
+                latencyMs = nil
+                activityBadgeLabel = "Done"
+            }
+            bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
+
+            TranscriptLogStore.shared.append(
+                provider: sttProvider.displayName,
+                appName: activeAppNameForLog,
+                durationMs: latencyMs,
+                text: latestTranscriptForLog,
+                status: "inserted"
+            )
+
+            recordStartAt = nil
+            transcribeStartAt = nil
+            latestTranscriptForLog = ""
+        case .idle:
+            activityBadgeLabel = ""
+            bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
+            recordStartAt = nil
+            transcribeStartAt = nil
+        case .error:
+            activityBadgeLabel = "Issue"
+            bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
+            if !latestTranscriptForLog.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                TranscriptLogStore.shared.append(
+                    provider: sttProvider.displayName,
+                    appName: activeAppNameForLog,
+                    durationMs: nil,
+                    text: latestTranscriptForLog,
+                    status: "saved_error"
+                )
+            }
+            recordStartAt = nil
+            transcribeStartAt = nil
+            latestTranscriptForLog = ""
+        }
+    }
+
+    private func playRecordingSoundsIfNeeded(next state: DictationStateMachine.State) {
+        let wasRecording: Bool
+        if case .recording = previousCoreState {
+            wasRecording = true
+        } else {
+            wasRecording = false
+        }
+
+        let isRecording: Bool
+        if case .recording = state {
+            isRecording = true
+        } else {
+            isRecording = false
+        }
+
+        if !wasRecording && isRecording {
+            recordingSoundPlayer.playStartIfEnabled()
+        } else if wasRecording && !isRecording {
+            recordingSoundPlayer.playStopIfEnabled()
+        }
+    }
+
+    private func updateBubbleVisibility(for state: DictationStateMachine.State) {
+        let mode = DictationOverlaySettings.overlayMode
+        let shouldShowOverlay: Bool
+
+        switch state {
+        case .recording, .transcribing:
+            shouldShowOverlay = true
+        case .idle, .success, .error:
+            shouldShowOverlay = false
+        }
+
+        guard shouldShowOverlay else {
+            bubblePanel.hide()
+            topCenterOverlayPanel.hide()
+            return
+        }
+
+        switch mode {
+        case .off:
+            bubblePanel.hide()
+            topCenterOverlayPanel.hide()
+        case .floatingBubble:
+            topCenterOverlayPanel.hide()
+            bubblePanel.show()
+        case .topCenterWaveform:
+            bubblePanel.hide()
+            topCenterOverlayPanel.show()
         }
     }
 
@@ -300,6 +525,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .idle:         return .idle
         case .recording:    return .listening
         case .transcribing: return .transcribing
+        case .success:      return .success
         case .error:        return .error
         }
     }

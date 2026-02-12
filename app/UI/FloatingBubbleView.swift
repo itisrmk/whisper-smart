@@ -14,6 +14,8 @@ struct FloatingBubbleView: View {
 
     @State private var pulseScale: CGFloat = 1.0
     @State private var glowOpacity: Double = 0.5
+    @State private var successPulseScale: CGFloat = 0.9
+    @State private var successPulseOpacity: Double = 0
 
     var body: some View {
         ZStack {
@@ -115,6 +117,14 @@ struct FloatingBubbleView: View {
                         )
                 )
 
+            if state == .success {
+                Circle()
+                    .stroke(VFColor.success.opacity(0.55), lineWidth: 2)
+                    .frame(width: VFSize.bubbleDiameter + 10, height: VFSize.bubbleDiameter + 10)
+                    .scaleEffect(successPulseScale)
+                    .opacity(successPulseOpacity)
+            }
+
             // ── Centre content: waveform bars when listening, icon otherwise ──
             if state == .listening {
                 WaveformBarView(
@@ -136,6 +146,15 @@ struct FloatingBubbleView: View {
                height: VFSize.bubbleDiameter + 48)
         .contentShape(Circle())
         .onTapGesture { onTap?() }
+        .onChange(of: state) {
+            guard state == .success else { return }
+            successPulseScale = 0.9
+            successPulseOpacity = 0.8
+            withAnimation(.easeOut(duration: 0.38)) {
+                successPulseScale = 1.4
+                successPulseOpacity = 0
+            }
+        }
         .animation(VFAnimation.springSnappy, value: state)
     }
 }
@@ -144,6 +163,7 @@ struct FloatingBubbleView: View {
 struct FloatingBubbleWithLabel: View {
     @EnvironmentObject var stateSubject: BubbleStateSubject
 
+    var compactMode: Bool = false
     var onTap: (() -> Void)?
 
     var body: some View {
@@ -154,38 +174,86 @@ struct FloatingBubbleWithLabel: View {
                 onTap: onTap
             )
 
-            // ── Neumorphic pill label ──
-            Text(bubbleLabelText)
-                .font(VFFont.bubbleStatus)
-                .foregroundStyle(VFColor.textOnOverlay)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 200)
-                .padding(.horizontal, VFSpacing.md)
-                .padding(.vertical, VFSpacing.xs + 1)
-                .background(
-                    Capsule()
-                        .fill(VFColor.glass2)
-                        .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
-                        .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
-                        .overlay(
-                            Capsule()
-                                .stroke(
-                                    LinearGradient(
-                                        stops: [
-                                            .init(color: Color.white.opacity(0.10), location: 0),
-                                            .init(color: .clear, location: 0.4),
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    ),
-                                    lineWidth: 0.5
+            if !compactMode {
+                HStack(spacing: VFSpacing.xs) {
+                    if !stateSubject.activityBadge.isEmpty {
+                        statusBadge(stateSubject.activityBadge, tint: VFColor.accentFallback)
+                    }
+                    if !stateSubject.healthBadge.isEmpty {
+                        statusBadge(stateSubject.healthBadge, tint: stateSubject.healthBadge == "Fallback" ? VFColor.error : VFColor.success)
+                    }
+                }
+
+                // ── Neumorphic pill label ──
+                Text(bubbleLabelText)
+                    .font(VFFont.bubbleStatus)
+                    .foregroundStyle(VFColor.textOnOverlay)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 220)
+                    .padding(.horizontal, VFSpacing.md)
+                    .padding(.vertical, VFSpacing.xs + 1)
+                    .background(
+                        Capsule()
+                            .fill(VFColor.glass2)
+                            .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                            .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
+                            .overlay(
+                                Capsule()
+                                    .stroke(
+                                        LinearGradient(
+                                            stops: [
+                                                .init(color: Color.white.opacity(0.10), location: 0),
+                                                .init(color: .clear, location: 0.4),
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        ),
+                                        lineWidth: 0.5
+                                    )
+                            )
+                    )
+                    .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+
+                if !stateSubject.liveTranscript.isEmpty && stateSubject.state != .idle {
+                    Text(stateSubject.liveTranscript)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(VFColor.textSecondary)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .frame(width: 220, alignment: .leading)
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(
+                            RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
+                                .fill(VFColor.glass1.opacity(0.9))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
+                                        .stroke(VFColor.glassBorder, lineWidth: 0.5)
                                 )
                         )
-                )
-                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
         }
         .animation(VFAnimation.fadeMedium, value: stateSubject.state)
+        .animation(VFAnimation.fadeMedium, value: stateSubject.liveTranscript)
+    }
+
+    @ViewBuilder
+    private func statusBadge(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold, design: .rounded))
+            .foregroundStyle(VFColor.textPrimary)
+            .padding(.horizontal, VFSpacing.sm)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.20))
+                    .overlay(
+                        Capsule().stroke(tint.opacity(0.45), lineWidth: 0.5)
+                    )
+            )
     }
 
     /// When in error state, show the specific error detail instead of

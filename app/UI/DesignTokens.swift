@@ -153,7 +153,7 @@ enum VFRadius {
 }
 
 enum VFSize {
-    static let bubbleDiameter:  CGFloat = 56
+    static let bubbleDiameter:  CGFloat = 40
     static let menuBarIcon:     CGFloat = 18
     static let settingsWidth:   CGFloat = 520
     static let settingsHeight:  CGFloat = 640

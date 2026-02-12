@@ -2,12 +2,16 @@
 
 ## Overview
 
-VisperflowClone is a macOS menu-bar utility that provides system-wide
-press-and-hold dictation. The user holds a hotkey, speaks, releases the key,
-and the transcribed text is injected into whatever app has focus.
+VisperflowClone is a macOS menu-bar dictation app with two primary interaction paths:
 
-The core logic lives in **`app/Core/`** and is intentionally decoupled from any
-UI framework so it can be driven by SwiftUI, AppKit, or unit tests.
+1. **Press-and-hold hotkey dictation** (global event tap)
+2. **Menu-driven one-shot dictation** (explicit start/stop action)
+
+Core pipeline:
+
+`Hotkey/Menu Trigger → AudioCaptureService → STTProvider → ClipboardInjector`
+
+`AppDelegate` wires dependencies and bridges core lifecycle state to UI state.
 
 ---
 
@@ -15,122 +19,115 @@ UI framework so it can be driven by SwiftUI, AppKit, or unit tests.
 
 ```
 app/
-└── Core/
-    ├── HotkeyMonitor.swift          # Global hotkey listener
-    ├── AudioCaptureService.swift     # Microphone capture via AVAudioEngine
-    ├── STTProvider.swift             # Speech-to-text protocol + stub
-    ├── ClipboardInjector.swift       # Text injection into frontmost app
-    └── DictationStateMachine.swift   # Orchestrator / state machine
+├── App/
+│   ├── main.swift
+│   └── AppDelegate.swift
+├── Core/
+│   ├── DictationStateMachine.swift
+│   ├── HotkeyMonitor.swift
+│   ├── AudioCaptureService.swift
+│   ├── STTProvider.swift
+│   ├── AppleSpeechSTTProvider.swift
+│   ├── ParakeetSTTProvider.swift
+│   ├── STTProviderDiagnostics.swift
+│   ├── ClipboardInjector.swift
+│   └── (Parakeet runtime/model support files)
+└── UI/
+    ├── MenuBarController.swift
+    ├── BubblePanelController.swift
+    ├── FloatingBubbleView.swift
+    └── Settings*.swift
 ```
 
 ---
 
-## Modules
+## Dictation Lifecycle
 
-### HotkeyMonitor
+`DictationStateMachine.State`:
 
-| Responsibility | Detect press-and-hold of a configurable global hotkey |
-|---|---|
-| Key API | `start()`, `stop()`, `onHoldStarted`, `onHoldEnded` |
-| Mechanism | `CGEvent.tapCreate` (session-level, listen-only) |
-| Permissions | Requires **Accessibility** (System Settings → Privacy) |
-| Threading | Callbacks fire on the main run-loop |
+- `.idle`
+- `.recording`
+- `.transcribing`
+- `.success` (brief micro-state after final transcript/injection)
+- `.error(String)`
 
-The monitor distinguishes a deliberate hold from a quick tap via a configurable
-`minimumHoldDuration` (default 0.3 s). Modifier-only keys (⌘, ⌥, ⇧, ⌃) are
-handled through `.flagsChanged` events.
-
-### AudioCaptureService
-
-| Responsibility | Capture microphone audio as PCM buffers |
-|---|---|
-| Key API | `start()`, `stop()`, `onBuffer`, `onError` |
-| Mechanism | `AVAudioEngine` input-node tap |
-| Output format | Float32, 16 kHz, mono (configurable) |
-| Permissions | Requires **Microphone** (granted via `AVCaptureDevice.requestAccess`) |
-
-The engine handles sample-rate conversion transparently when the hardware rate
-differs from the requested rate. Buffers are delivered on the audio engine's
-real-time thread; consumers should copy data off-thread for heavy processing.
-
-### STTProvider (Protocol)
-
-| Responsibility | Convert audio buffers into text |
-|---|---|
-| Key API | `beginSession()`, `feedAudio(buffer:time:)`, `endSession()`, `onResult`, `onError` |
-| Deliverable | `STTResult` with `.text`, `.isPartial`, `.confidence` |
-
-This is a protocol so backends can be swapped at runtime:
-
-| Provider | Status | Notes |
-|---|---|---|
-| `StubSTTProvider` | Included | No-op placeholder for dev/test |
-| `WhisperLocalProvider` | TODO | On-device via whisper.cpp |
-| `WhisperAPIProvider` | TODO | OpenAI Whisper REST API |
-| `AppleSpeechProvider` | TODO | Apple Speech framework |
-
-### ClipboardInjector
-
-| Responsibility | Deliver transcribed text to the focused text field |
-|---|---|
-| Key API | `inject(text:)` |
-| Strategies | `.pasteboard` (default) — copies text, synthesises ⌘V |
-|             | `.keyEvents` — character-by-character CGEvent posting (TODO) |
-
-The pasteboard strategy saves & restores the user's clipboard so dictation
-doesn't clobber copied content.
-
-### DictationStateMachine
-
-| Responsibility | Orchestrate the full dictation lifecycle |
-|---|---|
-| Key API | `activate()`, `deactivate()`, `onStateChange` |
-
-State diagram:
+Lifecycle:
 
 ```
-  ┌──────┐  hold started   ┌───────────┐  hold ended   ┌──────────────┐
-  │ Idle │ ───────────────▶ │ Recording │ ────────────▶ │ Transcribing │
-  └──────┘                  └───────────┘               └──────┬───────┘
-      ▲                                                        │
-      │              result received / error                   │
-      └────────────────────────────────────────────────────────┘
+idle -> recording -> transcribing -> success -> idle
+                    \-> error
 ```
 
-The state machine owns instances of all four modules above, wires their
-callbacks together, and exposes a single `onStateChange` callback for the UI
-layer to observe.
+Notes:
+- `success` is transient and automatically resets to `idle`.
+- Final text injection happens on non-partial STT result before entering `success`.
+- Provider swap (`replaceProvider`) is a single replacement path and resets active sessions safely.
 
 ---
 
-## Threading Model
+## Provider System (Current Truth)
 
-| Thread | Used by |
-|---|---|
-| Main run-loop | HotkeyMonitor callbacks, state transitions, UI updates |
-| AVAudioEngine real-time thread | `AudioCaptureService.onBuffer` delivery |
-| Background (provider-defined) | STT inference / network calls |
+`STTProvider` protocol supports begin/feed/end session callbacks and result/error delivery.
 
-STT results and errors are dispatched back to the main queue by the state
-machine before being acted upon.
+### Implemented providers
+
+- ✅ **Apple Speech** (`AppleSpeechSTTProvider`)
+  - Native Speech framework path
+  - Emits partial + final callbacks
+- ✅ **Parakeet local** (`ParakeetSTTProvider`)
+  - Local ONNX inference via Python runner (`scripts/parakeet_infer.py`)
+  - Integrates model source validation + runtime bootstrap status
+
+### Declared but not implemented providers
+
+- ⚠️ Whisper local
+- ⚠️ Whisper API
+
+Resolver/diagnostics selects effective provider and publishes fallback reason when requested provider is unavailable.
 
 ---
 
-## Permissions Required
+## UI State Mapping
 
-| Permission | Purpose | Prompt trigger |
-|---|---|---|
-| Accessibility | Global hotkey monitoring via CGEvent tap | First `HotkeyMonitor.start()` |
-| Microphone | Audio capture | First `AudioCaptureService.start()` |
+`AppDelegate` maps core state to `BubbleState`:
+
+- `idle -> .idle`
+- `recording -> .listening`
+- `transcribing -> .transcribing`
+- `success -> .success`
+- `error -> .error`
+
+`MenuBarController` keeps action labels aligned with behavior:
+
+- Idle/success/error: **Start Dictation**
+- Recording: **Stop Dictation**
+- Transcribing: **Transcribing…** (disabled)
 
 ---
 
-## Open TODOs
+## Permissions
 
-- [ ] Implement a real `STTProvider` (whisper.cpp or OpenAI API)
-- [ ] Implement `ClipboardInjector.keyEvents` strategy for non-pasteboard injection
-- [ ] Add CoreAudio device-change listener in `AudioCaptureService` for mic hot-swap
-- [ ] Add microphone permission request flow before capture starts
-- [ ] Surface Accessibility permission status to the UI
-- [ ] Add live partial-result overlay during recording
-- [ ] Unit tests for `DictationStateMachine` state transitions
+- Accessibility (global hotkey monitor/event tap)
+- Input Monitoring (global key capture reliability)
+- Microphone (audio capture)
+- Speech Recognition (Apple Speech provider)
+
+`PermissionDiagnostics` logs and surfaces runtime status.
+
+---
+
+## Reliability Behavior (Phase 1)
+
+- `ClipboardInjector` now uses explicit strategy order:
+  1. Accessibility insertion into focused text element (`AXValue` + `AXSelectedTextRange`).
+  2. Pasteboard + Cmd-V fallback.
+- Pasteboard fallback captures/restores full pasteboard items/types (data + property list forms) and only restores when clipboard change count is unchanged, preventing clobber of user copies made during injection.
+- `AudioCaptureService` now emits interruption hooks for:
+  - `AVAudioEngineConfigurationChange`
+  - default input-device changes (`kAudioHardwarePropertyDefaultInputDevice` listener)
+- `DictationStateMachine` treats interruption/device-change as safe-stop errors with explicit manual retry messaging (no hidden automatic retry).
+- Accessibility hotkey monitor retry policy is explicit and bounded (single pending retry task, max attempts), avoiding duplicate retry loops.
+
+## Known Gaps / Next Reliability Work
+
+- Audio-level waveform plumbing + partial transcript overlay are still limited.

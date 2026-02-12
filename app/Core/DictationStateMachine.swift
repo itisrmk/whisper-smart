@@ -1,4 +1,6 @@
 import Foundation
+import CoreGraphics
+import AVFoundation
 import os.log
 
 private let logger = Logger(subsystem: "com.visperflow", category: "DictationSM")
@@ -26,12 +28,14 @@ final class DictationStateMachine {
         case recording
         /// Hotkey released; waiting for the STT provider to deliver final text.
         case transcribing
+        /// Final transcript completed and injected; shown briefly before idle.
+        case success
         /// A non-recoverable error occurred; UI should display a message.
         case error(String)
 
         static func == (lhs: State, rhs: State) -> Bool {
             switch (lhs, rhs) {
-            case (.idle, .idle), (.recording, .recording), (.transcribing, .transcribing):
+            case (.idle, .idle), (.recording, .recording), (.transcribing, .transcribing), (.success, .success):
                 return true
             case (.error(let a), .error(let b)):
                 return a == b
@@ -55,31 +59,61 @@ final class DictationStateMachine {
 
     /// Notifies observers (typically the UI) whenever the state changes.
     var onStateChange: ((State) -> Void)?
+    /// Streaming microphone level (0...1) while recording.
+    var onAudioLevelChange: ((CGFloat) -> Void)?
+    /// Streaming transcript text (partial + final) during recording/transcribing.
+    var onTranscriptChange: ((String) -> Void)?
 
     // MARK: - Dependencies
 
-    private let hotkeyMonitor: HotkeyMonitor
-    private let audioCapture: AudioCaptureService
+    private let hotkeyMonitor: HotkeyMonitoring
+    private let audioCapture: AudioCapturing
     private var sttProvider: STTProvider
-    private let injector: ClipboardInjector
+    private let injector: TextInjecting
+    private let postProcessingPipeline: TranscriptPostProcessingPipeline
+    private let commandModeRouter: CommandModeRouter
+    private let microphoneAuthorizationStatus: () -> AVAuthorizationStatus
+    private let requestMicrophoneAccess: (@escaping (Bool) -> Void) -> Void
 
-    /// Timeout for the transcribing state. If the STT provider never delivers
-    /// a result or error, recover to idle after this interval.
-    private let transcribingTimeout: TimeInterval = 30.0
+    /// Timeout work item for the transcribing state. Actual timeout is derived
+    /// from the active provider (`sttProvider.transcriptionTimeout`).
     private var transcribingTimeoutWork: DispatchWorkItem?
+    private let successDisplayDuration: TimeInterval = 0.45
+    private var successResetWork: DispatchWorkItem?
+    private var oneShotModePendingStart = false
+    private var oneShotModeActive = false
+    private var silenceAutoStopWork: DispatchWorkItem?
+    private var lastDetectedSpeechAt: Date?
+    private var detectedSpeechInCurrentRecording = false
+    private var sessionStartedAt: Date?
+    private var transcribingStartedAt: Date?
+
+    /// Explicit retry policy: this state machine does not auto-retry failed
+    /// dictation sessions. Users must explicitly initiate a new recording.
+    private let automaticRetryEnabled = false
 
     // MARK: - Init
 
     init(
-        hotkeyMonitor: HotkeyMonitor,
-        audioCapture: AudioCaptureService,
+        hotkeyMonitor: HotkeyMonitoring,
+        audioCapture: AudioCapturing,
         sttProvider: STTProvider,
-        injector: ClipboardInjector
+        injector: TextInjecting,
+        postProcessingPipeline: TranscriptPostProcessingPipeline,
+        commandModeRouter: CommandModeRouter,
+        microphoneAuthorizationStatus: @escaping () -> AVAuthorizationStatus = { AudioCaptureService.microphoneAuthorizationStatus() },
+        requestMicrophoneAccess: @escaping (@escaping (Bool) -> Void) -> Void = { completion in
+            AudioCaptureService.requestMicrophoneAccess(completion: completion)
+        }
     ) {
         self.hotkeyMonitor = hotkeyMonitor
         self.audioCapture  = audioCapture
         self.sttProvider   = sttProvider
         self.injector      = injector
+        self.postProcessingPipeline = postProcessingPipeline
+        self.commandModeRouter = commandModeRouter
+        self.microphoneAuthorizationStatus = microphoneAuthorizationStatus
+        self.requestMicrophoneAccess = requestMicrophoneAccess
 
         wireCallbacks()
     }
@@ -108,11 +142,22 @@ final class DictationStateMachine {
             self?.sttProvider.feedAudio(buffer: buffer, time: time)
         }
 
+        audioCapture.onAudioLevel = { [weak self] level in
+            self?.onAudioLevelChange?(CGFloat(level))
+            self?.handleAudioLevel(level)
+        }
+
         // Audio error → surface
         audioCapture.onError = { [weak self] error in
             DispatchQueue.main.async {
                 logger.error("Audio capture error: \(error.localizedDescription)")
-                self?.transition(to: .error(error.localizedDescription))
+                self?.recoverFromCaptureFailure(message: error.localizedDescription)
+            }
+        }
+
+        audioCapture.onInterruption = { [weak self] reason in
+            DispatchQueue.main.async {
+                self?.handleAudioInterruption(reason)
             }
         }
 
@@ -167,10 +212,17 @@ final class DictationStateMachine {
         hotkeyMonitor.stop()
         audioCapture.stop()
         cancelTranscribingTimeout()
+        cancelSuccessReset()
+        cancelSilenceAutoStopWatchdog()
         // Only end the session if we were actively using the provider.
         if state == .recording || state == .transcribing {
             sttProvider.endSession()
         }
+        onAudioLevelChange?(0)
+        onTranscriptChange?("")
+        detectedSpeechInCurrentRecording = false
+        sessionStartedAt = nil
+        transcribingStartedAt = nil
         transition(to: .idle)
     }
 
@@ -196,6 +248,11 @@ final class DictationStateMachine {
         }
 
         cancelTranscribingTimeout()
+        cancelSuccessReset()
+        cancelSilenceAutoStopWatchdog()
+        oneShotModeActive = false
+        oneShotModePendingStart = false
+        detectedSpeechInCurrentRecording = false
 
         if priorState == .recording {
             audioCapture.stop()
@@ -220,27 +277,34 @@ final class DictationStateMachine {
     ///
     /// The caller is responsible for calling `stopOneShotRecording()` to end it.
     func startOneShotRecording() {
-        guard state == .idle || state.isError else {
-            logger.warning("One-shot recording: not idle/error, ignoring (state=\(String(describing: self.state)))")
+        guard state == .idle || state == .success || state.isError else {
+            logger.warning("One-shot recording: not idle/success/error, ignoring (state=\(String(describing: self.state)))")
             return
         }
 
-        // Reset error state so we can attempt recording
-        if state.isError {
+        // Reset terminal states so we can attempt recording
+        if state == .success || state.isError {
             transition(to: .idle)
         }
 
+        onTranscriptChange?("")
+        oneShotModePendingStart = true
         handleHoldStarted()
     }
 
     /// Ends a one-shot recording session (simulates hotkey release).
     func stopOneShotRecording() {
+        oneShotModePendingStart = false
         handleHoldEnded()
     }
 
     // MARK: - State transitions
 
     private func handleHoldStarted() {
+        if state == .success {
+            cancelSuccessReset()
+            transition(to: .idle)
+        }
         if state.isError {
             logger.info("Hold-start received in error state — recovering to idle before recording")
             transition(to: .idle)
@@ -248,10 +312,10 @@ final class DictationStateMachine {
         guard state == .idle else { return }
 
         // Pre-flight: check microphone permission before attempting capture.
-        let micStatus = AudioCaptureService.microphoneAuthorizationStatus()
+        let micStatus = microphoneAuthorizationStatus()
         if micStatus == .notDetermined {
             logger.info("Microphone permission not yet determined — requesting")
-            AudioCaptureService.requestMicrophoneAccess { [weak self] granted in
+            requestMicrophoneAccess { [weak self] granted in
                 if granted {
                     logger.info("Microphone permission granted")
                     self?.beginRecordingSession()
@@ -271,12 +335,22 @@ final class DictationStateMachine {
 
         let providerName = sttProvider.displayName
         var didBeginSTTSession = false
+        onTranscriptChange?("")
 
         do {
             logger.info("Starting recording session with provider: \(providerName, privacy: .public)")
             try sttProvider.beginSession()
             didBeginSTTSession = true
             try audioCapture.start()
+            oneShotModeActive = oneShotModePendingStart
+            oneShotModePendingStart = false
+            detectedSpeechInCurrentRecording = false
+            lastDetectedSpeechAt = Date()
+            if oneShotModeActive {
+                scheduleSilenceAutoStopWatchdog()
+            }
+            sessionStartedAt = Date()
+            transcribingStartedAt = nil
             logger.info("Recording session started with provider: \(providerName, privacy: .public)")
             transition(to: .recording)
         } catch {
@@ -291,10 +365,20 @@ final class DictationStateMachine {
     private func handleHoldEnded() {
         guard state == .recording else { return }
 
+        cancelSilenceAutoStopWatchdog()
+        oneShotModeActive = false
+        detectedSpeechInCurrentRecording = false
+
         audioCapture.stop()
+        if let sessionStartedAt {
+            let recordMs = Int(Date().timeIntervalSince(sessionStartedAt) * 1000)
+            logger.info("Dictation timing: recordingDurationMs=\(recordMs)")
+        }
+
         // Transition to .transcribing BEFORE endSession() so that synchronous
         // result delivery (e.g. StubSTTProvider) finds the machine in the
         // correct state.
+        transcribingStartedAt = Date()
         transition(to: .transcribing)
         scheduleTranscribingTimeout()
         sttProvider.endSession()
@@ -306,37 +390,152 @@ final class DictationStateMachine {
             return
         }
 
+        let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let processed = postProcessingPipeline.process(trimmed, isFinal: !result.isPartial)
+        onTranscriptChange?(processed)
+
         if !result.isPartial {
             cancelTranscribingTimeout()
-            let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                logger.info("Injecting transcription (\(trimmed.count) chars)")
-                injector.inject(text: trimmed)
-            } else {
-                logger.info("Transcription empty after trim, skipping injection")
+            let finalAt = Date()
+            if let transcribingStartedAt {
+                let sttMs = Int(finalAt.timeIntervalSince(transcribingStartedAt) * 1000)
+                logger.info("Dictation timing: transcribingDurationMs=\(sttMs)")
             }
-            transition(to: .idle)
+            if let sessionStartedAt {
+                let totalMs = Int(finalAt.timeIntervalSince(sessionStartedAt) * 1000)
+                logger.info("Dictation timing: endToEndMs=\(totalMs)")
+            }
+
+            let routingDecision = commandModeRouter.route(text: processed, isFinal: true)
+            if !routingDecision.textForInjection.isEmpty {
+                if routingDecision.mode == .commandCandidate {
+                    logger.info("Command-mode scaffold matched candidate; using passthrough injection for now")
+                }
+                logger.info("Injecting transcription (\(routingDecision.textForInjection.count) chars)")
+                injector.inject(text: routingDecision.textForInjection)
+            } else {
+                logger.info("Transcription empty after post-processing/routing, skipping injection")
+            }
+            sessionStartedAt = nil
+            transcribingStartedAt = nil
+            transition(to: .success)
+            scheduleSuccessReset()
         }
-        // TODO: Surface partial results to the UI overlay so the user
-        //       can see live transcription while still holding the key.
+    }
+
+    private func handleAudioLevel(_ level: Float) {
+        guard state == .recording, oneShotModeActive else { return }
+        if level >= 0.08 {
+            detectedSpeechInCurrentRecording = true
+            lastDetectedSpeechAt = Date()
+        }
+    }
+
+    private func scheduleSilenceAutoStopWatchdog() {
+        cancelSilenceAutoStopWatchdog()
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.state == .recording, self.oneShotModeActive else { return }
+
+            let now = Date()
+            let lastVoice = self.lastDetectedSpeechAt ?? now
+            let elapsed = now.timeIntervalSince(lastVoice)
+            let baseTimeout = DictationWorkflowSettings.silenceTimeoutSeconds
+            let timeout: TimeInterval
+            if self.detectedSpeechInCurrentRecording {
+                timeout = baseTimeout
+            } else {
+                // Faster endpoint when no speech has been detected at all.
+                timeout = min(baseTimeout, max(0.45, baseTimeout * 0.7))
+            }
+
+            if elapsed >= timeout {
+                logger.info("One-shot silence timeout reached (\(elapsed)s >= \(timeout)s, detectedSpeech=\(self.detectedSpeechInCurrentRecording)); auto-stopping recording")
+                self.handleHoldEnded()
+            } else {
+                self.scheduleSilenceAutoStopWatchdog()
+            }
+        }
+
+        silenceAutoStopWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10, execute: work)
+    }
+
+    private func cancelSilenceAutoStopWatchdog() {
+        silenceAutoStopWork?.cancel()
+        silenceAutoStopWork = nil
+    }
+
+    private func handleAudioInterruption(_ reason: AudioCaptureService.InterruptionReason) {
+        logger.warning("Handling audio interruption reason=\(reason.rawValue, privacy: .public) state=\(String(describing: self.state), privacy: .public)")
+        let message: String
+        switch reason {
+        case .engineConfigurationChanged:
+            message = "Audio capture was interrupted by a system audio reconfiguration. Dictation stopped safely. Press Start Dictation to retry."
+        case .defaultInputDeviceChanged:
+            message = "Input device changed while recording. Dictation stopped safely. Press Start Dictation to retry with the new microphone."
+        }
+        recoverFromCaptureFailure(message: message)
+    }
+
+    private func recoverFromCaptureFailure(message: String) {
+        cancelTranscribingTimeout()
+        cancelSuccessReset()
+        cancelSilenceAutoStopWatchdog()
+        oneShotModeActive = false
+        oneShotModePendingStart = false
+        detectedSpeechInCurrentRecording = false
+        sessionStartedAt = nil
+        transcribingStartedAt = nil
+
+        if state == .recording || state == .transcribing {
+            sttProvider.endSession()
+        }
+
+        if automaticRetryEnabled {
+            logger.warning("Automatic retry is enabled, but this build should not use automatic retries")
+        }
+
+        transition(to: .error(message))
     }
 
     private func transition(to newState: State) {
+        if newState != .success {
+            cancelSuccessReset()
+        }
         logger.info("State transition: \(String(describing: self.state)) → \(String(describing: newState))")
         state = newState
+    }
+
+    private func scheduleSuccessReset() {
+        cancelSuccessReset()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.state == .success else { return }
+            self.transition(to: .idle)
+        }
+        successResetWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + successDisplayDuration, execute: work)
+    }
+
+    private func cancelSuccessReset() {
+        successResetWork?.cancel()
+        successResetWork = nil
     }
 
     // MARK: - Transcribing Timeout
 
     private func scheduleTranscribingTimeout() {
         cancelTranscribingTimeout()
+        let timeout = max(10, sttProvider.transcriptionTimeout)
+        let providerName = sttProvider.displayName
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.state == .transcribing else { return }
-            logger.error("Transcribing timeout (\(self.transcribingTimeout)s) — STT provider did not respond, recovering to idle")
-            self.transition(to: .error("Transcription timed out. The STT provider did not return a result. Try again."))
+            logger.error("Transcribing timeout (\(timeout)s) for provider \(providerName, privacy: .public) — STT provider did not respond, recovering to error")
+            self.transition(to: .error("Transcription timed out while using \(providerName). Please try again."))
         }
         transcribingTimeoutWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + transcribingTimeout, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: work)
     }
 
     private func cancelTranscribingTimeout() {

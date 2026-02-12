@@ -5,8 +5,8 @@ private let storagePathsLogger = Logger(subsystem: "com.visperflow", category: "
 
 /// Shared storage path resolver for App Support artifacts.
 enum AppStoragePaths {
-    static let canonicalAppSupportDirectoryName = "VisperflowClone"
-    private static let legacyAppSupportDirectoryNames = ["Visperflow"]
+    static let canonicalAppSupportDirectoryName = "WhisperSmart"
+    private static let legacyAppSupportDirectoryNames = ["VisperflowClone", "Visperflow"]
 
     static func resolvedModelURL(relativePath: String, fileManager: FileManager = .default) -> URL? {
         guard let canonicalRoot = canonicalRootURL(fileManager: fileManager) else { return nil }

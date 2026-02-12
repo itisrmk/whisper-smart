@@ -27,6 +27,8 @@ final class MenuBarController {
     private var retryItem: NSMenuItem?
     /// Menu item showing provider runtime diagnostics.
     private var providerDiagnosticsItem: NSMenuItem?
+    /// Primary dictation control item.
+    private var dictateItem: NSMenuItem?
 
     private var isOneShotActive = false
 
@@ -42,7 +44,7 @@ final class MenuBarController {
         if let button = item.button {
             button.image = NSImage(
                 systemSymbolName: "mic.fill",
-                accessibilityDescription: "Visperflow Dictation"
+                accessibilityDescription: "Whisper Smart Dictation"
             )
             button.image?.size = NSSize(width: VFSize.menuBarIcon, height: VFSize.menuBarIcon)
             button.image?.isTemplate = true
@@ -78,6 +80,21 @@ final class MenuBarController {
         if state == .idle {
             isOneShotActive = false
             oneShotItem?.title = "One-Shot Recording (no hotkey)"
+        }
+    }
+
+    /// Keeps the primary menu action text aligned with current lifecycle state.
+    func updateDictationAction(for state: DictationStateMachine.State) {
+        switch state {
+        case .recording:
+            dictateItem?.title = "Stop Dictation"
+            dictateItem?.isEnabled = true
+        case .transcribing:
+            dictateItem?.title = "Transcribing…"
+            dictateItem?.isEnabled = false
+        case .idle, .success, .error:
+            dictateItem?.title = "Start Dictation"
+            dictateItem?.isEnabled = true
         }
     }
 
@@ -143,6 +160,7 @@ final class MenuBarController {
         )
         dictateItem.target = self
         menu.addItem(dictateItem)
+        self.dictateItem = dictateItem
 
         let providerDiag = NSMenuItem(
             title: "Provider: Loading…",
@@ -195,7 +213,7 @@ final class MenuBarController {
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
-            title: "Quit Visperflow",
+            title: "Quit Whisper Smart",
             action: #selector(handleQuit),
             keyEquivalent: "q"
         )

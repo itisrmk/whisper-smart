@@ -26,11 +26,11 @@ enum STTProviderKind: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// Whether this provider requires a local model file to be downloaded.
+    /// Whether this provider uses built-in model download UX.
     var requiresModelDownload: Bool {
         switch self {
-        case .parakeet, .whisper: return true
-        case .appleSpeech, .stub, .openaiAPI: return false
+        case .parakeet: return true
+        case .appleSpeech, .whisper, .stub, .openaiAPI: return false
         }
     }
 

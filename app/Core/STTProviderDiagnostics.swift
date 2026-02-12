@@ -91,6 +91,24 @@ final class ProviderRuntimeDiagnosticsStore: ObservableObject {
 /// emits diagnostics (health checks + fallback rationale).
 enum STTProviderResolver {
 
+    struct Environment {
+        var microphoneStatus: () -> PermissionDiagnostics.Status
+        var speechRecognitionStatus: () -> PermissionDiagnostics.Status
+        var speechRecognizerFactory: () -> SFSpeechRecognizer?
+        var cloudFallbackEnabled: () -> Bool
+        var openAIAPIKey: () -> String
+        var parakeetBootstrapStatus: () -> ParakeetRuntimeBootstrapStatus
+
+        static let live = Environment(
+            microphoneStatus: { PermissionDiagnostics.microphoneStatus() },
+            speechRecognitionStatus: { PermissionDiagnostics.speechRecognitionStatus() },
+            speechRecognizerFactory: { SFSpeechRecognizer(locale: .current) },
+            cloudFallbackEnabled: { DictationProviderPolicy.cloudFallbackEnabled },
+            openAIAPIKey: { DictationProviderPolicy.openAIAPIKey },
+            parakeetBootstrapStatus: { ParakeetRuntimeBootstrapManager.shared.statusSnapshot() }
+        )
+    }
+
     static func resolve(for requestedKind: STTProviderKind) -> ProviderResolution {
         let diagnostics = diagnostics(for: requestedKind)
         let provider = makeProvider(for: diagnostics)
@@ -109,37 +127,32 @@ enum STTProviderResolver {
     }
 
     static func diagnostics(for requestedKind: STTProviderKind) -> ProviderRuntimeDiagnostics {
+        diagnostics(for: requestedKind, environment: .live)
+    }
+
+    static func diagnostics(for requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
         switch requestedKind {
         case .appleSpeech:
-            return appleSpeechDiagnostics(requestedKind: requestedKind)
+            return appleSpeechDiagnostics(requestedKind: requestedKind, environment: environment)
         case .parakeet:
-            return parakeetDiagnostics(requestedKind: requestedKind)
+            return parakeetDiagnostics(requestedKind: requestedKind, environment: environment)
         case .whisper:
-            return unavailableProviderDiagnostics(
-                requestedKind: requestedKind,
-                implementationTitle: "Whisper Runtime",
-                implementationReason: "Whisper local runtime is not implemented in this build.",
-                fallbackReason: "Whisper local runtime is not available yet."
-            )
+            return whisperLocalDiagnostics(requestedKind: requestedKind, environment: environment)
         case .openaiAPI:
-            return unavailableProviderDiagnostics(
-                requestedKind: requestedKind,
-                implementationTitle: "OpenAI API Runtime",
-                implementationReason: "OpenAI Whisper API integration is not implemented in this build.",
-                fallbackReason: "OpenAI Whisper API integration is not available yet."
-            )
+            return openAIDiagnostics(requestedKind: requestedKind, environment: environment)
         case .stub:
             return stubDiagnostics(
-                requestedKind: requestedKind
+                requestedKind: requestedKind,
+                environment: environment
             )
         }
     }
 
     // MARK: - Provider-specific diagnostics
 
-    private static func appleSpeechDiagnostics(requestedKind: STTProviderKind) -> ProviderRuntimeDiagnostics {
-        var checks = [microphoneCheck()]
-        let speechChecks = appleSpeechReadinessChecks(prefix: nil)
+    private static func appleSpeechDiagnostics(requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
+        var checks = [microphoneCheck(environment: environment)]
+        let speechChecks = appleSpeechReadinessChecks(prefix: nil, environment: environment)
         checks.append(contentsOf: speechChecks)
 
         let level: ProviderHealthLevel = checks.allSatisfy(\.isPassing) ? .healthy : .degraded
@@ -154,8 +167,8 @@ enum STTProviderResolver {
         )
     }
 
-    private static func parakeetDiagnostics(requestedKind: STTProviderKind) -> ProviderRuntimeDiagnostics {
-        var checks = [microphoneCheck()]
+    private static func parakeetDiagnostics(requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
+        var checks = [microphoneCheck(environment: environment)]
         var fallbackReason: String?
         var canUseParakeet = true
 
@@ -174,7 +187,8 @@ enum STTProviderResolver {
                 requestedKind: requestedKind,
                 checks: checks,
                 canUseParakeet: canUseParakeet,
-                fallbackReason: fallbackReason
+                fallbackReason: fallbackReason,
+                environment: environment
             )
         }
 
@@ -278,7 +292,7 @@ enum STTProviderResolver {
             fallbackReason = "Parakeet inference runtime is not integrated yet."
         }
 
-        let bootstrapAssessment = parakeetRuntimeBootstrapCheck()
+        let bootstrapAssessment = parakeetRuntimeBootstrapCheck(environment: environment)
         checks.append(bootstrapAssessment.check)
         if bootstrapAssessment.blocksParakeet, fallbackReason == nil {
             canUseParakeet = false
@@ -289,7 +303,8 @@ enum STTProviderResolver {
             requestedKind: requestedKind,
             checks: checks,
             canUseParakeet: canUseParakeet,
-            fallbackReason: fallbackReason
+            fallbackReason: fallbackReason,
+            environment: environment
         )
     }
 
@@ -297,9 +312,10 @@ enum STTProviderResolver {
         requestedKind: STTProviderKind,
         checks: [ProviderHealthCheck],
         canUseParakeet: Bool,
-        fallbackReason: String?
+        fallbackReason: String?,
+        environment: Environment
     ) -> ProviderRuntimeDiagnostics {
-        var finalChecks = checks
+        let finalChecks = checks
 
         if canUseParakeet {
             let level: ProviderHealthLevel = finalChecks.allSatisfy(\.isPassing) ? .healthy : .degraded
@@ -313,28 +329,132 @@ enum STTProviderResolver {
             )
         }
 
-        let fallbackChecks = appleSpeechReadinessChecks(prefix: "Fallback")
-        finalChecks.append(contentsOf: fallbackChecks)
-        let fallbackHealthy = fallbackChecks.allSatisfy(\.isPassing)
-        let level: ProviderHealthLevel = fallbackHealthy ? .degraded : .unavailable
+        let level: ProviderHealthLevel = .unavailable
 
         return ProviderRuntimeDiagnostics(
             timestamp: Date(),
             requestedKind: requestedKind,
-            effectiveKind: .appleSpeech,
+            effectiveKind: .parakeet,
             healthLevel: level,
             checks: finalChecks,
             fallbackReason: fallbackReason
         )
     }
 
+    private static func whisperLocalDiagnostics(requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
+        var checks = [microphoneCheck(environment: environment)]
+
+        let runtimeReason = WhisperLocalRuntime.unavailableReason()
+        checks.append(
+            ProviderHealthCheck(
+                id: "whisper.runtime",
+                title: "Whisper CLI Runtime",
+                isPassing: runtimeReason == nil,
+                detail: runtimeReason ?? "Local whisper-cli runtime is configured and executable."
+            )
+        )
+
+        guard runtimeReason == nil else {
+            return fallbackToApple(
+                requestedKind: requestedKind,
+                checks: checks,
+                fallbackReason: runtimeReason ?? "Whisper local runtime unavailable.",
+                environment: environment
+            )
+        }
+
+        let level: ProviderHealthLevel = checks.allSatisfy(\.isPassing) ? .healthy : .degraded
+        return ProviderRuntimeDiagnostics(
+            timestamp: Date(),
+            requestedKind: requestedKind,
+            effectiveKind: .whisper,
+            healthLevel: level,
+            checks: checks,
+            fallbackReason: nil
+        )
+    }
+
+    private static func openAIDiagnostics(requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
+        var checks = [microphoneCheck(environment: environment)]
+
+        checks.append(
+            ProviderHealthCheck(
+                id: "openai.opt_in",
+                title: "Cloud Fallback Opt-In",
+                isPassing: environment.cloudFallbackEnabled(),
+                detail: environment.cloudFallbackEnabled()
+                    ? "Cloud fallback has been explicitly enabled by the user."
+                    : "Cloud fallback is disabled. Enable it in Settings -> Provider to use OpenAI Whisper API."
+            )
+        )
+
+        let hasAPIKey = !environment.openAIAPIKey().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        checks.append(
+            ProviderHealthCheck(
+                id: "openai.api_key",
+                title: "OpenAI API Key",
+                isPassing: hasAPIKey,
+                detail: hasAPIKey
+                    ? "API key is configured."
+                    : "No API key configured. Set OPENAI_API_KEY or enter one in Settings -> Provider."
+            )
+        )
+
+        guard environment.cloudFallbackEnabled(), hasAPIKey else {
+            let reason = !environment.cloudFallbackEnabled()
+                ? "OpenAI Whisper API is disabled until cloud fallback is explicitly enabled."
+                : "OpenAI Whisper API requires an API key."
+            return fallbackToApple(requestedKind: requestedKind, checks: checks, fallbackReason: reason, environment: environment)
+        }
+
+        let level: ProviderHealthLevel = checks.allSatisfy(\.isPassing) ? .healthy : .degraded
+        return ProviderRuntimeDiagnostics(
+            timestamp: Date(),
+            requestedKind: requestedKind,
+            effectiveKind: .openaiAPI,
+            healthLevel: level,
+            checks: checks,
+            fallbackReason: nil
+        )
+    }
+
+    private static func fallbackToApple(
+        requestedKind: STTProviderKind,
+        checks: [ProviderHealthCheck],
+        fallbackReason: String,
+        environment: Environment
+    ) -> ProviderRuntimeDiagnostics {
+        var combined = checks
+        let fallbackChecks = appleSpeechReadinessChecks(prefix: "Fallback", environment: environment)
+        combined.append(contentsOf: fallbackChecks)
+        let fallbackHealthy = fallbackChecks.allSatisfy(\.isPassing)
+        let level: ProviderHealthLevel = fallbackHealthy ? .degraded : .unavailable
+        return ProviderRuntimeDiagnostics(
+            timestamp: Date(),
+            requestedKind: requestedKind,
+            effectiveKind: .appleSpeech,
+            healthLevel: level,
+            checks: combined,
+            fallbackReason: fallbackReason
+        )
+    }
+
+    static func selectableProviderKinds() -> [STTProviderKind] {
+        STTProviderKind.allCases.filter { kind in
+            let diagnostics = diagnostics(for: kind)
+            if kind == .stub { return true }
+            return diagnostics.effectiveKind == kind
+        }
+    }
+
     private static func unavailableProviderDiagnostics(
         requestedKind: STTProviderKind,
         implementationTitle: String,
         implementationReason: String,
-        fallbackReason: String
+        fallbackReason: String,
+        environment: Environment
     ) -> ProviderRuntimeDiagnostics {
-        var checks = [microphoneCheck()]
+        var checks = [microphoneCheck(environment: environment)]
         checks.append(
             ProviderHealthCheck(
                 id: "\(requestedKind.rawValue).implementation",
@@ -344,7 +464,7 @@ enum STTProviderResolver {
             )
         )
 
-        let fallbackChecks = appleSpeechReadinessChecks(prefix: "Fallback")
+        let fallbackChecks = appleSpeechReadinessChecks(prefix: "Fallback", environment: environment)
         checks.append(contentsOf: fallbackChecks)
         let fallbackHealthy = fallbackChecks.allSatisfy(\.isPassing)
         let level: ProviderHealthLevel = fallbackHealthy ? .degraded : .unavailable
@@ -359,8 +479,8 @@ enum STTProviderResolver {
         )
     }
 
-    private static func stubDiagnostics(requestedKind: STTProviderKind) -> ProviderRuntimeDiagnostics {
-        var checks = [microphoneCheck()]
+    private static func stubDiagnostics(requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
+        var checks = [microphoneCheck(environment: environment)]
         checks.append(
             ProviderHealthCheck(
                 id: "stub.testing_only",
@@ -392,9 +512,10 @@ enum STTProviderResolver {
                 return AppleSpeechSTTProvider()
             }
             return ParakeetSTTProvider(variant: variant)
-        case .whisper, .openaiAPI:
-            // These kinds currently resolve to Apple Speech via diagnostics.
-            return AppleSpeechSTTProvider()
+        case .whisper:
+            return WhisperLocalSTTProvider()
+        case .openaiAPI:
+            return OpenAIWhisperAPISTTProvider()
         case .stub:
             return StubSTTProvider()
         }
@@ -402,12 +523,12 @@ enum STTProviderResolver {
 
     // MARK: - Shared checks
 
-    private static func parakeetRuntimeBootstrapCheck() -> (
+    private static func parakeetRuntimeBootstrapCheck(environment: Environment) -> (
         check: ProviderHealthCheck,
         blocksParakeet: Bool,
         failureReason: String?
     ) {
-        let status = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+        let status = environment.parakeetBootstrapStatus()
         let detail = status.detail
 
         switch status.phase {
@@ -458,8 +579,8 @@ enum STTProviderResolver {
         }
     }
 
-    private static func microphoneCheck() -> ProviderHealthCheck {
-        let micStatus = PermissionDiagnostics.microphoneStatus()
+    private static func microphoneCheck(environment: Environment) -> ProviderHealthCheck {
+        let micStatus = environment.microphoneStatus()
         return ProviderHealthCheck(
             id: "permissions.microphone",
             title: "Microphone Permission",
@@ -468,13 +589,13 @@ enum STTProviderResolver {
         )
     }
 
-    private static func appleSpeechReadinessChecks(prefix: String?) -> [ProviderHealthCheck] {
+    private static func appleSpeechReadinessChecks(prefix: String?, environment: Environment) -> [ProviderHealthCheck] {
         let namePrefix = prefix.map { "\($0) " } ?? ""
         let idPrefix = prefix.map { "\($0.lowercased())." } ?? ""
 
         var checks: [ProviderHealthCheck] = []
 
-        let speechStatus = PermissionDiagnostics.speechRecognitionStatus()
+        let speechStatus = environment.speechRecognitionStatus()
         checks.append(
             ProviderHealthCheck(
                 id: "\(idPrefix)apple.permission",
@@ -484,7 +605,7 @@ enum STTProviderResolver {
             )
         )
 
-        let recognizer = SFSpeechRecognizer(locale: .current)
+        let recognizer = environment.speechRecognizerFactory()
         let recognizerCreated = (recognizer != nil)
         checks.append(
             ProviderHealthCheck(

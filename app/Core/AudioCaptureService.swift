@@ -1,36 +1,36 @@
 import AVFoundation
+import CoreAudio
 import os.log
 
 private let logger = Logger(subsystem: "com.visperflow", category: "AudioCapture")
 
 /// Captures raw audio from the default input device and streams PCM buffers
 /// to a consumer (typically an STTProvider).
-///
-/// The service wraps AVAudioEngine and exposes a simple start/stop API.
-/// Callers receive audio via the `onBuffer` callback.
 final class AudioCaptureService {
 
     // MARK: - Public types
 
-    /// Delivers a buffer of PCM audio captured from the microphone.
     typealias BufferHandler = (AVAudioPCMBuffer, AVAudioTime) -> Void
+
+    enum InterruptionReason: String {
+        case engineConfigurationChanged = "engineConfigurationChanged"
+        case defaultInputDeviceChanged = "defaultInputDeviceChanged"
+    }
 
     // MARK: - Public callbacks
 
-    /// Called on the audio-engine's real-time thread each time a new buffer
-    /// is available. Keep work minimal here—copy the buffer off-thread for
-    /// heavier processing.
     var onBuffer: BufferHandler?
-
-    /// Called on the main queue when an error occurs (e.g. device disconnected).
     var onError: ((Error) -> Void)?
+    /// Normalized input amplitude (0...1), computed from converted mono PCM.
+    var onAudioLevel: ((Float) -> Void)?
+
+    /// Called on main queue when capture is interrupted by audio engine
+    /// reconfiguration or input-device changes.
+    var onInterruption: ((InterruptionReason) -> Void)?
 
     // MARK: - Configuration
 
-    /// Desired sample rate for capture. Whisper expects 16 kHz mono.
     var desiredSampleRate: Double = 16_000
-
-    /// Number of channels (mono = 1).
     var desiredChannelCount: AVAudioChannelCount = 1
 
     // MARK: - Private state
@@ -39,31 +39,30 @@ final class AudioCaptureService {
     private var converter: AVAudioConverter?
     private var isRunning = false
 
+    private var engineConfigObserver: NSObjectProtocol?
+    private var defaultInputDeviceListenerInstalled = false
+    private var defaultInputDeviceListenerBlock: AudioObjectPropertyListenerBlock?
+    private let listenerQueue = DispatchQueue(label: "com.visperflow.audio-listeners", qos: .utility)
+
     // MARK: - Lifecycle
 
-    /// Checks the current microphone authorization status.
-    /// Returns `.authorized` when recording is allowed immediately.
+    deinit {
+        unregisterInterruptionObservers()
+    }
+
     static func microphoneAuthorizationStatus() -> AVAuthorizationStatus {
         AVCaptureDevice.authorizationStatus(for: .audio)
     }
 
-    /// Requests microphone access. Calls `completion` on the main queue with the result.
     static func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             DispatchQueue.main.async { completion(granted) }
         }
     }
 
-    /// Configures the audio engine, installs a tap on the input node,
-    /// and starts capture.
-    ///
-    /// - Throws: If mic permission is denied, the audio session cannot be
-    ///           configured, or the engine fails to start.
     func start() throws {
         guard !isRunning else { return }
 
-        // Gate on microphone permission — callers should pre-request via
-        // requestMicrophoneAccess(), but we enforce here as a safety net.
         let authStatus = Self.microphoneAuthorizationStatus()
         guard authStatus == .authorized else {
             logger.error("Microphone access not authorized (status: \(authStatus.rawValue))")
@@ -74,7 +73,6 @@ final class AudioCaptureService {
         let inputNode = engine.inputNode
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
 
-        // Build a format that matches what the STT provider expects.
         guard let captureFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: desiredSampleRate,
@@ -84,20 +82,18 @@ final class AudioCaptureService {
             throw AudioCaptureError.unsupportedFormat
         }
 
-        // Validate that the hardware format has at least one channel.
         guard hardwareFormat.channelCount > 0 else {
             throw AudioCaptureError.noInputDevice
         }
 
-        // Build a converter from the hardware format to the desired STT format.
-        // Installing the tap with the hardware format avoids the
-        // "Input HW format and tap format not matching" crash.
         guard let audioConverter = AVAudioConverter(from: hardwareFormat, to: captureFormat) else {
             throw AudioCaptureError.conversionFailed
         }
         self.converter = audioConverter
 
-        let bufferSize: AVAudioFrameCount = AVAudioFrameCount(hardwareFormat.sampleRate * 0.1) // ~100 ms
+        registerInterruptionObservers()
+
+        let bufferSize: AVAudioFrameCount = AVAudioFrameCount(hardwareFormat.sampleRate * 0.1)
 
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: hardwareFormat) { [weak self] buffer, time in
             guard let self = self, let converter = self.converter else { return }
@@ -124,26 +120,137 @@ final class AudioCaptureService {
                 return
             }
 
+            if let level = Self.normalizedLevel(from: convertedBuffer) {
+                self.onAudioLevel?(level)
+            }
             self.onBuffer?(convertedBuffer, time)
         }
 
         engine.prepare()
         try engine.start()
         isRunning = true
-
-        // TODO: On macOS, AVAudioSession is unavailable. Monitor device
-        //       changes via CoreAudio's AudioObjectAddPropertyListener on
-        //       kAudioHardwarePropertyDefaultInputDevice to detect mic
-        //       disconnects / switches and notify the state machine.
     }
 
-    /// Stops the audio engine and removes the input tap.
     func stop() {
-        guard isRunning else { return }
+        guard isRunning else {
+            unregisterInterruptionObservers()
+            return
+        }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         converter = nil
         isRunning = false
+        unregisterInterruptionObservers()
+    }
+
+    // MARK: - Interruption observers
+
+    private func registerInterruptionObservers() {
+        if engineConfigObserver == nil {
+            engineConfigObserver = NotificationCenter.default.addObserver(
+                forName: .AVAudioEngineConfigurationChange,
+                object: engine,
+                queue: .main
+            ) { [weak self] _ in
+                self?.handleInterruption(.engineConfigurationChanged)
+            }
+        }
+
+        installDefaultInputDeviceListenerIfNeeded()
+    }
+
+    private func unregisterInterruptionObservers() {
+        if let engineConfigObserver {
+            NotificationCenter.default.removeObserver(engineConfigObserver)
+            self.engineConfigObserver = nil
+        }
+        removeDefaultInputDeviceListenerIfNeeded()
+    }
+
+    private func handleInterruption(_ reason: InterruptionReason) {
+        guard isRunning else { return }
+
+        logger.warning("Audio interruption detected: \(reason.rawValue, privacy: .public)")
+        stop()
+        DispatchQueue.main.async { [onInterruption] in
+            onInterruption?(reason)
+        }
+    }
+
+    private func installDefaultInputDeviceListenerIfNeeded() {
+        guard !defaultInputDeviceListenerInstalled else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.handleInterruption(.defaultInputDeviceChanged)
+        }
+        defaultInputDeviceListenerBlock = listener
+
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            listenerQueue,
+            listener
+        )
+
+        if status == noErr {
+            defaultInputDeviceListenerInstalled = true
+        } else {
+            defaultInputDeviceListenerBlock = nil
+            logger.error("Failed to install default-input listener (status=\(status))")
+        }
+    }
+
+    private func removeDefaultInputDeviceListenerIfNeeded() {
+        guard defaultInputDeviceListenerInstalled else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        guard let listener = defaultInputDeviceListenerBlock else {
+            defaultInputDeviceListenerInstalled = false
+            return
+        }
+
+        let status = AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            listenerQueue,
+            listener
+        )
+
+        if status != noErr {
+            logger.error("Failed to remove default-input listener (status=\(status))")
+        }
+
+        defaultInputDeviceListenerInstalled = false
+        defaultInputDeviceListenerBlock = nil
+    }
+
+    private static func normalizedLevel(from buffer: AVAudioPCMBuffer) -> Float? {
+        guard let data = buffer.floatChannelData?[0] else { return nil }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return 0 }
+
+        var sum: Float = 0
+        for i in 0..<frameCount {
+            let sample = data[i]
+            sum += sample * sample
+        }
+
+        let rms = sqrt(sum / Float(frameCount))
+        // Map ~-50 dB...0 dB RMS into 0...1 for responsive UI motion.
+        let db = 20 * log10(max(rms, 0.000_01))
+        let normalized = (db + 50) / 50
+        return min(max(normalized, 0), 1)
     }
 }
 

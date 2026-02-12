@@ -36,12 +36,13 @@ final class BubblePanelController {
 
     private func createPanel() {
         let content = FloatingBubbleWithLabel(
+            compactMode: true,
             onTap: { [weak self] in self?.stateSubject.handleTap() }
         )
         .environmentObject(stateSubject)
 
         let hostingView = NSHostingView(rootView: content)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 120, height: 120)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 84, height: 84)
 
         let p = NSPanel(
             contentRect: hostingView.frame,
@@ -82,6 +83,13 @@ final class BubbleStateSubject: ObservableObject {
     /// (e.g. "Microphone access denied …"). Used by the bubble label and menu.
     @Published var errorDetail: String = ""
 
+    /// Live partial/final transcript shown as an overlay while recording/transcribing.
+    @Published var liveTranscript: String = ""
+
+    /// Lightweight status badges shown in the bubble/settings.
+    @Published var activityBadge: String = ""
+    @Published var healthBadge: String = ""
+
     /// Called when the user taps the bubble. Override via `onTap` closure.
     var onTap: (() -> Void)?
 
@@ -93,12 +101,29 @@ final class BubbleStateSubject: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.state = newState
             self?.errorDetail = errorDetail ?? ""
+            if newState == .idle || newState == .error {
+                self?.audioLevel = 0
+                self?.liveTranscript = ""
+            }
         }
     }
 
     func updateAudioLevel(_ level: CGFloat) {
         DispatchQueue.main.async { [weak self] in
             self?.audioLevel = min(max(level, 0), 1)
+        }
+    }
+
+    func updateLiveTranscript(_ text: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.liveTranscript = text
+        }
+    }
+
+    func updateBadges(activity: String, health: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.activityBadge = activity
+            self?.healthBadge = health
         }
     }
 }
