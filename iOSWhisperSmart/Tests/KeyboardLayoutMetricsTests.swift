@@ -7,8 +7,8 @@ final class KeyboardLayoutMetricsTests: XCTestCase {
         XCTAssertEqual(metrics.keyHeight, 32)
         XCTAssertFalse(metrics.showsStatusLabel)
         XCTAssertEqual(metrics.preferredTypingHeight, 216)
-        XCTAssertEqual(metrics.letterFontSize, 18)
-        XCTAssertEqual(metrics.keyContentInsets.top, 2)
+        XCTAssertEqual(metrics.letterFontSize, 17)
+        XCTAssertEqual(metrics.keyContentInsets.top, 1)
     }
 
     func testRegularHeightUsesNativeLikeMetrics() {

@@ -380,9 +380,11 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func styleKey(_ button: UIButton, title: String) {
         button.configuration = nil
         button.setTitle(title, for: .normal)
-        button.setTitleColor(keyTitleColor, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: currentMetrics.letterFontSize, weight: .regular)
         button.backgroundColor = keyColor
+        button.tintColor = keyTitleColor
+        button.contentHorizontalAlignment = .center
+        button.contentVerticalAlignment = .center
         button.layer.cornerRadius = currentMetrics.keyCornerRadius
         button.layer.cornerCurve = .continuous
         button.layer.shadowColor = UIColor.black.withAlphaComponent(isDark ? 0.42 : 0.18).cgColor
@@ -393,27 +395,33 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.5 : 0.12).cgColor
         button.contentEdgeInsets = currentMetrics.keyContentInsets
         button.titleLabel?.adjustsFontSizeToFitWidth = true
-        button.titleLabel?.minimumScaleFactor = 0.82
+        button.titleLabel?.minimumScaleFactor = 0.75
         button.titleLabel?.lineBreakMode = .byClipping
+        applyTitleColors(to: button, base: keyTitleColor)
         setHeight(currentMetrics.keyHeight, for: button)
-        applyPressBehavior(to: button, isAccent: false)
+        applyPressBehavior(to: button, normalColor: keyColor, highlightedColor: pressedVariant(for: keyColor), usesConfiguration: false)
     }
 
     private func styleModifierKey(_ button: UIButton, title: String) {
         styleKey(button, title: title)
-        button.setTitleColor(modifierTitleColor, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: currentMetrics.modifierFontSize, weight: .medium)
         button.backgroundColor = modifierKeyColor
+        button.tintColor = modifierTitleColor
+        applyTitleColors(to: button, base: modifierTitleColor)
+        applyPressBehavior(to: button, normalColor: modifierKeyColor, highlightedColor: pressedVariant(for: modifierKeyColor), usesConfiguration: false)
     }
 
     private func styleReturnKey(_ button: UIButton) {
         let title = returnKeyTitle()
         styleModifierKey(button, title: title)
         let accent = shouldAccentReturnKey()
-        button.backgroundColor = accent ? accentKeyColor : modifierKeyColor
-        button.setTitleColor(accent ? .white : modifierTitleColor, for: .normal)
+        let foregroundColor: UIColor = accent ? .white : modifierTitleColor
+        let normalColor = accent ? accentKeyColor : modifierKeyColor
+        button.backgroundColor = normalColor
+        button.tintColor = foregroundColor
+        applyTitleColors(to: button, base: foregroundColor)
         setWidth(accent ? 76 : 68, for: button)
-        applyPressBehavior(to: button, isAccent: accent)
+        applyPressBehavior(to: button, normalColor: normalColor, highlightedColor: accent ? accentKeyPressedColor : pressedVariant(for: normalColor), usesConfiguration: false)
     }
 
     private func stylePanelControl(_ button: UIButton, symbolName: String) {
@@ -430,29 +438,39 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func configureAccessoryButton(_ button: UIButton, title: String) {
+        let normalColor = modifierKeyColor.withAlphaComponent(0.88)
+        button.configuration = nil
         button.setTitle(title, for: .normal)
-        button.setTitleColor(modifierTitleColor, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
-        button.backgroundColor = modifierKeyColor.withAlphaComponent(0.88)
+        button.backgroundColor = normalColor
+        button.tintColor = modifierTitleColor
+        button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        button.contentHorizontalAlignment = .center
+        button.contentVerticalAlignment = .center
         button.layer.cornerRadius = 13
         button.layer.cornerCurve = .continuous
         button.layer.borderWidth = 0.5
         button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.35 : 0.14).cgColor
-        applyPressBehavior(to: button, isAccent: false)
+        applyTitleColors(to: button, base: modifierTitleColor)
+        applyPressBehavior(to: button, normalColor: normalColor, highlightedColor: pressedVariant(for: normalColor), usesConfiguration: false)
     }
 
     private func configureMicAccessoryButton(_ button: UIButton) {
+        let normalColor = modifierKeyColor.withAlphaComponent(0.9)
         var config = UIButton.Configuration.filled()
         config.image = UIImage(systemName: "mic.fill")
         config.imagePlacement = .leading
         config.imagePadding = 6
         config.baseForegroundColor = modifierTitleColor
-        config.baseBackgroundColor = modifierKeyColor.withAlphaComponent(0.9)
+        config.baseBackgroundColor = normalColor
         config.cornerStyle = .capsule
-        config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
+        config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
         config.title = "Mic"
         button.configuration = config
-        applyPressBehavior(to: button, isAccent: false)
+        button.tintColor = modifierTitleColor
+        button.contentHorizontalAlignment = .center
+        button.contentVerticalAlignment = .center
+        applyPressBehavior(to: button, normalColor: normalColor, highlightedColor: pressedVariant(for: normalColor), usesConfiguration: true)
     }
 
     private func applyCurrentTheme() {
@@ -486,18 +504,39 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         configureMicAccessoryButton(accessoryMicButton)
     }
 
-    private func applyPressBehavior(to button: UIButton, isAccent: Bool) {
-        button.configurationUpdateHandler = { [weak self] btn in
-            guard let self else { return }
-            let activeColor: UIColor
-            if isAccent {
-                activeColor = btn.isHighlighted ? self.accentKeyPressedColor : self.accentKeyColor
+    private func applyPressBehavior(to button: UIButton, normalColor: UIColor, highlightedColor: UIColor, usesConfiguration: Bool) {
+        button.configurationUpdateHandler = { btn in
+            let resolvedBackground: UIColor
+            if !btn.isEnabled {
+                resolvedBackground = normalColor.withAlphaComponent(0.5)
+            } else if btn.isHighlighted || btn.isSelected {
+                resolvedBackground = highlightedColor
             } else {
-                let base = btn.backgroundColor ?? self.keyColor
-                activeColor = btn.isHighlighted ? self.pressedVariant(for: base) : base
+                resolvedBackground = normalColor
             }
-            btn.backgroundColor = activeColor
+
+            if usesConfiguration, var configuration = btn.configuration {
+                configuration.baseBackgroundColor = resolvedBackground
+                btn.configuration = configuration
+            } else {
+                btn.configuration = nil
+                btn.backgroundColor = resolvedBackground
+            }
         }
+        button.setNeedsUpdateConfiguration()
+    }
+
+    private func applyTitleColors(to button: UIButton, base: UIColor) {
+        let title = button.title(for: .normal)
+        if let title {
+            button.setTitle(title, for: .highlighted)
+            button.setTitle(title, for: .selected)
+            button.setTitle(title, for: .disabled)
+        }
+        button.setTitleColor(base, for: .normal)
+        button.setTitleColor(base.withAlphaComponent(0.92), for: .highlighted)
+        button.setTitleColor(base.withAlphaComponent(0.92), for: .selected)
+        button.setTitleColor(base.withAlphaComponent(0.52), for: .disabled)
     }
 
     private func pressedVariant(for color: UIColor) -> UIColor {
