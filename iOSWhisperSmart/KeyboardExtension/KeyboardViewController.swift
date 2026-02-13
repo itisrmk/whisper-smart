@@ -1,8 +1,11 @@
 import UIKit
 
-final class KeyboardViewController: UIInputViewController {
+final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool { true }
+
     private let store = KeyboardCompanionStore.shared
 
+    private let backgroundView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
     private let rootStack = UIStackView()
     private let typingContainer = UIStackView()
     private let accessoryBar = UIStackView()
@@ -24,6 +27,7 @@ final class KeyboardViewController: UIInputViewController {
     private let shiftButton = UIButton(type: .system)
     private let backspaceButton = UIButton(type: .system)
     private let modeToggleButton = UIButton(type: .system)
+    private let nextKeyboardButton = UIButton(type: .system)
     private let spaceButton = UIButton(type: .system)
     private let returnButton = UIButton(type: .system)
 
@@ -47,10 +51,6 @@ final class KeyboardViewController: UIInputViewController {
     private var transcriptPollTimer: Timer?
     private var listeningBaselineTimestamp: Date?
 
-    private let keyBackground = UIColor(red: 0.98, green: 0.98, blue: 0.99, alpha: 1)
-    private let modifierBackground = UIColor(red: 0.84, green: 0.85, blue: 0.88, alpha: 1)
-    private let keyboardBackground = UIColor(red: 0.81, green: 0.82, blue: 0.85, alpha: 1)
-
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
@@ -60,12 +60,23 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        preferredContentSize = CGSize(width: view.bounds.width, height: 300)
+        preferredContentSize = CGSize(width: view.bounds.width, height: 292)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        backgroundView.frame = view.bounds
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         reloadData()
+        applyCurrentTheme()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        applyCurrentTheme()
     }
 
     deinit {
@@ -73,18 +84,20 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func setupUI() {
-        view.backgroundColor = keyboardBackground
+        view.backgroundColor = .clear
+        backgroundView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(backgroundView)
 
         rootStack.axis = .vertical
-        rootStack.spacing = 8
+        rootStack.spacing = 6
         rootStack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(rootStack)
 
         NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
-            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
-            rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
-            rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8)
+            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
+            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
+            rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
+            rootStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6)
         ])
 
         configureTypingContainer()
@@ -92,28 +105,31 @@ final class KeyboardViewController: UIInputViewController {
 
         rootStack.addArrangedSubview(typingContainer)
         rootStack.addArrangedSubview(dictationPanel)
+
+        applyCurrentTheme()
     }
 
     private func configureTypingContainer() {
         typingContainer.axis = .vertical
-        typingContainer.spacing = 8
+        typingContainer.spacing = 6
 
         configureAccessoryBar()
         configureKeyboardArea()
 
         statusLabel.font = .systemFont(ofSize: 11)
-        statusLabel.textColor = UIColor.black.withAlphaComponent(0.58)
+        statusLabel.textColor = UIColor.secondaryLabel.withAlphaComponent(0.95)
         statusLabel.numberOfLines = 2
         statusLabel.textAlignment = .center
-        statusLabel.text = "Tap the mic button above the keyboard to open listening, then confirm when your transcript is ready."
+        statusLabel.text = "Tap mic above the keyboard to listen, then confirm to insert."
         typingContainer.addArrangedSubview(statusLabel)
     }
 
     private func configureDictationPanel() {
-        dictationPanel.backgroundColor = UIColor(red: 0.12, green: 0.13, blue: 0.15, alpha: 1)
         dictationPanel.layer.cornerRadius = 16
+        dictationPanel.layer.cornerCurve = .continuous
+        dictationPanel.layer.borderWidth = 0.8
         dictationPanel.translatesAutoresizingMaskIntoConstraints = false
-        dictationPanel.heightAnchor.constraint(equalToConstant: 224).isActive = true
+        dictationPanel.heightAnchor.constraint(equalToConstant: 210).isActive = true
 
         dictationTopBar.axis = .horizontal
         dictationTopBar.distribution = .equalSpacing
@@ -135,26 +151,23 @@ final class KeyboardViewController: UIInputViewController {
         dictationCenterStack.translatesAutoresizingMaskIntoConstraints = false
 
         dictationStateLabel.font = .systemFont(ofSize: 22, weight: .semibold)
-        dictationStateLabel.textColor = .white
         dictationStateLabel.text = "Listening"
 
         waveformStack.axis = .horizontal
-        waveformStack.spacing = 6
+        waveformStack.spacing = 5
         waveformStack.alignment = .bottom
         waveformStack.translatesAutoresizingMaskIntoConstraints = false
         for index in 0..<7 {
             let bar = UIView()
-            bar.backgroundColor = UIColor.white.withAlphaComponent(0.92)
-            bar.layer.cornerRadius = 2
+            bar.layer.cornerRadius = 1.8
             bar.translatesAutoresizingMaskIntoConstraints = false
-            bar.widthAnchor.constraint(equalToConstant: 5).isActive = true
-            let baseHeight = CGFloat(14 + (index % 3) * 6)
+            bar.widthAnchor.constraint(equalToConstant: 4.5).isActive = true
+            let baseHeight = CGFloat(12 + (index % 3) * 5)
             bar.heightAnchor.constraint(equalToConstant: baseHeight).isActive = true
             waveformStack.addArrangedSubview(bar)
         }
 
         dictationHintLabel.font = .systemFont(ofSize: 13, weight: .regular)
-        dictationHintLabel.textColor = UIColor.white.withAlphaComponent(0.74)
         dictationHintLabel.numberOfLines = 2
         dictationHintLabel.textAlignment = .center
 
@@ -166,13 +179,13 @@ final class KeyboardViewController: UIInputViewController {
         dictationPanel.addSubview(dictationCenterStack)
 
         NSLayoutConstraint.activate([
-            dictationTopBar.leadingAnchor.constraint(equalTo: dictationPanel.leadingAnchor, constant: 14),
-            dictationTopBar.trailingAnchor.constraint(equalTo: dictationPanel.trailingAnchor, constant: -14),
-            dictationTopBar.topAnchor.constraint(equalTo: dictationPanel.topAnchor, constant: 12),
+            dictationTopBar.leadingAnchor.constraint(equalTo: dictationPanel.leadingAnchor, constant: 12),
+            dictationTopBar.trailingAnchor.constraint(equalTo: dictationPanel.trailingAnchor, constant: -12),
+            dictationTopBar.topAnchor.constraint(equalTo: dictationPanel.topAnchor, constant: 10),
 
             dictationCenterStack.leadingAnchor.constraint(equalTo: dictationPanel.leadingAnchor, constant: 20),
             dictationCenterStack.trailingAnchor.constraint(equalTo: dictationPanel.trailingAnchor, constant: -20),
-            dictationCenterStack.centerYAnchor.constraint(equalTo: dictationPanel.centerYAnchor, constant: 6)
+            dictationCenterStack.centerYAnchor.constraint(equalTo: dictationPanel.centerYAnchor, constant: 4)
         ])
     }
 
@@ -206,14 +219,14 @@ final class KeyboardViewController: UIInputViewController {
             dictationPanel.isHidden = true
             stopWaveAnimation()
             stopTranscriptPolling()
-            statusLabel.text = "Tap the mic button above the keyboard to open listening, then confirm when your transcript is ready."
+            statusLabel.text = "Tap mic above the keyboard to listen, then confirm to insert."
         case .dictationWaiting:
             typingContainer.isHidden = true
             dictationPanel.isHidden = false
             dictationStateLabel.text = "Listening"
-            dictationHintLabel.text = "WhisperSmart app captures audio. Speak there, then return here to insert; latest transcript auto-detects."
+            dictationHintLabel.text = "Speak in WhisperSmart, then return here. Latest transcript appears automatically."
             confirmDictationButton.isEnabled = false
-            confirmDictationButton.alpha = 0.4
+            confirmDictationButton.alpha = 0.45
             startWaveAnimation()
         case .dictationReady(let transcript, _):
             typingContainer.isHidden = true
@@ -235,14 +248,14 @@ final class KeyboardViewController: UIInputViewController {
         let rows = KeyboardLayoutHelper.rows(for: layoutMode, isShiftEnabled: isShiftEnabled)
 
         keyboardStack.addArrangedSubview(makeLetterRow(letters: rows[0], leadingInset: 0, trailingInset: 0))
-        keyboardStack.addArrangedSubview(makeLetterRow(letters: rows[1], leadingInset: 12, trailingInset: 12))
+        keyboardStack.addArrangedSubview(makeLetterRow(letters: rows[1], leadingInset: 10, trailingInset: 10))
 
         let thirdRow = UIStackView()
         thirdRow.axis = .horizontal
         thirdRow.spacing = 6
 
         styleModifierKey(shiftButton, title: layoutMode == .letters ? (isShiftEnabled ? "⇪" : "⇧") : "#+=")
-        shiftButton.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        shiftButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
         shiftButton.removeTarget(nil, action: nil, for: .allEvents)
         shiftButton.addTarget(self, action: #selector(shiftTapped), for: .touchUpInside)
         thirdRow.addArrangedSubview(shiftButton)
@@ -252,7 +265,7 @@ final class KeyboardViewController: UIInputViewController {
         }
 
         styleModifierKey(backspaceButton, title: "⌫")
-        backspaceButton.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        backspaceButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
         backspaceButton.removeTarget(nil, action: nil, for: .allEvents)
         backspaceButton.addTarget(self, action: #selector(backspaceTapped), for: .touchUpInside)
         thirdRow.addArrangedSubview(backspaceButton)
@@ -264,23 +277,33 @@ final class KeyboardViewController: UIInputViewController {
         bottomRow.spacing = 6
 
         styleModifierKey(modeToggleButton, title: layoutMode == .letters ? "123" : "ABC")
-        modeToggleButton.widthAnchor.constraint(equalToConstant: 54).isActive = true
+        modeToggleButton.widthAnchor.constraint(equalToConstant: 52).isActive = true
         modeToggleButton.removeTarget(nil, action: nil, for: .allEvents)
         modeToggleButton.addTarget(self, action: #selector(modeToggleTapped), for: .touchUpInside)
+
+        styleModifierKey(nextKeyboardButton, title: "🌐")
+        nextKeyboardButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        nextKeyboardButton.removeTarget(nil, action: nil, for: .allEvents)
+        nextKeyboardButton.addTarget(self, action: #selector(nextKeyboardTapped), for: .touchUpInside)
+        nextKeyboardButton.isHidden = !needsInputModeSwitchKey
 
         styleKey(spaceButton, title: "space")
         spaceButton.removeTarget(nil, action: nil, for: .allEvents)
         spaceButton.addTarget(self, action: #selector(spaceTapped), for: .touchUpInside)
 
-        styleModifierKey(returnButton, title: "return")
-        returnButton.widthAnchor.constraint(equalToConstant: 68).isActive = true
+        styleReturnKey(returnButton)
         returnButton.removeTarget(nil, action: nil, for: .allEvents)
         returnButton.addTarget(self, action: #selector(returnTapped), for: .touchUpInside)
 
         bottomRow.addArrangedSubview(modeToggleButton)
+        if needsInputModeSwitchKey {
+            bottomRow.addArrangedSubview(nextKeyboardButton)
+        }
         bottomRow.addArrangedSubview(spaceButton)
         bottomRow.addArrangedSubview(returnButton)
         keyboardStack.addArrangedSubview(bottomRow)
+
+        applyCurrentTheme()
     }
 
     private func makeLetterRow(letters: [String], leadingInset: CGFloat, trailingInset: CGFloat) -> UIView {
@@ -318,28 +341,44 @@ final class KeyboardViewController: UIInputViewController {
 
     private func styleKey(_ button: UIButton, title: String) {
         button.setTitle(title, for: .normal)
-        button.setTitleColor(.black, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 20, weight: .regular)
-        button.backgroundColor = keyBackground
-        button.layer.cornerRadius = 6
-        button.layer.shadowColor = UIColor.black.withAlphaComponent(0.22).cgColor
-        button.layer.shadowOpacity = 0.18
-        button.layer.shadowRadius = 0.5
+        button.setTitleColor(.label, for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 22, weight: .regular)
+        button.backgroundColor = keyColor
+        button.layer.cornerRadius = 5
+        button.layer.cornerCurve = .continuous
+        button.layer.shadowColor = UIColor.black.withAlphaComponent(isDark ? 0.45 : 0.16).cgColor
+        button.layer.shadowOpacity = 1
+        button.layer.shadowRadius = 0.0
         button.layer.shadowOffset = CGSize(width: 0, height: 1)
-        button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 6, bottom: 10, right: 6)
+        button.layer.borderWidth = isDark ? 0.5 : 0.35
+        button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.4 : 0.18).cgColor
+        applyPressBehavior(to: button, isAccent: false)
     }
 
     private func styleModifierKey(_ button: UIButton, title: String) {
         styleKey(button, title: title)
         button.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
-        button.backgroundColor = modifierBackground
+        button.backgroundColor = modifierKeyColor
+    }
+
+    private func styleReturnKey(_ button: UIButton) {
+        let title = returnKeyTitle()
+        styleModifierKey(button, title: title)
+        let accent = shouldAccentReturnKey()
+        button.backgroundColor = accent ? accentKeyColor : modifierKeyColor
+        button.setTitleColor(accent ? .white : .label, for: .normal)
+        button.widthAnchor.constraint(equalToConstant: accent ? 76 : 68).isActive = true
+        applyPressBehavior(to: button, isAccent: accent)
     }
 
     private func stylePanelControl(_ button: UIButton, symbolName: String) {
         button.setImage(UIImage(systemName: symbolName), for: .normal)
-        button.tintColor = .white
-        button.backgroundColor = UIColor.white.withAlphaComponent(0.16)
+        button.tintColor = .label
+        button.backgroundColor = modifierKeyColor.withAlphaComponent(0.8)
         button.layer.cornerRadius = 16
+        button.layer.cornerCurve = .continuous
+        button.layer.borderWidth = 0.5
+        button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.35 : 0.15).cgColor
         button.translatesAutoresizingMaskIntoConstraints = false
         button.widthAnchor.constraint(equalToConstant: 32).isActive = true
         button.heightAnchor.constraint(equalToConstant: 32).isActive = true
@@ -347,11 +386,14 @@ final class KeyboardViewController: UIInputViewController {
 
     private func configureAccessoryButton(_ button: UIButton, title: String) {
         button.setTitle(title, for: .normal)
-        button.setTitleColor(.black.withAlphaComponent(0.82), for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
-        button.backgroundColor = UIColor.white.withAlphaComponent(0.66)
-        button.layer.cornerRadius = 14
-        button.contentEdgeInsets = UIEdgeInsets(top: 7, left: 12, bottom: 7, right: 12)
+        button.setTitleColor(.secondaryLabel, for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        button.backgroundColor = modifierKeyColor.withAlphaComponent(0.88)
+        button.layer.cornerRadius = 13
+        button.layer.cornerCurve = .continuous
+        button.layer.borderWidth = 0.5
+        button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.35 : 0.14).cgColor
+        applyPressBehavior(to: button, isAccent: false)
     }
 
     private func configureMicAccessoryButton(_ button: UIButton) {
@@ -359,24 +401,80 @@ final class KeyboardViewController: UIInputViewController {
         config.image = UIImage(systemName: "mic.fill")
         config.imagePlacement = .leading
         config.imagePadding = 6
-        config.baseForegroundColor = UIColor.black.withAlphaComponent(0.82)
-        config.baseBackgroundColor = UIColor.white.withAlphaComponent(0.66)
+        config.baseForegroundColor = .secondaryLabel
+        config.baseBackgroundColor = modifierKeyColor.withAlphaComponent(0.9)
         config.cornerStyle = .capsule
         config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
         config.title = "Mic"
         button.configuration = config
+        applyPressBehavior(to: button, isAccent: false)
+    }
+
+    private func applyCurrentTheme() {
+        backgroundView.effect = UIBlurEffect(style: isDark ? .systemThinMaterialDark : .systemThinMaterialLight)
+
+        dictationPanel.backgroundColor = isDark ? UIColor(red: 0.16, green: 0.17, blue: 0.2, alpha: 0.92) : UIColor(red: 0.95, green: 0.96, blue: 0.98, alpha: 0.92)
+        dictationPanel.layer.borderColor = UIColor.separator.withAlphaComponent(0.45).cgColor
+        dictationStateLabel.textColor = .label
+        dictationHintLabel.textColor = .secondaryLabel
+        waveformStack.arrangedSubviews.forEach { $0.backgroundColor = accentKeyColor.withAlphaComponent(0.88) }
+
+        [insertLatestButton, accessoryMicButton, modeToggleButton, nextKeyboardButton, shiftButton, backspaceButton].forEach {
+            $0.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.36 : 0.14).cgColor
+        }
+
+        keyboardStack.arrangedSubviews
+            .flatMap { ($0 as? UIStackView)?.arrangedSubviews ?? [] }
+            .compactMap { $0 as? UIButton }
+            .forEach { btn in
+                if btn === returnButton {
+                    styleReturnKey(btn)
+                } else if btn === shiftButton || btn === backspaceButton || btn === modeToggleButton || btn === nextKeyboardButton {
+                    styleModifierKey(btn, title: btn.currentTitle ?? "")
+                } else if btn === spaceButton {
+                    styleKey(btn, title: "space")
+                } else {
+                    styleKey(btn, title: btn.currentTitle ?? "")
+                }
+            }
+
+        stylePanelControl(cancelDictationButton, symbolName: "xmark")
+        stylePanelControl(confirmDictationButton, symbolName: "checkmark")
+        configureAccessoryButton(insertLatestButton, title: "Insert Latest")
+        configureMicAccessoryButton(accessoryMicButton)
+    }
+
+    private func applyPressBehavior(to button: UIButton, isAccent: Bool) {
+        button.configurationUpdateHandler = { [weak self] btn in
+            guard let self else { return }
+            let activeColor: UIColor
+            if isAccent {
+                activeColor = btn.isHighlighted ? self.accentKeyPressedColor : self.accentKeyColor
+            } else {
+                let base = btn.backgroundColor ?? self.keyColor
+                activeColor = btn.isHighlighted ? self.pressedVariant(for: base) : base
+            }
+            btn.backgroundColor = activeColor
+        }
+    }
+
+    private func pressedVariant(for color: UIColor) -> UIColor {
+        return isDark ? color.withAlphaComponent(0.78) : color.withAlphaComponent(0.86)
     }
 
     private func reloadData() {
         let latest = store.latestTranscript
         insertLatestButton.isEnabled = latest != nil
-        insertLatestButton.alpha = latest == nil ? 0.55 : 1.0
+        insertLatestButton.alpha = latest == nil ? 0.6 : 1.0
 
         accessoryMicButton.isEnabled = true
         accessoryMicButton.alpha = 1.0
+
+        styleReturnKey(returnButton)
     }
 
     @objc private func dictateTapped() {
+        UIDevice.current.playInputClick()
         listeningBaselineTimestamp = store.lastUpdatedAt
         dictationState = KeyboardMicFlowStateMachine.reduce(state: dictationState, event: .micTapped(now: Date()))
         startTranscriptPolling()
@@ -392,17 +490,19 @@ final class KeyboardViewController: UIInputViewController {
             if opened {
                 self.statusLabel.text = "Opened WhisperSmart. Speak in app, then return here to insert."
             } else {
-                self.dictationHintLabel.text = "Couldn’t launch WhisperSmart. Open the app manually, dictate, then return to insert."
-                self.statusLabel.text = "If launch fails, open WhisperSmart manually and come back to tap ✓."
+                self.dictationHintLabel.text = "Couldn’t launch WhisperSmart. Open app manually, dictate, then return."
+                self.statusLabel.text = "If launch fails, open WhisperSmart manually and tap ✓ after dictation."
             }
         }
     }
 
     @objc private func cancelDictationTapped() {
+        UIDevice.current.playInputClick()
         dictationState = KeyboardMicFlowStateMachine.reduce(state: dictationState, event: .cancel)
     }
 
     @objc private func confirmDictationTapped() {
+        UIDevice.current.playInputClick()
         guard case .dictationReady(let transcript, _) = dictationState else { return }
         textDocumentProxy.insertText(transcript)
         reloadData()
@@ -411,12 +511,19 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func modeToggleTapped() {
+        UIDevice.current.playInputClick()
         layoutMode = layoutMode == .letters ? .numbersAndSymbols : .letters
     }
 
+    @objc private func nextKeyboardTapped() {
+        UIDevice.current.playInputClick()
+        advanceToNextInputMode()
+    }
+
     @objc private func insertLatestTapped() {
+        UIDevice.current.playInputClick()
         guard let text = store.latestTranscript else {
-            statusLabel.text = "No saved dictation yet. Tap Mic above the keyboard to open listening mode first."
+            statusLabel.text = "No saved dictation yet. Tap Mic above the keyboard first."
             reloadData()
             return
         }
@@ -425,6 +532,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func letterTapped(_ sender: UIButton) {
+        UIDevice.current.playInputClick()
         guard let key = sender.currentTitle else { return }
         textDocumentProxy.insertText(key)
         if layoutMode == .letters, isShiftEnabled {
@@ -433,20 +541,24 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func shiftTapped() {
+        UIDevice.current.playInputClick()
         if layoutMode == .letters {
             isShiftEnabled.toggle()
         }
     }
 
     @objc private func backspaceTapped() {
+        UIDevice.current.playInputClick()
         textDocumentProxy.deleteBackward()
     }
 
     @objc private func spaceTapped() {
+        UIDevice.current.playInputClick()
         textDocumentProxy.insertText(" ")
     }
 
     @objc private func returnTapped() {
+        UIDevice.current.playInputClick()
         textDocumentProxy.insertText("\n")
     }
 
@@ -533,5 +645,51 @@ final class KeyboardViewController: UIInputViewController {
             responder = current.next
         }
         return false
+    }
+
+    private var isDark: Bool {
+        traitCollection.userInterfaceStyle == .dark
+    }
+
+    private var keyColor: UIColor {
+        isDark ? UIColor(red: 0.35, green: 0.36, blue: 0.39, alpha: 1) : UIColor(white: 1.0, alpha: 0.92)
+    }
+
+    private var modifierKeyColor: UIColor {
+        isDark ? UIColor(red: 0.27, green: 0.28, blue: 0.31, alpha: 1) : UIColor(red: 0.69, green: 0.72, blue: 0.76, alpha: 1)
+    }
+
+    private var accentKeyColor: UIColor {
+        isDark ? UIColor(red: 0.23, green: 0.51, blue: 0.97, alpha: 1) : UIColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1)
+    }
+
+    private var accentKeyPressedColor: UIColor {
+        accentKeyColor.withAlphaComponent(0.82)
+    }
+
+    private func returnKeyTitle() -> String {
+        let traits = textDocumentProxy
+        switch traits.returnKeyType {
+        case .go: return "go"
+        case .google: return "google"
+        case .join: return "join"
+        case .next: return "next"
+        case .route: return "route"
+        case .search: return "search"
+        case .send: return "send"
+        case .yahoo: return "yahoo"
+        case .done: return "done"
+        case .emergencyCall: return "SOS"
+        default: return "return"
+        }
+    }
+
+    private func shouldAccentReturnKey() -> Bool {
+        switch textDocumentProxy.returnKeyType {
+        case .go, .search, .send, .done, .join, .next, .route, .google, .yahoo:
+            return true
+        default:
+            return false
+        }
     }
 }
