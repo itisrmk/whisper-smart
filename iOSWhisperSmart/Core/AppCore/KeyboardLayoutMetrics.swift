@@ -9,6 +9,10 @@ struct KeyboardLayoutMetrics: Equatable {
     let dictationPanelHeight: CGFloat
     let preferredTypingHeight: CGFloat
     let preferredDictationHeight: CGFloat
+    let keyCornerRadius: CGFloat
+    let letterFontSize: CGFloat
+    let modifierFontSize: CGFloat
+    let keyContentInsets: UIEdgeInsets
 
     static func resolve(availableHeight: CGFloat, isCompactLandscape: Bool) -> KeyboardLayoutMetrics {
         if isCompactLandscape || availableHeight <= 220 {
@@ -20,7 +24,11 @@ struct KeyboardLayoutMetrics: Equatable {
                 showsStatusLabel: false,
                 dictationPanelHeight: max(150, availableHeight - 16),
                 preferredTypingHeight: 216,
-                preferredDictationHeight: 204
+                preferredDictationHeight: 204,
+                keyCornerRadius: 5,
+                letterFontSize: 17,
+                modifierFontSize: 14,
+                keyContentInsets: UIEdgeInsets(top: 3, left: 4, bottom: 3, right: 4)
             )
         }
 
@@ -33,7 +41,11 @@ struct KeyboardLayoutMetrics: Equatable {
                 showsStatusLabel: false,
                 dictationPanelHeight: max(176, availableHeight - 16),
                 preferredTypingHeight: 228,
-                preferredDictationHeight: 220
+                preferredDictationHeight: 220,
+                keyCornerRadius: 6,
+                letterFontSize: 19,
+                modifierFontSize: 15,
+                keyContentInsets: UIEdgeInsets(top: 4, left: 5, bottom: 4, right: 5)
             )
         }
 
@@ -45,7 +57,11 @@ struct KeyboardLayoutMetrics: Equatable {
             showsStatusLabel: true,
             dictationPanelHeight: min(210, availableHeight - 14),
             preferredTypingHeight: 256,
-            preferredDictationHeight: 238
+            preferredDictationHeight: 238,
+            keyCornerRadius: 7,
+            letterFontSize: 21,
+            modifierFontSize: 16,
+            keyContentInsets: UIEdgeInsets(top: 5, left: 6, bottom: 5, right: 6)
         )
     }
 }

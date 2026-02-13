@@ -379,25 +379,29 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func styleKey(_ button: UIButton, title: String) {
         button.setTitle(title, for: .normal)
-        button.setTitleColor(.label, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 22, weight: .regular)
+        button.setTitleColor(keyTitleColor, for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: currentMetrics.letterFontSize, weight: .regular)
         button.backgroundColor = keyColor
-        button.layer.cornerRadius = 5
+        button.layer.cornerRadius = currentMetrics.keyCornerRadius
         button.layer.cornerCurve = .continuous
-        button.layer.shadowColor = UIColor.black.withAlphaComponent(isDark ? 0.45 : 0.16).cgColor
+        button.layer.shadowColor = UIColor.black.withAlphaComponent(isDark ? 0.42 : 0.18).cgColor
         button.layer.shadowOpacity = 1
-        button.layer.shadowRadius = 0.0
+        button.layer.shadowRadius = isDark ? 0.7 : 0.4
         button.layer.shadowOffset = CGSize(width: 0, height: 1)
-        button.layer.borderWidth = isDark ? 0.5 : 0.35
-        button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.4 : 0.18).cgColor
-        button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 6, bottom: 10, right: 6)
+        button.layer.borderWidth = isDark ? 0.6 : 0.45
+        button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.5 : 0.12).cgColor
+        button.contentEdgeInsets = currentMetrics.keyContentInsets
+        button.titleLabel?.adjustsFontSizeToFitWidth = true
+        button.titleLabel?.minimumScaleFactor = 0.82
+        button.titleLabel?.lineBreakMode = .byClipping
         setHeight(currentMetrics.keyHeight, for: button)
         applyPressBehavior(to: button, isAccent: false)
     }
 
     private func styleModifierKey(_ button: UIButton, title: String) {
         styleKey(button, title: title)
-        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        button.setTitleColor(modifierTitleColor, for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: currentMetrics.modifierFontSize, weight: .medium)
         button.backgroundColor = modifierKeyColor
     }
 
@@ -406,14 +410,14 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         styleModifierKey(button, title: title)
         let accent = shouldAccentReturnKey()
         button.backgroundColor = accent ? accentKeyColor : modifierKeyColor
-        button.setTitleColor(accent ? .white : .label, for: .normal)
+        button.setTitleColor(accent ? .white : modifierTitleColor, for: .normal)
         setWidth(accent ? 76 : 68, for: button)
         applyPressBehavior(to: button, isAccent: accent)
     }
 
     private func stylePanelControl(_ button: UIButton, symbolName: String) {
         button.setImage(UIImage(systemName: symbolName), for: .normal)
-        button.tintColor = .label
+        button.tintColor = modifierTitleColor
         button.backgroundColor = modifierKeyColor.withAlphaComponent(0.8)
         button.layer.cornerRadius = 16
         button.layer.cornerCurve = .continuous
@@ -426,7 +430,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func configureAccessoryButton(_ button: UIButton, title: String) {
         button.setTitle(title, for: .normal)
-        button.setTitleColor(.secondaryLabel, for: .normal)
+        button.setTitleColor(modifierTitleColor, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
         button.backgroundColor = modifierKeyColor.withAlphaComponent(0.88)
         button.layer.cornerRadius = 13
@@ -441,7 +445,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         config.image = UIImage(systemName: "mic.fill")
         config.imagePlacement = .leading
         config.imagePadding = 6
-        config.baseForegroundColor = .secondaryLabel
+        config.baseForegroundColor = modifierTitleColor
         config.baseBackgroundColor = modifierKeyColor.withAlphaComponent(0.9)
         config.cornerStyle = .capsule
         config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
@@ -754,11 +758,19 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private var keyColor: UIColor {
-        isDark ? UIColor(red: 0.35, green: 0.36, blue: 0.39, alpha: 1) : UIColor(white: 1.0, alpha: 0.92)
+        isDark ? UIColor(red: 0.30, green: 0.31, blue: 0.35, alpha: 1) : UIColor(white: 1.0, alpha: 0.98)
+    }
+
+    private var keyTitleColor: UIColor {
+        isDark ? UIColor(white: 0.98, alpha: 1) : UIColor(red: 0.06, green: 0.06, blue: 0.08, alpha: 1)
     }
 
     private var modifierKeyColor: UIColor {
-        isDark ? UIColor(red: 0.27, green: 0.28, blue: 0.31, alpha: 1) : UIColor(red: 0.69, green: 0.72, blue: 0.76, alpha: 1)
+        isDark ? UIColor(red: 0.41, green: 0.43, blue: 0.48, alpha: 1) : UIColor(red: 0.70, green: 0.73, blue: 0.78, alpha: 1)
+    }
+
+    private var modifierTitleColor: UIColor {
+        isDark ? UIColor(white: 0.98, alpha: 1) : UIColor(red: 0.12, green: 0.13, blue: 0.16, alpha: 1)
     }
 
     private var accentKeyColor: UIColor {
