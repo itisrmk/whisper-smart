@@ -30,7 +30,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private let shiftButton = UIButton(type: .custom)
     private let backspaceButton = UIButton(type: .custom)
     private let modeToggleButton = UIButton(type: .custom)
-    private let nextKeyboardButton = UIButton(type: .custom)
+    private let nextKeyboardButton = UIButton(type: .system)
     private let spaceButton = UIButton(type: .custom)
     private let returnButton = UIButton(type: .custom)
 
@@ -80,7 +80,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         reloadData()
-        applyCurrentTheme()
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -314,7 +313,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         styleModifierKey(nextKeyboardButton, title: "🌐")
         setWidth(42, for: nextKeyboardButton)
         nextKeyboardButton.removeTarget(nil, action: nil, for: .allEvents)
-        nextKeyboardButton.addTarget(self, action: #selector(nextKeyboardTapped), for: .touchUpInside)
+        nextKeyboardButton.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
+        nextKeyboardButton.accessibilityLabel = "Next Keyboard"
         nextKeyboardButton.isHidden = !needsInputModeSwitchKey
 
         styleKey(spaceButton, title: "space")
@@ -379,7 +379,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func styleKey(_ button: UIButton, title: String) {
         button.configuration = nil
-        forceVisibleTitleRendering(on: button, title: title)
+        button.setTitle(title, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: currentMetrics.letterFontSize, weight: .regular)
         button.backgroundColor = keyColor
         button.tintColor = keyTitleColor
@@ -408,7 +408,12 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.backgroundColor = modifierKeyColor
         button.tintColor = modifierTitleColor
         applyTitleColors(to: button, base: modifierTitleColor)
-        applyPressBehavior(to: button, normalColor: modifierKeyColor, highlightedColor: pressedVariant(for: modifierKeyColor), usesConfiguration: false)
+
+        if button === nextKeyboardButton {
+            button.configurationUpdateHandler = nil
+        } else {
+            applyPressBehavior(to: button, normalColor: modifierKeyColor, highlightedColor: pressedVariant(for: modifierKeyColor), usesConfiguration: false)
+        }
     }
 
     private func styleReturnKey(_ button: UIButton) {
@@ -487,14 +492,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
 
         keyboardButtons().forEach { btn in
+            let normalTitle = btn.title(for: .normal) ?? btn.currentTitle ?? ""
             if btn === returnButton {
                 styleReturnKey(btn)
             } else if btn === shiftButton || btn === backspaceButton || btn === modeToggleButton || btn === nextKeyboardButton {
-                styleModifierKey(btn, title: btn.currentTitle ?? "")
+                styleModifierKey(btn, title: normalTitle)
             } else if btn === spaceButton {
                 styleKey(btn, title: "space")
             } else {
-                styleKey(btn, title: btn.currentTitle ?? "")
+                styleKey(btn, title: normalTitle)
             }
         }
 
@@ -502,33 +508,10 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         stylePanelControl(confirmDictationButton, symbolName: "checkmark")
         configureAccessoryButton(insertLatestButton, title: "Insert Latest")
         configureMicAccessoryButton(accessoryMicButton)
-        enforceKeyboardTitleVisibility()
-    }
-
-    private func forceVisibleTitleRendering(on button: UIButton, title: String) {
-        button.setAttributedTitle(nil, for: .normal)
-        button.setAttributedTitle(nil, for: .highlighted)
-        button.setAttributedTitle(nil, for: .selected)
-        button.setAttributedTitle(nil, for: .disabled)
-
-        button.setTitle(title, for: .normal)
-        button.setTitle(title, for: .highlighted)
-        button.setTitle(title, for: .selected)
-        button.setTitle(title, for: .disabled)
-
-        button.titleLabel?.isHidden = false
-        button.titleLabel?.alpha = 1
-        button.titleLabel?.transform = .identity
-        button.titleLabel?.layer.opacity = 1
-
-        button.alpha = button.isEnabled ? 1 : 0.6
-        button.layer.opacity = 1
-        button.layer.masksToBounds = false
     }
 
     private func applyPressBehavior(to button: UIButton, normalColor: UIColor, highlightedColor: UIColor, usesConfiguration: Bool) {
-        button.configurationUpdateHandler = { [weak self] btn in
-            guard let self else { return }
+        button.configurationUpdateHandler = { btn in
             let resolvedBackground: UIColor
             if !btn.isEnabled {
                 resolvedBackground = normalColor.withAlphaComponent(0.5)
@@ -542,29 +525,23 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
                 configuration.baseBackgroundColor = resolvedBackground
                 btn.configuration = configuration
             } else {
-                btn.configuration = nil
                 btn.backgroundColor = resolvedBackground
-            }
-
-            if let title = btn.currentTitle {
-                self.forceVisibleTitleRendering(on: btn, title: title)
             }
         }
         button.setNeedsUpdateConfiguration()
     }
 
     private func applyTitleColors(to button: UIButton, base: UIColor) {
-        let title = button.title(for: .normal) ?? button.currentTitle ?? ""
-        forceVisibleTitleRendering(on: button, title: title)
+        if let title = button.title(for: .normal) ?? button.currentTitle {
+            button.setTitle(title, for: .highlighted)
+            button.setTitle(title, for: .selected)
+            button.setTitle(title, for: .disabled)
+        }
 
         button.setTitleColor(base, for: .normal)
         button.setTitleColor(base.withAlphaComponent(0.92), for: .highlighted)
         button.setTitleColor(base.withAlphaComponent(0.92), for: .selected)
         button.setTitleColor(base.withAlphaComponent(0.52), for: .disabled)
-
-        button.titleLabel?.textColor = button.titleColor(for: button.state) ?? base
-        button.titleLabel?.alpha = 1
-        button.titleLabel?.isHidden = false
     }
 
     private func pressedVariant(for color: UIColor) -> UIColor {
@@ -587,21 +564,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func keyboardButtons() -> [UIButton] {
         collectButtons(from: keyboardStack)
-    }
-
-    private func enforceKeyboardTitleVisibility() {
-        keyboardButtons().forEach { button in
-            guard let title = button.currentTitle, !title.isEmpty else { return }
-            forceVisibleTitleRendering(on: button, title: title)
-            let fallbackColor: UIColor
-            if button === shiftButton || button === backspaceButton || button === modeToggleButton || button === nextKeyboardButton || button === returnButton {
-                fallbackColor = modifierTitleColor
-            } else {
-                fallbackColor = keyTitleColor
-            }
-            button.titleLabel?.font = button.titleLabel?.font ?? .systemFont(ofSize: currentMetrics.letterFontSize, weight: .regular)
-            button.titleLabel?.textColor = button.titleColor(for: button.state) ?? fallbackColor
-        }
     }
 
     private func collectButtons(from view: UIView) -> [UIButton] {
@@ -672,11 +634,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         layoutMode = layoutMode == .letters ? .numbersAndSymbols : .letters
     }
 
-    @objc private func nextKeyboardTapped() {
-        UIDevice.current.playInputClick()
-        advanceToNextInputMode()
-    }
-
     @objc private func insertLatestTapped() {
         UIDevice.current.playInputClick()
         guard let text = store.latestTranscript else {
@@ -690,7 +647,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     @objc private func letterTapped(_ sender: UIButton) {
         UIDevice.current.playInputClick()
-        guard let key = sender.currentTitle else { return }
+        guard let key = sender.title(for: .normal) ?? sender.currentTitle else { return }
         textDocumentProxy.insertText(key)
         if layoutMode == .letters, isShiftEnabled {
             isShiftEnabled = false
@@ -847,7 +804,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
 
         keyboardButtons().forEach { setHeight(currentMetrics.keyHeight, for: $0) }
-        enforceKeyboardTitleVisibility()
     }
 
     private var isDark: Bool {
