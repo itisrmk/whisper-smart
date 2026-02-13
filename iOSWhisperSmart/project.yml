@@ -1,0 +1,98 @@
+name: iOSWhisperSmart
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "17.0"
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.visperflow.iOSWhisperSmart
+    SWIFT_VERSION: 5.10
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 0.1.0
+    INFOPLIST_KEY_CFBundleDisplayName: WhisperSmart
+    INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: WhisperSmart needs speech recognition to convert your voice to text.
+    INFOPLIST_KEY_NSMicrophoneUsageDescription: WhisperSmart needs microphone access for live dictation.
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+targets:
+  iOSWhisperSmart:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App
+      - path: Core
+      - path: Features
+      - path: Intents
+      - path: Utilities
+    settings:
+      base:
+        PRODUCT_NAME: iOSWhisperSmart
+        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: App/iOSWhisperSmart.entitlements
+        INFOPLIST_KEY_CFBundleURLTypes:
+          - CFBundleURLName: com.visperflow.iOSWhisperSmart
+            CFBundleURLSchemes:
+              - whispersmart
+    dependencies:
+      - target: iOSWhisperSmartKeyboard
+        embed: true
+    scheme:
+      testTargets:
+        - iOSWhisperSmartTests
+  iOSWhisperSmartWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Widgets
+      - path: Core/AppCore/DictationLiveActivityAttributes.swift
+    settings:
+      base:
+        PRODUCT_NAME: iOSWhisperSmartWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.visperflow.iOSWhisperSmart.widgets
+        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        SKIP_INSTALL: YES
+        INFOPLIST_KEY_NSExtension:NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    dependencies:
+      - target: iOSWhisperSmart
+  iOSWhisperSmartKeyboard:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: KeyboardExtension
+      - path: Core/AppCore/KeyboardCompanionStore.swift
+      - path: Core/AppCore/KeyboardLayoutHelper.swift
+      - path: Core/AppCore/KeyboardMicFlowStateMachine.swift
+      - path: Core/AppCore/KeyboardLayoutMetrics.swift
+    settings:
+      base:
+        PRODUCT_NAME: iOSWhisperSmartKeyboard
+        PRODUCT_BUNDLE_IDENTIFIER: com.visperflow.iOSWhisperSmart.keyboard
+        INFOPLIST_FILE: KeyboardExtension/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: KeyboardExtension/iOSWhisperSmartKeyboard.entitlements
+        SKIP_INSTALL: YES
+    scheme: {}
+
+  iOSWhisperSmartTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Tests
+    settings:
+      base:
+        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: iOSWhisperSmart
