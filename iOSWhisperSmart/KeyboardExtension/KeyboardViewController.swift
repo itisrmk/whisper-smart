@@ -121,6 +121,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         statusLabel.numberOfLines = 2
         statusLabel.textAlignment = .center
         statusLabel.text = "Tap mic above the keyboard to listen, then confirm to insert."
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        statusLabel.setContentHuggingPriority(.defaultLow, for: .vertical)
         typingContainer.addArrangedSubview(statusLabel)
     }
 
@@ -208,6 +210,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func configureKeyboardArea() {
         keyboardStack.axis = .vertical
         keyboardStack.spacing = 6
+        keyboardStack.setContentCompressionResistancePriority(.required, for: .vertical)
+        keyboardStack.setContentHuggingPriority(.required, for: .vertical)
         typingContainer.addArrangedSubview(keyboardStack)
         rebuildKeyboardRows()
     }
@@ -253,9 +257,10 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         let thirdRow = UIStackView()
         thirdRow.axis = .horizontal
         thirdRow.spacing = 6
+        thirdRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
 
         styleModifierKey(shiftButton, title: layoutMode == .letters ? (isShiftEnabled ? "⇪" : "⇧") : "#+=")
-        shiftButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        setWidth(42, for: shiftButton)
         shiftButton.removeTarget(nil, action: nil, for: .allEvents)
         shiftButton.addTarget(self, action: #selector(shiftTapped), for: .touchUpInside)
         thirdRow.addArrangedSubview(shiftButton)
@@ -265,7 +270,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
 
         styleModifierKey(backspaceButton, title: "⌫")
-        backspaceButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        setWidth(42, for: backspaceButton)
         backspaceButton.removeTarget(nil, action: nil, for: .allEvents)
         backspaceButton.addTarget(self, action: #selector(backspaceTapped), for: .touchUpInside)
         thirdRow.addArrangedSubview(backspaceButton)
@@ -275,14 +280,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         let bottomRow = UIStackView()
         bottomRow.axis = .horizontal
         bottomRow.spacing = 6
+        bottomRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
 
         styleModifierKey(modeToggleButton, title: layoutMode == .letters ? "123" : "ABC")
-        modeToggleButton.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        setWidth(52, for: modeToggleButton)
         modeToggleButton.removeTarget(nil, action: nil, for: .allEvents)
         modeToggleButton.addTarget(self, action: #selector(modeToggleTapped), for: .touchUpInside)
 
         styleModifierKey(nextKeyboardButton, title: "🌐")
-        nextKeyboardButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        setWidth(42, for: nextKeyboardButton)
         nextKeyboardButton.removeTarget(nil, action: nil, for: .allEvents)
         nextKeyboardButton.addTarget(self, action: #selector(nextKeyboardTapped), for: .touchUpInside)
         nextKeyboardButton.isHidden = !needsInputModeSwitchKey
@@ -329,6 +335,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             rowStack.addArrangedSubview(spacer)
         }
 
+        rowStack.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
         return rowStack
     }
 
@@ -352,6 +359,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.layer.shadowOffset = CGSize(width: 0, height: 1)
         button.layer.borderWidth = isDark ? 0.5 : 0.35
         button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.4 : 0.18).cgColor
+        button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 6, bottom: 10, right: 6)
+        setHeight(40, for: button)
         applyPressBehavior(to: button, isAccent: false)
     }
 
@@ -367,7 +376,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         let accent = shouldAccentReturnKey()
         button.backgroundColor = accent ? accentKeyColor : modifierKeyColor
         button.setTitleColor(accent ? .white : .label, for: .normal)
-        button.widthAnchor.constraint(equalToConstant: accent ? 76 : 68).isActive = true
+        setWidth(accent ? 76 : 68, for: button)
         applyPressBehavior(to: button, isAccent: accent)
     }
 
@@ -380,8 +389,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.layer.borderWidth = 0.5
         button.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.35 : 0.15).cgColor
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 32).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        setWidth(32, for: button)
+        setHeight(32, for: button)
     }
 
     private func configureAccessoryButton(_ button: UIButton, title: String) {
@@ -460,6 +469,20 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func pressedVariant(for color: UIColor) -> UIColor {
         return isDark ? color.withAlphaComponent(0.78) : color.withAlphaComponent(0.86)
+    }
+
+    private func setWidth(_ value: CGFloat, for view: UIView) {
+        view.constraints
+            .filter { $0.firstAttribute == .width && $0.secondItem == nil }
+            .forEach { $0.isActive = false }
+        view.widthAnchor.constraint(equalToConstant: value).isActive = true
+    }
+
+    private func setHeight(_ value: CGFloat, for view: UIView) {
+        view.constraints
+            .filter { $0.firstAttribute == .height && $0.secondItem == nil }
+            .forEach { $0.isActive = false }
+        view.heightAnchor.constraint(equalToConstant: value).isActive = true
     }
 
     private func reloadData() {
