@@ -13,6 +13,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private let statusLabel = UILabel()
 
     private let dictationPanel = UIView()
+    private var dictationPanelHeightConstraint: NSLayoutConstraint?
     private let dictationTopBar = UIStackView()
     private let dictationCenterStack = UIStackView()
     private let dictationStateLabel = UILabel()
@@ -51,6 +52,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private var transcriptPollTimer: Timer?
     private var listeningBaselineTimestamp: Date?
 
+    private enum Layout {
+        static let horizontalInset: CGFloat = 6
+        static let verticalInset: CGFloat = 6
+        static let typingHeight: CGFloat = 256
+        static let dictationHeight: CGFloat = 238
+        static let compactLandscapeTypingHeight: CGFloat = 222
+        static let compactLandscapeDictationHeight: CGFloat = 214
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
@@ -60,7 +70,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        preferredContentSize = CGSize(width: view.bounds.width, height: 292)
+        updatePreferredContentSizeIfNeeded()
     }
 
     override func viewDidLayoutSubviews() {
@@ -77,6 +87,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         applyCurrentTheme()
+        updatePreferredContentSizeIfNeeded()
     }
 
     deinit {
@@ -94,10 +105,10 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         view.addSubview(rootStack)
 
         NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
-            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
-            rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
-            rootStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6)
+            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Layout.horizontalInset),
+            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Layout.horizontalInset),
+            rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: Layout.verticalInset),
+            rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Layout.verticalInset)
         ])
 
         configureTypingContainer()
@@ -107,6 +118,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         rootStack.addArrangedSubview(dictationPanel)
 
         applyCurrentTheme()
+        updatePreferredContentSizeIfNeeded()
     }
 
     private func configureTypingContainer() {
@@ -118,7 +130,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = UIColor.secondaryLabel.withAlphaComponent(0.95)
-        statusLabel.numberOfLines = 2
+        statusLabel.numberOfLines = 1
         statusLabel.textAlignment = .center
         statusLabel.text = "Tap mic above the keyboard to listen, then confirm to insert."
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -131,7 +143,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         dictationPanel.layer.cornerCurve = .continuous
         dictationPanel.layer.borderWidth = 0.8
         dictationPanel.translatesAutoresizingMaskIntoConstraints = false
-        dictationPanel.heightAnchor.constraint(equalToConstant: 210).isActive = true
+        dictationPanelHeightConstraint = dictationPanel.heightAnchor.constraint(equalToConstant: 210)
+        dictationPanelHeightConstraint?.isActive = true
 
         dictationTopBar.axis = .horizontal
         dictationTopBar.distribution = .equalSpacing
@@ -194,7 +207,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func configureAccessoryBar() {
         accessoryBar.axis = .horizontal
         accessoryBar.spacing = 6
-        accessoryBar.distribution = .fillProportionally
+        accessoryBar.distribution = .fillEqually
 
         configureAccessoryButton(insertLatestButton, title: "Insert Latest")
         insertLatestButton.addTarget(self, action: #selector(insertLatestTapped), for: .touchUpInside)
@@ -204,6 +217,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
         accessoryBar.addArrangedSubview(insertLatestButton)
         accessoryBar.addArrangedSubview(accessoryMicButton)
+        setHeight(36, for: insertLatestButton)
+        setHeight(36, for: accessoryMicButton)
         typingContainer.addArrangedSubview(accessoryBar)
     }
 
@@ -241,6 +256,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             confirmDictationButton.alpha = 1.0
             startWaveAnimation()
         }
+
+        updatePreferredContentSizeIfNeeded()
     }
 
     private func rebuildKeyboardRows() {
@@ -257,6 +274,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         let thirdRow = UIStackView()
         thirdRow.axis = .horizontal
         thirdRow.spacing = 6
+        thirdRow.alignment = .fill
         thirdRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
 
         styleModifierKey(shiftButton, title: layoutMode == .letters ? (isShiftEnabled ? "⇪" : "⇧") : "#+=")
@@ -265,9 +283,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         shiftButton.addTarget(self, action: #selector(shiftTapped), for: .touchUpInside)
         thirdRow.addArrangedSubview(shiftButton)
 
+        let thirdLettersRow = UIStackView()
+        thirdLettersRow.axis = .horizontal
+        thirdLettersRow.spacing = 6
+        thirdLettersRow.alignment = .fill
+        thirdLettersRow.distribution = .fillEqually
         for key in rows[2] {
-            thirdRow.addArrangedSubview(makeLetterKey(key))
+            thirdLettersRow.addArrangedSubview(makeLetterKey(key))
         }
+        thirdRow.addArrangedSubview(thirdLettersRow)
 
         styleModifierKey(backspaceButton, title: "⌫")
         setWidth(42, for: backspaceButton)
@@ -316,6 +340,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         let rowStack = UIStackView()
         rowStack.axis = .horizontal
         rowStack.spacing = 6
+        rowStack.alignment = .fill
 
         if leadingInset > 0 {
             let spacer = UIView()
@@ -324,9 +349,15 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             rowStack.addArrangedSubview(spacer)
         }
 
+        let lettersStack = UIStackView()
+        lettersStack.axis = .horizontal
+        lettersStack.spacing = 6
+        lettersStack.alignment = .fill
+        lettersStack.distribution = .fillEqually
         for letter in letters {
-            rowStack.addArrangedSubview(makeLetterKey(letter))
+            lettersStack.addArrangedSubview(makeLetterKey(letter))
         }
+        rowStack.addArrangedSubview(lettersStack)
 
         if trailingInset > 0 {
             let spacer = UIView()
@@ -668,6 +699,26 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             responder = current.next
         }
         return false
+    }
+
+    private func updatePreferredContentSizeIfNeeded() {
+        let isCompactLandscape = traitCollection.verticalSizeClass == .compact
+        statusLabel.isHidden = isCompactLandscape && !typingContainer.isHidden
+        dictationPanelHeightConstraint?.constant = isCompactLandscape ? 184 : 210
+
+        let size = CGSize(width: view.bounds.width, height: preferredKeyboardHeight())
+        guard preferredContentSize != size else { return }
+        preferredContentSize = size
+    }
+
+    private func preferredKeyboardHeight() -> CGFloat {
+        let isCompactLandscape = traitCollection.verticalSizeClass == .compact
+        switch dictationState {
+        case .typing:
+            return isCompactLandscape ? Layout.compactLandscapeTypingHeight : Layout.typingHeight
+        case .dictationWaiting, .dictationReady:
+            return isCompactLandscape ? Layout.compactLandscapeDictationHeight : Layout.dictationHeight
+        }
     }
 
     private var isDark: Bool {
