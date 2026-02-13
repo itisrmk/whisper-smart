@@ -378,6 +378,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func styleKey(_ button: UIButton, title: String) {
+        button.configuration = nil
         button.setTitle(title, for: .normal)
         button.setTitleColor(keyTitleColor, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: currentMetrics.letterFontSize, weight: .regular)
@@ -467,20 +468,17 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             $0.layer.borderColor = UIColor.black.withAlphaComponent(isDark ? 0.36 : 0.14).cgColor
         }
 
-        keyboardStack.arrangedSubviews
-            .flatMap { ($0 as? UIStackView)?.arrangedSubviews ?? [] }
-            .compactMap { $0 as? UIButton }
-            .forEach { btn in
-                if btn === returnButton {
-                    styleReturnKey(btn)
-                } else if btn === shiftButton || btn === backspaceButton || btn === modeToggleButton || btn === nextKeyboardButton {
-                    styleModifierKey(btn, title: btn.currentTitle ?? "")
-                } else if btn === spaceButton {
-                    styleKey(btn, title: "space")
-                } else {
-                    styleKey(btn, title: btn.currentTitle ?? "")
-                }
+        keyboardButtons().forEach { btn in
+            if btn === returnButton {
+                styleReturnKey(btn)
+            } else if btn === shiftButton || btn === backspaceButton || btn === modeToggleButton || btn === nextKeyboardButton {
+                styleModifierKey(btn, title: btn.currentTitle ?? "")
+            } else if btn === spaceButton {
+                styleKey(btn, title: "space")
+            } else {
+                styleKey(btn, title: btn.currentTitle ?? "")
             }
+        }
 
         stylePanelControl(cancelDictationButton, symbolName: "xmark")
         stylePanelControl(confirmDictationButton, symbolName: "checkmark")
@@ -518,6 +516,25 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             .filter { $0.firstAttribute == .height && $0.secondItem == nil }
             .forEach { $0.isActive = false }
         view.heightAnchor.constraint(equalToConstant: value).isActive = true
+    }
+
+    private func keyboardButtons() -> [UIButton] {
+        collectButtons(from: keyboardStack)
+    }
+
+    private func collectButtons(from view: UIView) -> [UIButton] {
+        if let button = view as? UIButton {
+            return [button]
+        }
+
+        let children: [UIView]
+        if let stack = view as? UIStackView {
+            children = stack.arrangedSubviews
+        } else {
+            children = view.subviews
+        }
+
+        return children.flatMap { collectButtons(from: $0) }
     }
 
     private func reloadData() {
@@ -747,10 +764,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
             preferredContentSize = size
         }
 
-        keyboardStack.arrangedSubviews
-            .flatMap { ($0 as? UIStackView)?.arrangedSubviews ?? [] }
-            .compactMap { $0 as? UIButton }
-            .forEach { setHeight(currentMetrics.keyHeight, for: $0) }
+        keyboardButtons().forEach { setHeight(currentMetrics.keyHeight, for: $0) }
     }
 
     private var isDark: Bool {

@@ -26,9 +26,9 @@ struct KeyboardLayoutMetrics: Equatable {
                 preferredTypingHeight: 216,
                 preferredDictationHeight: 204,
                 keyCornerRadius: 5,
-                letterFontSize: 17,
+                letterFontSize: 18,
                 modifierFontSize: 14,
-                keyContentInsets: UIEdgeInsets(top: 3, left: 4, bottom: 3, right: 4)
+                keyContentInsets: UIEdgeInsets(top: 2, left: 4, bottom: 2, right: 4)
             )
         }
 
@@ -43,9 +43,9 @@ struct KeyboardLayoutMetrics: Equatable {
                 preferredTypingHeight: 228,
                 preferredDictationHeight: 220,
                 keyCornerRadius: 6,
-                letterFontSize: 19,
+                letterFontSize: 20,
                 modifierFontSize: 15,
-                keyContentInsets: UIEdgeInsets(top: 4, left: 5, bottom: 4, right: 5)
+                keyContentInsets: UIEdgeInsets(top: 3, left: 5, bottom: 3, right: 5)
             )
         }
 
@@ -59,9 +59,9 @@ struct KeyboardLayoutMetrics: Equatable {
             preferredTypingHeight: 256,
             preferredDictationHeight: 238,
             keyCornerRadius: 7,
-            letterFontSize: 21,
+            letterFontSize: 22,
             modifierFontSize: 16,
-            keyContentInsets: UIEdgeInsets(top: 5, left: 6, bottom: 5, right: 6)
+            keyContentInsets: UIEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
         )
     }
 }
