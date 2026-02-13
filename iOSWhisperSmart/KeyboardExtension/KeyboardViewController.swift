@@ -27,12 +27,32 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private let insertLatestButton = UIButton(type: .system)
     private let accessoryMicButton = UIButton(type: .system)
 
-    private let shiftButton = UIButton(type: .custom)
-    private let backspaceButton = UIButton(type: .custom)
-    private let modeToggleButton = UIButton(type: .custom)
+    private let shiftButton = UIButton(type: .system)
+    private let backspaceButton = UIButton(type: .system)
+    private let modeToggleButton = UIButton(type: .system)
     private let nextKeyboardButton = UIButton(type: .system)
-    private let spaceButton = UIButton(type: .custom)
-    private let returnButton = UIButton(type: .custom)
+    private let spaceButton = UIButton(type: .system)
+    private let returnButton = UIButton(type: .system)
+
+    private enum KeyboardKeyRole {
+        case letter
+        case modifier
+        case space
+        case returnKey
+    }
+
+    private struct PressPalette {
+        let normal: UIColor
+        let highlighted: UIColor
+    }
+
+    private var keyModelTitles: [ObjectIdentifier: String] = [:]
+    private var keyRoles: [ObjectIdentifier: KeyboardKeyRole] = [:]
+    private var pressPalettes: [ObjectIdentifier: PressPalette] = [:]
+
+    #if DEBUG
+    private var debugLegendDumpCount = 0
+    #endif
 
     private var isShiftEnabled = false {
         didSet { rebuildKeyboardRows() }
@@ -260,6 +280,10 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func rebuildKeyboardRows() {
+        keyModelTitles.removeAll(keepingCapacity: true)
+        keyRoles.removeAll(keepingCapacity: true)
+        pressPalettes.removeAll(keepingCapacity: true)
+
         keyboardStack.arrangedSubviews.forEach {
             keyboardStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
@@ -276,9 +300,9 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         thirdRow.alignment = .fill
         thirdRow.heightAnchor.constraint(greaterThanOrEqualToConstant: currentMetrics.rowMinimumHeight).isActive = true
 
-        styleModifierKey(shiftButton, title: layoutMode == .letters ? (isShiftEnabled ? "⇪" : "⇧") : "#+=")
-        setWidth(42, for: shiftButton)
         shiftButton.removeTarget(nil, action: nil, for: .allEvents)
+        styleModifierKey(shiftButton, title: layoutMode == .letters ? (isShiftEnabled ? "⇪" : "⇧" ) : "#+=", role: .modifier)
+        setWidth(42, for: shiftButton)
         shiftButton.addTarget(self, action: #selector(shiftTapped), for: .touchUpInside)
         thirdRow.addArrangedSubview(shiftButton)
 
@@ -292,9 +316,9 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
         thirdRow.addArrangedSubview(thirdLettersRow)
 
-        styleModifierKey(backspaceButton, title: "⌫")
-        setWidth(42, for: backspaceButton)
         backspaceButton.removeTarget(nil, action: nil, for: .allEvents)
+        styleModifierKey(backspaceButton, title: "⌫", role: .modifier)
+        setWidth(42, for: backspaceButton)
         backspaceButton.addTarget(self, action: #selector(backspaceTapped), for: .touchUpInside)
         thirdRow.addArrangedSubview(backspaceButton)
 
@@ -305,24 +329,24 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         bottomRow.spacing = currentMetrics.stackSpacing
         bottomRow.heightAnchor.constraint(greaterThanOrEqualToConstant: currentMetrics.rowMinimumHeight).isActive = true
 
-        styleModifierKey(modeToggleButton, title: layoutMode == .letters ? "123" : "ABC")
-        setWidth(52, for: modeToggleButton)
         modeToggleButton.removeTarget(nil, action: nil, for: .allEvents)
+        styleModifierKey(modeToggleButton, title: layoutMode == .letters ? "123" : "ABC", role: .modifier)
+        setWidth(52, for: modeToggleButton)
         modeToggleButton.addTarget(self, action: #selector(modeToggleTapped), for: .touchUpInside)
 
-        styleModifierKey(nextKeyboardButton, title: "🌐")
-        setWidth(42, for: nextKeyboardButton)
         nextKeyboardButton.removeTarget(nil, action: nil, for: .allEvents)
+        styleModifierKey(nextKeyboardButton, title: "🌐", role: .modifier)
+        setWidth(42, for: nextKeyboardButton)
         nextKeyboardButton.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
         nextKeyboardButton.accessibilityLabel = "Next Keyboard"
         nextKeyboardButton.isHidden = !needsInputModeSwitchKey
 
-        styleKey(spaceButton, title: "space")
         spaceButton.removeTarget(nil, action: nil, for: .allEvents)
+        styleKey(spaceButton, title: "space", role: .space)
         spaceButton.addTarget(self, action: #selector(spaceTapped), for: .touchUpInside)
 
-        styleReturnKey(returnButton)
         returnButton.removeTarget(nil, action: nil, for: .allEvents)
+        styleReturnKey(returnButton)
         returnButton.addTarget(self, action: #selector(returnTapped), for: .touchUpInside)
 
         bottomRow.addArrangedSubview(modeToggleButton)
@@ -371,15 +395,16 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func makeLetterKey(_ letter: String) -> UIButton {
-        let button = UIButton(type: .custom)
-        styleKey(button, title: letter)
+        let button = UIButton(type: .system)
+        styleKey(button, title: letter, role: .letter)
         button.addTarget(self, action: #selector(letterTapped(_:)), for: .touchUpInside)
         return button
     }
 
-    private func styleKey(_ button: UIButton, title: String) {
+    private func styleKey(_ button: UIButton, title: String, role: KeyboardKeyRole) {
+        registerModelTitle(title, role: role, for: button)
         button.configuration = nil
-        button.setTitle(title, for: .normal)
+        setTitleForAllStates(title, on: button)
         button.titleLabel?.font = .systemFont(ofSize: currentMetrics.letterFontSize, weight: .regular)
         button.backgroundColor = keyColor
         button.tintColor = keyTitleColor
@@ -402,23 +427,18 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         applyPressBehavior(to: button, normalColor: keyColor, highlightedColor: pressedVariant(for: keyColor), usesConfiguration: false)
     }
 
-    private func styleModifierKey(_ button: UIButton, title: String) {
-        styleKey(button, title: title)
+    private func styleModifierKey(_ button: UIButton, title: String, role: KeyboardKeyRole = .modifier) {
+        styleKey(button, title: title, role: role)
         button.titleLabel?.font = .systemFont(ofSize: currentMetrics.modifierFontSize, weight: .medium)
         button.backgroundColor = modifierKeyColor
         button.tintColor = modifierTitleColor
         applyTitleColors(to: button, base: modifierTitleColor)
-
-        if button === nextKeyboardButton {
-            button.configurationUpdateHandler = nil
-        } else {
-            applyPressBehavior(to: button, normalColor: modifierKeyColor, highlightedColor: pressedVariant(for: modifierKeyColor), usesConfiguration: false)
-        }
+        applyPressBehavior(to: button, normalColor: modifierKeyColor, highlightedColor: pressedVariant(for: modifierKeyColor), usesConfiguration: false)
     }
 
     private func styleReturnKey(_ button: UIButton) {
         let title = returnKeyTitle()
-        styleModifierKey(button, title: title)
+        styleModifierKey(button, title: title, role: .returnKey)
         let accent = shouldAccentReturnKey()
         let foregroundColor: UIColor = accent ? .white : modifierTitleColor
         let normalColor = accent ? accentKeyColor : modifierKeyColor
@@ -445,7 +465,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func configureAccessoryButton(_ button: UIButton, title: String) {
         let normalColor = modifierKeyColor.withAlphaComponent(0.88)
         button.configuration = nil
-        button.setTitle(title, for: .normal)
+        setTitleForAllStates(title, on: button)
         button.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
         button.backgroundColor = normalColor
         button.tintColor = modifierTitleColor
@@ -492,15 +512,14 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         }
 
         keyboardButtons().forEach { btn in
-            let normalTitle = btn.title(for: .normal) ?? btn.currentTitle ?? ""
             if btn === returnButton {
                 styleReturnKey(btn)
             } else if btn === shiftButton || btn === backspaceButton || btn === modeToggleButton || btn === nextKeyboardButton {
-                styleModifierKey(btn, title: normalTitle)
+                styleModifierKey(btn, title: modelTitle(for: btn) ?? "", role: .modifier)
             } else if btn === spaceButton {
-                styleKey(btn, title: "space")
+                styleKey(btn, title: modelTitle(for: btn) ?? "space", role: .space)
             } else {
-                styleKey(btn, title: normalTitle)
+                styleKey(btn, title: modelTitle(for: btn) ?? "", role: .letter)
             }
         }
 
@@ -508,34 +527,46 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         stylePanelControl(confirmDictationButton, symbolName: "checkmark")
         configureAccessoryButton(insertLatestButton, title: "Insert Latest")
         configureMicAccessoryButton(accessoryMicButton)
+
+        #if DEBUG
+        debugDumpLetterLegendState(context: "applyCurrentTheme")
+        #endif
     }
 
     private func applyPressBehavior(to button: UIButton, normalColor: UIColor, highlightedColor: UIColor, usesConfiguration: Bool) {
-        button.configurationUpdateHandler = { btn in
-            let resolvedBackground: UIColor
-            if !btn.isEnabled {
-                resolvedBackground = normalColor.withAlphaComponent(0.5)
-            } else if btn.isHighlighted || btn.isSelected {
-                resolvedBackground = highlightedColor
-            } else {
-                resolvedBackground = normalColor
-            }
+        if usesConfiguration {
+            pressPalettes.removeValue(forKey: ObjectIdentifier(button))
+            removeLegacyPressTargets(from: button)
+            button.configurationUpdateHandler = { btn in
+                let resolvedBackground: UIColor
+                if !btn.isEnabled {
+                    resolvedBackground = normalColor.withAlphaComponent(0.5)
+                } else if btn.isHighlighted || btn.isSelected {
+                    resolvedBackground = highlightedColor
+                } else {
+                    resolvedBackground = normalColor
+                }
 
-            if usesConfiguration, var configuration = btn.configuration {
-                configuration.baseBackgroundColor = resolvedBackground
-                btn.configuration = configuration
-            } else {
-                btn.backgroundColor = resolvedBackground
+                if var configuration = btn.configuration {
+                    configuration.baseBackgroundColor = resolvedBackground
+                    btn.configuration = configuration
+                }
             }
+            button.setNeedsUpdateConfiguration()
+            return
         }
-        button.setNeedsUpdateConfiguration()
+
+        button.configurationUpdateHandler = nil
+        pressPalettes[ObjectIdentifier(button)] = PressPalette(normal: normalColor, highlighted: highlightedColor)
+        removeLegacyPressTargets(from: button)
+        button.addTarget(self, action: #selector(legacyKeyTouchDown(_:)), for: [.touchDown, .touchDragEnter])
+        button.addTarget(self, action: #selector(legacyKeyTouchUp(_:)), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
+        updateLegacyPressAppearance(for: button, isHighlighted: false)
     }
 
     private func applyTitleColors(to button: UIButton, base: UIColor) {
-        if let title = button.title(for: .normal) ?? button.currentTitle {
-            button.setTitle(title, for: .highlighted)
-            button.setTitle(title, for: .selected)
-            button.setTitle(title, for: .disabled)
+        if let title = modelTitle(for: button) ?? button.title(for: .normal) {
+            setTitleForAllStates(title, on: button)
         }
 
         button.setTitleColor(base, for: .normal)
@@ -543,6 +574,80 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         button.setTitleColor(base.withAlphaComponent(0.92), for: .selected)
         button.setTitleColor(base.withAlphaComponent(0.52), for: .disabled)
     }
+
+    private func setTitleForAllStates(_ title: String, on button: UIButton) {
+        button.setTitle(title, for: .normal)
+        button.setTitle(title, for: .highlighted)
+        button.setTitle(title, for: .selected)
+        button.setTitle(title, for: .disabled)
+    }
+
+    private func registerModelTitle(_ title: String, role: KeyboardKeyRole, for button: UIButton) {
+        let id = ObjectIdentifier(button)
+        keyModelTitles[id] = title
+        keyRoles[id] = role
+    }
+
+    private func modelTitle(for button: UIButton) -> String? {
+        keyModelTitles[ObjectIdentifier(button)]
+    }
+
+    private func removeLegacyPressTargets(from button: UIButton) {
+        button.removeTarget(self, action: #selector(legacyKeyTouchDown(_:)), for: [.touchDown, .touchDragEnter])
+        button.removeTarget(self, action: #selector(legacyKeyTouchUp(_:)), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
+    }
+
+    @objc private func legacyKeyTouchDown(_ sender: UIButton) {
+        updateLegacyPressAppearance(for: sender, isHighlighted: true)
+    }
+
+    @objc private func legacyKeyTouchUp(_ sender: UIButton) {
+        updateLegacyPressAppearance(for: sender, isHighlighted: false)
+    }
+
+    private func updateLegacyPressAppearance(for button: UIButton, isHighlighted: Bool) {
+        guard let palette = pressPalettes[ObjectIdentifier(button)] else { return }
+        if !button.isEnabled {
+            button.backgroundColor = palette.normal.withAlphaComponent(0.5)
+        } else {
+            button.backgroundColor = (isHighlighted || button.isSelected) ? palette.highlighted : palette.normal
+        }
+    }
+
+    #if DEBUG
+    private func debugDumpLetterLegendState(context: String) {
+        guard debugLegendDumpCount < 4 else { return }
+        debugLegendDumpCount += 1
+
+        let letterButtons = keyboardButtons().filter { keyRoles[ObjectIdentifier($0)] == .letter }
+        for button in letterButtons {
+            let model = modelTitle(for: button) ?? "<nil-model>"
+            let normalTitle = button.title(for: .normal) ?? "<nil-title>"
+            let labelText = button.titleLabel?.text ?? "<nil-label-text>"
+            let labelColor = debugColorDescription(button.titleLabel?.textColor)
+            let hidden = button.titleLabel?.isHidden ?? true
+            let alpha = button.titleLabel?.alpha ?? -1
+            let alphaText = String(format: "%.2f", Double(alpha))
+            NSLog("%@", "[KeyboardLegend][\(context)] key=\(model) normal=\(normalTitle) labelText=\(labelText) labelColor=\(labelColor) hidden=\(hidden) alpha=\(alphaText)")
+
+            if normalTitle.isEmpty {
+                assertionFailure("Keyboard key \(model) has empty .normal title after \(context)")
+            }
+        }
+    }
+
+    private func debugColorDescription(_ color: UIColor?) -> String {
+        guard let color else { return "nil" }
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        if color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            return String(format: "rgba(%.3f,%.3f,%.3f,%.3f)", red, green, blue, alpha)
+        }
+        return color.description
+    }
+    #endif
 
     private func pressedVariant(for color: UIColor) -> UIColor {
         return isDark ? color.withAlphaComponent(0.78) : color.withAlphaComponent(0.86)
@@ -647,7 +752,7 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     @objc private func letterTapped(_ sender: UIButton) {
         UIDevice.current.playInputClick()
-        guard let key = sender.title(for: .normal) ?? sender.currentTitle else { return }
+        guard let key = modelTitle(for: sender) ?? sender.title(for: .normal) else { return }
         textDocumentProxy.insertText(key)
         if layoutMode == .letters, isShiftEnabled {
             isShiftEnabled = false
