@@ -1369,7 +1369,7 @@ private struct ProviderSettingsTab: View {
         var subtitle: String {
             switch self {
             case .light: return "Whisper Tiny/Base · fastest local"
-            case .balanced: return "Parakeet CTC 0.6B · good speed/quality"
+            case .balanced: return "Parakeet CTC 0.6B · experimental (not recommended)"
             case .best: return "Whisper Large-v3 Turbo · highest local accuracy"
             case .cloud: return "OpenAI Whisper API · remote transcription"
             }
@@ -1394,7 +1394,7 @@ private struct ProviderSettingsTab: View {
         VStack(spacing: VFSpacing.lg) {
             NeuSection(icon: "waveform.and.mic", title: "Smart Model Selection") {
                 VStack(alignment: .leading, spacing: VFSpacing.lg) {
-                    Text("Choose a preset. If requirements are missing, Whisper Smart safely falls back to Apple Speech and shows one-click setup actions.")
+                    Text("Choose a preset. If host prerequisites (Apple Command Line Tools, make, Python/venv) are missing, setup fails fast with guidance and Whisper Smart falls back to Apple Speech.")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
 
@@ -1454,9 +1454,9 @@ private struct ProviderSettingsTab: View {
                     switch whisperRuntimeInstaller.phase {
                     case .notInstalled:
                         profileActionButton(title: "Install runtime", enabled: true) {
-                            whisperRuntimeInstaller.installWithHomebrew()
+                            whisperRuntimeInstaller.installRuntime()
                         }
-                        Text("Installs whisper.cpp runtime in-app using Homebrew.")
+                        Text("Builds and installs whisper-cli in app-managed runtime storage. Requires Apple Command Line Tools (xcode-select) and make on host.")
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.textSecondary)
                     case .installing:
@@ -1578,7 +1578,7 @@ private struct ProviderSettingsTab: View {
         case .light:
             if !whisperRuntimeIsReady {
                 profileActionButton(title: "Install runtime", enabled: true) {
-                    whisperRuntimeInstaller.installWithHomebrew()
+                    whisperRuntimeInstaller.installRuntime()
                 }
             } else if !whisperModelInstalled([.tinyEn, .baseEn]) {
                 profileActionButton(title: "Download", enabled: true) {
@@ -1591,7 +1591,7 @@ private struct ProviderSettingsTab: View {
         case .best:
             if !whisperRuntimeIsReady {
                 profileActionButton(title: "Install runtime", enabled: true) {
-                    whisperRuntimeInstaller.installWithHomebrew()
+                    whisperRuntimeInstaller.installRuntime()
                 }
             } else if !whisperModelInstalled([.largeV3Turbo]) {
                 profileActionButton(title: "Download", enabled: true) {

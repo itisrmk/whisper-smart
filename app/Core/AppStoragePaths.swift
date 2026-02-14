@@ -51,6 +51,20 @@ enum AppStoragePaths {
                 .appendingPathComponent("parakeet", isDirectory: true)
         }
     }
+
+    static func whisperRuntimeRootCandidates(fileManager: FileManager = .default) -> [URL] {
+        guard let appSupport = appSupportDirectoryURL(fileManager: fileManager) else { return [] }
+
+        var roots = [canonicalAppSupportDirectoryName]
+        roots.append(contentsOf: legacyAppSupportDirectoryNames)
+
+        return roots.map { rootName in
+            appSupport
+                .appendingPathComponent(rootName, isDirectory: true)
+                .appendingPathComponent("runtime", isDirectory: true)
+                .appendingPathComponent("whisper", isDirectory: true)
+        }
+    }
 }
 
 private extension AppStoragePaths {

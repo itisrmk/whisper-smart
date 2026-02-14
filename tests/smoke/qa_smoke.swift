@@ -22,6 +22,7 @@ private final class MockAudioCapture: AudioCapturing {
     var onError: ((Error) -> Void)?
     var onAudioLevel: ((Float) -> Void)?
     var onInterruption: ((AudioCaptureService.InterruptionReason) -> Void)?
+    var inputDeviceUID: String?
 
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0

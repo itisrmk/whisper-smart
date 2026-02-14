@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import os.log
 
 private let logger = Logger(subsystem: "com.visperflow", category: "ModelDownloader")
@@ -12,10 +13,12 @@ final class ModelDownloaderService: NSObject {
         let variant: ModelVariant
         let source: ParakeetResolvedModelSource
         weak var state: ModelDownloadState?
-        let task: URLSessionDownloadTask
+        var task: URLSessionDownloadTask
         let resumeDataKey: String
         var isUserCancelled = false
         var completionError: String?
+        var retryCount = 0
+        var expectedContentLength: Int64?
 
         init(
             variant: ModelVariant,
@@ -34,6 +37,7 @@ final class ModelDownloaderService: NSObject {
 
     private let runtimeBootstrapManager = ParakeetRuntimeBootstrapManager.shared
     private let stateQueue = DispatchQueue(label: "com.visperflow.modeldownloader.state")
+    private let maxRetryAttempts = 2
     private var activeDownloadsByVariantID: [String: DownloadContext] = [:]
     private var variantIDByTaskID: [Int: String] = [:]
     private var resumeDataByDownloadKey: [String: Data] = [:]
@@ -182,12 +186,22 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
         stateQueue.sync {
             guard let context = context(forTaskID: downloadTask.taskIdentifier) else { return }
 
+            if let response = downloadTask.response as? HTTPURLResponse,
+               !(200...299).contains(response.statusCode) {
+                context.completionError = "Model download failed: server returned HTTP \(response.statusCode)."
+                return
+            }
+
             guard let destinationURL = context.variant.localURL else {
                 context.completionError = "Cannot resolve model storage path. Check disk permissions."
                 return
             }
 
-            if let moveError = Self.moveDownloadedFile(from: location, to: destinationURL) {
+            if let expectedLength = downloadTask.response?.expectedContentLength, expectedLength > 0 {
+                context.expectedContentLength = expectedLength
+            }
+
+            if let moveError = Self.moveDownloadedFileAtomically(from: location, to: destinationURL) {
                 context.completionError = moveError
                 return
             }
@@ -226,12 +240,40 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
         var completionAction: (() -> Void)?
 
         stateQueue.sync {
-            guard let context = removeContext(forTaskID: task.taskIdentifier) else { return }
+            guard let context = context(forTaskID: task.taskIdentifier) else { return }
 
             if context.isUserCancelled {
+                _ = removeContext(forTaskID: task.taskIdentifier)
                 return
             }
 
+            if let error,
+               shouldRetry(error: error, retryCount: context.retryCount) {
+                context.retryCount += 1
+                let resumeData = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+                let nextTask: URLSessionDownloadTask
+                if let resumeData, !resumeData.isEmpty {
+                    nextTask = session.downloadTask(withResumeData: resumeData)
+                } else if let modelURL = context.source.modelURL {
+                    nextTask = session.downloadTask(with: modelURL)
+                } else {
+                    completionAction = {
+                        context.state?.transitionToFailed(message: "Model source URL is invalid.")
+                    }
+                    _ = removeContext(forTaskID: task.taskIdentifier)
+                    return
+                }
+
+                variantIDByTaskID.removeValue(forKey: task.taskIdentifier)
+                variantIDByTaskID[nextTask.taskIdentifier] = context.variant.id
+                context.task = nextTask
+                nextTask.resume()
+
+                logger.info("Retrying model download for \(context.variant.id) attempt=\(context.retryCount + 1)")
+                return
+            }
+
+            guard let context = removeContext(forTaskID: task.taskIdentifier) else { return }
             guard let state = context.state else { return }
             completionState = state
 
@@ -241,7 +283,7 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
                     resumeDataByDownloadKey[context.resumeDataKey] = resumeData
                 }
 
-                let message = downloadFailureMessage(for: error)
+                let message = downloadFailureMessage(for: error, response: task.response)
                 completionAction = {
                     state.transitionToFailed(message: message)
                 }
@@ -283,17 +325,26 @@ private extension ModelDownloaderService {
         return activeDownloadsByVariantID.removeValue(forKey: variantID)
     }
 
-    static func moveDownloadedFile(from sourceURL: URL, to destinationURL: URL) -> String? {
+    static func moveDownloadedFileAtomically(from sourceURL: URL, to destinationURL: URL) -> String? {
         let fileManager = FileManager.default
         do {
             try fileManager.createDirectory(
                 at: destinationURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                try fileManager.removeItem(at: destinationURL)
+
+            let tempURL = destinationURL.deletingLastPathComponent()
+                .appendingPathComponent(".\(destinationURL.lastPathComponent).download")
+            if fileManager.fileExists(atPath: tempURL.path) {
+                try fileManager.removeItem(at: tempURL)
             }
-            try fileManager.moveItem(at: sourceURL, to: destinationURL)
+            try fileManager.moveItem(at: sourceURL, to: tempURL)
+
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                _ = try fileManager.replaceItemAt(destinationURL, withItemAt: tempURL)
+            } else {
+                try fileManager.moveItem(at: tempURL, to: destinationURL)
+            }
             return nil
         } catch {
             logger.error("Failed to move downloaded model to \(destinationURL.path): \(error.localizedDescription)")
@@ -366,41 +417,66 @@ private extension ModelDownloaderService {
             return downloadError
         }
 
+        if let expectedSize = source.tokenizerExpectedSizeBytes,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: tokenizerDestinationURL.path),
+           let fileSize = attrs[.size] as? Int64,
+           fileSize < expectedSize {
+            return "Tokenizer artifact is smaller than expected (\(fileSize) < \(expectedSize) bytes). Retry the download."
+        }
+
+        if let expectedSHA = source.tokenizerSHA256,
+           let checksumError = validateSHA256(at: tokenizerDestinationURL, expectedHex: expectedSHA, label: "tokenizer") {
+            return checksumError
+        }
+
         return validateTokenizerArtifact(at: tokenizerDestinationURL)
     }
 
     func downloadAuxiliaryArtifact(from sourceURL: URL, to destinationURL: URL, label: String) -> String? {
-        let semaphore = DispatchSemaphore(value: 0)
-        var completionError: String?
+        var lastError: String?
 
-        let task = URLSession.shared.downloadTask(with: sourceURL) { tempURL, response, error in
-            defer { semaphore.signal() }
+        for attempt in 0...maxRetryAttempts {
+            let semaphore = DispatchSemaphore(value: 0)
+            var completionError: String?
 
-            if let error {
-                completionError = "Failed to download \(label) artifact: \(self.downloadFailureMessage(for: error))"
-                return
+            let task = URLSession.shared.downloadTask(with: sourceURL) { tempURL, response, error in
+                defer { semaphore.signal() }
+
+                if let error {
+                    completionError = "Failed to download \(label) artifact: \(self.downloadFailureMessage(for: error, response: response))"
+                    return
+                }
+
+                if let httpResponse = response as? HTTPURLResponse,
+                   (200...299).contains(httpResponse.statusCode) == false {
+                    completionError = "Failed to download \(label) artifact: server returned HTTP \(httpResponse.statusCode)."
+                    return
+                }
+
+                guard let tempURL else {
+                    completionError = "Failed to download \(label) artifact: no file data received."
+                    return
+                }
+
+                if let moveError = Self.moveDownloadedFileAtomically(from: tempURL, to: destinationURL) {
+                    completionError = "Failed to store \(label) artifact: \(moveError)"
+                    return
+                }
             }
 
-            if let httpResponse = response as? HTTPURLResponse,
-               (200...299).contains(httpResponse.statusCode) == false {
-                completionError = "Failed to download \(label) artifact: server returned HTTP \(httpResponse.statusCode)."
-                return
-            }
+            task.resume()
+            semaphore.wait()
 
-            guard let tempURL else {
-                completionError = "Failed to download \(label) artifact: no file data received."
-                return
+            if completionError == nil {
+                return nil
             }
-
-            if let moveError = Self.moveDownloadedFile(from: tempURL, to: destinationURL) {
-                completionError = "Failed to store \(label) artifact: \(moveError)"
-                return
+            lastError = completionError
+            if attempt < maxRetryAttempts {
+                logger.warning("Retrying \(label, privacy: .public) artifact download (attempt \(attempt + 2))")
             }
         }
 
-        task.resume()
-        semaphore.wait()
-        return completionError
+        return lastError
     }
 
     func validateDownloadedModel(
@@ -413,9 +489,19 @@ private extension ModelDownloaderService {
             return "Downloaded model file is unreadable. Check disk permissions and retry."
         }
 
-        let minimumModelBytes = variant.minimumValidModelBytes(using: source)
+        let minimumModelBytes = max(variant.minimumValidModelBytes(using: source), source.modelExpectedSizeBytes ?? 0)
         guard fileSize >= minimumModelBytes else {
             return "Downloaded model file is too small (\(fileSize / 1_000_000) MB). Minimum expected is \(minimumModelBytes / 1_000_000) MB."
+        }
+
+        if let expectedSHA = source.modelSHA256,
+           let checksumError = validateSHA256(at: modelURL, expectedHex: expectedSHA, label: "model") {
+            return checksumError
+        }
+
+        if let expectedLength = source.modelExpectedSizeBytes,
+           fileSize < expectedLength {
+            return "Downloaded model size check failed (\(fileSize) < expected \(expectedLength) bytes). Retry the download."
         }
 
         if source.tokenizerURL != nil {
@@ -586,7 +672,7 @@ private extension ModelDownloaderService {
             return "Tokenizer validation failed during ONNX preflight. Re-download model artifacts from Settings -> Provider."
         }
         if lowercased.contains("dependency_missing") || lowercased.contains("modulenotfounderror") {
-            return "Parakeet runtime dependencies are missing. Run Repair Parakeet Runtime in Settings -> Provider."
+            return "Parakeet runtime dependencies are incomplete on this Mac. Try Repair Parakeet Runtime in Settings -> Provider, or switch to Light preset for guaranteed local setup."
         }
         if details.isEmpty {
             return "ONNX preflight failed with exit status \(exitCode) and no diagnostics."
@@ -594,7 +680,53 @@ private extension ModelDownloaderService {
         return "ONNX preflight failed: \(details)"
     }
 
-    func downloadFailureMessage(for error: Error) -> String {
+    func shouldRetry(error: Error, retryCount: Int) -> Bool {
+        guard retryCount < maxRetryAttempts else { return false }
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return false }
+
+        switch nsError.code {
+        case NSURLErrorTimedOut,
+             NSURLErrorNetworkConnectionLost,
+             NSURLErrorCannotConnectToHost,
+             NSURLErrorCannotFindHost,
+             NSURLErrorDNSLookupFailed,
+             NSURLErrorNotConnectedToInternet,
+             NSURLErrorResourceUnavailable:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func validateSHA256(at fileURL: URL, expectedHex: String, label: String) -> String? {
+        guard let data = try? Data(contentsOf: fileURL) else {
+            return "\(label.capitalized) checksum validation failed: file is unreadable."
+        }
+        let digest = SHA256.hash(data: data)
+        let actual = digest.compactMap { String(format: "%02x", $0) }.joined()
+        if actual.lowercased() != expectedHex.lowercased() {
+            return "\(label.capitalized) checksum mismatch. Retry download from the built-in source."
+        }
+        return nil
+    }
+
+    func downloadFailureMessage(for error: Error, response: URLResponse? = nil) -> String {
+        if let http = response as? HTTPURLResponse {
+            switch http.statusCode {
+            case 401, 403:
+                return "Download failed: access denied by model host (HTTP \(http.statusCode))."
+            case 404:
+                return "Download failed: model file was not found on the server (HTTP 404)."
+            case 429:
+                return "Download failed: host is rate-limiting requests (HTTP 429). Try again shortly."
+            case 500...599:
+                return "Download failed: model host is temporarily unavailable (HTTP \(http.statusCode))."
+            default:
+                break
+            }
+        }
+
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain {
             switch nsError.code {
@@ -604,6 +736,8 @@ private extension ModelDownloaderService {
                 return "Download timed out. Retry when the network is stable."
             case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost:
                 return "Download failed: cannot reach the model host."
+            case NSURLErrorCancelled:
+                return "Download was cancelled."
             default:
                 break
             }

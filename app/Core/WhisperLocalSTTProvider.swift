@@ -180,10 +180,14 @@ enum WhisperLocalRuntime {
             return configured
         }
 
-        let candidates = [
+        var candidates: [String] = []
+        for runtimeRoot in AppStoragePaths.whisperRuntimeRootCandidates() {
+            candidates.append(runtimeRoot.appendingPathComponent("bin/whisper-cli").path)
+        }
+        candidates.append(contentsOf: [
             "/opt/homebrew/bin/whisper-cli",
             "/usr/local/bin/whisper-cli",
-        ]
+        ])
 
         for c in candidates where FileManager.default.isExecutableFile(atPath: c) {
             return c
@@ -213,7 +217,7 @@ enum WhisperLocalRuntime {
 
     static func unavailableReason() -> String? {
         guard let cliPath = detectCLIPath() else {
-            return "Whisper runtime is not installed. Install whisper.cpp (whisper-cli) in Provider settings."
+            return "Whisper runtime is not installed yet. Use Provider settings to install the managed local runtime."
         }
         DictationProviderPolicy.whisperCLIPath = cliPath
 

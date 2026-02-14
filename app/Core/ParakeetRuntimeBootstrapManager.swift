@@ -32,7 +32,9 @@ final class ParakeetRuntimeBootstrapManager {
     private let queue = DispatchQueue(label: "com.visperflow.parakeet.bootstrap", qos: .userInitiated)
     private let statusLock = NSLock()
     private let fileManager = FileManager.default
-    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece", "onnx-asr"]
+    // Keep runtime bootstrap on widely available wheels only.
+    // onnx-asr is optional at runtime and must not block one-click setup.
+    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece"]
 
     private var status = ParakeetRuntimeBootstrapStatus(
         phase: .idle,
@@ -56,7 +58,7 @@ final class ParakeetRuntimeBootstrapManager {
             do {
                 try runCommand(
                     executablePath: "/usr/bin/env",
-                    arguments: [override, "-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+                    arguments: [override, "-c", "import numpy, onnxruntime, sentencepiece"],
                     step: "verify VISPERFLOW_PARAKEET_PYTHON override"
                 )
                 updateStatus(
@@ -107,6 +109,8 @@ private extension ParakeetRuntimeBootstrapManager {
     }
 
     func bootstrapLocked(forceRepair: Bool) throws -> String {
+        try validateHostPrerequisites()
+
         let runtimeRoot = try resolveRuntimeRootDirectory()
         let venvDirectory = runtimeRoot.appendingPathComponent("venv", isDirectory: true)
         let pythonURL = venvDirectory.appendingPathComponent("bin/python3")
@@ -197,6 +201,62 @@ private extension ParakeetRuntimeBootstrapManager {
             throw ParakeetRuntimeBootstrapError(
                 message: "\(message) Use Repair Parakeet Runtime in Settings → Provider."
             )
+        }
+    }
+
+    func validateHostPrerequisites() throws {
+        guard commandExists("xcode-select") else {
+            throw ParakeetRuntimeBootstrapError(
+                message: "Missing Apple Command Line Tools (xcode-select not found). Install with 'xcode-select --install', then retry."
+            )
+        }
+
+        guard commandExists(bootstrapPythonCommand) else {
+            throw ParakeetRuntimeBootstrapError(
+                message: "Python runtime prerequisite not found ('\(bootstrapPythonCommand)'). Install Python 3 and ensure it is on PATH, or set VISPERFLOW_PARAKEET_BOOTSTRAP_PYTHON."
+            )
+        }
+
+        do {
+            try runCommand(
+                executablePath: "/usr/bin/env",
+                arguments: ["xcode-select", "-p"],
+                step: "verify Apple Command Line Tools"
+            )
+        } catch {
+            throw ParakeetRuntimeBootstrapError(
+                message: "Apple Command Line Tools are required for one-click runtime setup. Run 'xcode-select --install' and open Xcode once to finish setup."
+            )
+        }
+
+        do {
+            try runCommand(
+                executablePath: "/usr/bin/env",
+                arguments: [bootstrapPythonCommand, "-m", "venv", "--help"],
+                step: "verify Python venv support"
+            )
+        } catch {
+            throw ParakeetRuntimeBootstrapError(
+                message: "Python prerequisite is missing venv support. Install a full Python 3 build (with venv), then retry one-click runtime setup."
+            )
+        }
+    }
+
+    func commandExists(_ command: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = [command]
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
         }
     }
 

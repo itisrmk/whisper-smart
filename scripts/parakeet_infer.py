@@ -62,10 +62,12 @@ def load_sentencepiece():
 def load_onnx_asr():
     try:
         import onnx_asr  # type: ignore
-    except ModuleNotFoundError as exc:
-        raise_dependency_error("onnx-asr", exc)
-    except Exception as exc:  # pragma: no cover - unexpected import failure
-        raise RunnerError(f"DEPENDENCY_ERROR: Failed to import onnx-asr: {exc}") from exc
+    except ModuleNotFoundError:
+        # Optional optimization path; raw ONNX fallback remains supported.
+        return None
+    except Exception:
+        # Treat unexpected onnx-asr import failures as optional-path failures.
+        return None
     return onnx_asr
 
 
@@ -456,35 +458,37 @@ def run_inference(
     explicit_tokenizer: Optional[str],
 ) -> str:
     # Preferred path: onnx-asr handles Parakeet preprocessing/signature variants.
+    # If unavailable, continue with raw ONNX fallback.
     temp_model_dir: Path | None = None
     try:
         onnx_asr = load_onnx_asr()
-        temp_model_dir = prepare_onnx_asr_model_dir(model_path, explicit_tokenizer)
+        if onnx_asr is not None:
+            temp_model_dir = prepare_onnx_asr_model_dir(model_path, explicit_tokenizer)
 
-        model = None
-        last_error: Exception | None = None
-        for quant in (None, "int8"):
-            try:
-                model = onnx_asr.load_model(
-                    "nemo-parakeet-ctc-0.6b",
-                    path=str(temp_model_dir),
-                    quantization=quant,
-                    providers=["CPUExecutionProvider"],
-                )
-                break
-            except Exception as exc:
-                last_error = exc
+            model = None
+            last_error: Exception | None = None
+            for quant in (None, "int8"):
+                try:
+                    model = onnx_asr.load_model(
+                        "nemo-parakeet-ctc-0.6b",
+                        path=str(temp_model_dir),
+                        quantization=quant,
+                        providers=["CPUExecutionProvider"],
+                    )
+                    break
+                except Exception as exc:
+                    last_error = exc
 
-        if model is None and last_error is not None:
-            raise last_error
-        if model is None:
-            raise RunnerError("INFERENCE_ERROR: Failed to initialize onnx-asr model.")
+            if model is None and last_error is not None:
+                raise last_error
+            if model is None:
+                raise RunnerError("INFERENCE_ERROR: Failed to initialize onnx-asr model.")
 
-        result = model.recognize(str(audio_path), sample_rate=16000)
-        text = str(result).strip()
-        if text:
-            return text
-        raise RunnerError("INFERENCE_ERROR: onnx-asr returned empty transcript.")
+            result = model.recognize(str(audio_path), sample_rate=16000)
+            text = str(result).strip()
+            if text:
+                return text
+            raise RunnerError("INFERENCE_ERROR: onnx-asr returned empty transcript.")
     except RunnerError:
         raise
     except Exception:
@@ -527,25 +531,27 @@ def run_inference(
 
 def check_runtime(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
     # Preferred check path via onnx-asr (supports Parakeet preprocessing graph requirements).
+    # If unavailable, continue with raw ONNX validator.
     temp_model_dir: Path | None = None
     try:
         onnx_asr = load_onnx_asr()
-        temp_model_dir = prepare_onnx_asr_model_dir(model_path, explicit_tokenizer)
+        if onnx_asr is not None:
+            temp_model_dir = prepare_onnx_asr_model_dir(model_path, explicit_tokenizer)
 
-        last_error: Exception | None = None
-        for quant in (None, "int8"):
-            try:
-                _ = onnx_asr.load_model(
-                    "nemo-parakeet-ctc-0.6b",
-                    path=str(temp_model_dir),
-                    quantization=quant,
-                    providers=["CPUExecutionProvider"],
-                )
-                return
-            except Exception as exc:
-                last_error = exc
-        if last_error is not None:
-            raise last_error
+            last_error: Exception | None = None
+            for quant in (None, "int8"):
+                try:
+                    _ = onnx_asr.load_model(
+                        "nemo-parakeet-ctc-0.6b",
+                        path=str(temp_model_dir),
+                        quantization=quant,
+                        providers=["CPUExecutionProvider"],
+                    )
+                    return
+                except Exception as exc:
+                    last_error = exc
+            if last_error is not None:
+                raise last_error
     except RunnerError:
         raise
     except Exception:

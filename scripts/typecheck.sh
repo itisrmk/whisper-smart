@@ -1,27 +1,13 @@
 #!/usr/bin/env bash
-# scripts/typecheck.sh — Swift type-check for all sources in the repo.
+# scripts/typecheck.sh — Swift type-check using SwiftPM package context.
 # Usage: bash scripts/typecheck.sh
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Collect every Swift file under app/
-SOURCES=()
-while IFS= read -r -d '' f; do
-    SOURCES+=("$f")
-done < <(find "$REPO_ROOT/app" -name '*.swift' -print0)
+cd "$REPO_ROOT"
 
-if [ ${#SOURCES[@]} -eq 0 ]; then
-    echo "No Swift files found under app/."
-    exit 1
-fi
+echo "Type-checking App target via SwiftPM (resolves package dependencies like Sparkle)…"
+swift build --target App -c debug
 
-echo "Type-checking ${#SOURCES[@]} Swift file(s)…"
-
-swiftc -typecheck \
-    -sdk "$(xcrun --show-sdk-path)" \
-    -target "$(uname -m)-apple-macosx14.0" \
-    -F "$(xcrun --show-sdk-path)/System/Library/Frameworks" \
-    "${SOURCES[@]}"
-
-echo "✓ All files pass type-check."
+echo "✓ App target type-check/build passed."

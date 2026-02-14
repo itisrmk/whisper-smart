@@ -189,7 +189,7 @@ enum DictationProviderPolicy {
         get {
             let stored = defaults.string(forKey: Key.whisperCLIPath)?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let stored, !stored.isEmpty { return stored }
-            return ProcessInfo.processInfo.environment["VISPERFLOW_WHISPER_CLI"] ?? "/opt/homebrew/bin/whisper-cli"
+            return ProcessInfo.processInfo.environment["VISPERFLOW_WHISPER_CLI"] ?? ""
         }
         set { defaults.set(newValue, forKey: Key.whisperCLIPath) }
     }

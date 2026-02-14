@@ -15,6 +15,10 @@ struct ParakeetModelSourceOption: Identifiable, Equatable {
     let modelURLString: String
     let modelDataURLString: String?
     let tokenizerURLString: String?
+    let modelExpectedSizeBytes: Int64?
+    let tokenizerExpectedSizeBytes: Int64?
+    let modelSHA256: String?
+    let tokenizerSHA256: String?
     let isBuiltIn: Bool
 
     var modelURL: URL? {
@@ -56,6 +60,10 @@ struct ParakeetResolvedModelSource: Equatable {
     let modelDataURL: URL?
     let tokenizerURL: URL?
     let tokenizerFilename: String?
+    let modelExpectedSizeBytes: Int64?
+    let tokenizerExpectedSizeBytes: Int64?
+    let modelSHA256: String?
+    let tokenizerSHA256: String?
     let error: String?
     let availableSources: [ParakeetModelSourceOption]
 
@@ -171,6 +179,10 @@ final class ParakeetModelSourceConfigurationStore {
                 modelDataURL: nil,
                 tokenizerURL: nil,
                 tokenizerFilename: nil,
+                modelExpectedSizeBytes: nil,
+                tokenizerExpectedSizeBytes: nil,
+                modelSHA256: nil,
+                tokenizerSHA256: nil,
                 error: "No default model source is bundled for variant '\(variantID)'.",
                 availableSources: []
             )
@@ -209,6 +221,10 @@ final class ParakeetModelSourceConfigurationStore {
             modelDataURL: selectedSource.modelDataURL,
             tokenizerURL: selectedSource.tokenizerURL,
             tokenizerFilename: selectedSource.tokenizerFilename,
+            modelExpectedSizeBytes: selectedSource.modelExpectedSizeBytes,
+            tokenizerExpectedSizeBytes: selectedSource.tokenizerExpectedSizeBytes,
+            modelSHA256: selectedSource.modelSHA256,
+            tokenizerSHA256: selectedSource.tokenizerSHA256,
             error: error,
             availableSources: options
         )
@@ -222,10 +238,14 @@ private extension ParakeetModelSourceConfigurationStore {
             return [
                 ParakeetModelSourceOption(
                     id: "hf_parakeet_ctc06b_int8",
-                    displayName: "Hugging Face int8 ONNX (recommended)",
+                    displayName: "Hugging Face int8 ONNX (experimental, not recommended)",
                     modelURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.int8.onnx",
                     modelDataURLString: nil,
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/vocab.txt",
+                    modelExpectedSizeBytes: 350_000_000,
+                    tokenizerExpectedSizeBytes: 100_000,
+                    modelSHA256: nil,
+                    tokenizerSHA256: nil,
                     isBuiltIn: true
                 )
             ]
@@ -250,6 +270,10 @@ private extension ParakeetModelSourceConfigurationStore {
             modelURLString: modelURL ?? "",
             modelDataURLString: nil,
             tokenizerURLString: tokenizerURL,
+            modelExpectedSizeBytes: nil,
+            tokenizerExpectedSizeBytes: nil,
+            modelSHA256: nil,
+            tokenizerSHA256: nil,
             isBuiltIn: false
         )
     }
