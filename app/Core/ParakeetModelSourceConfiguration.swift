@@ -237,11 +237,11 @@ private extension ParakeetModelSourceConfigurationStore {
         case ParakeetModelCatalog.ctc06BVariantID:
             return [
                 ParakeetModelSourceOption(
-                    id: "hf_parakeet_ctc06b_int8",
-                    displayName: "Hugging Face int8 ONNX (experimental, not recommended)",
-                    modelURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/model.int8.onnx",
+                    id: "hf_parakeet_tdt06b_v3_onnx",
+                    displayName: "nvidia/parakeet-tdt-0.6b-v3 ONNX mapping (community export, experimental)",
+                    modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/model.onnx",
                     modelDataURLString: nil,
-                    tokenizerURLString: "https://huggingface.co/istupakov/parakeet-ctc-0.6b-onnx/resolve/main/vocab.txt",
+                    tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",
                     modelExpectedSizeBytes: 350_000_000,
                     tokenizerExpectedSizeBytes: 100_000,
                     modelSHA256: nil,

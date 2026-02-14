@@ -6,7 +6,7 @@ Whisper Smart is a lightweight macOS menu-bar dictation app that supports local 
 
 In **Settings → Provider**, the app now includes explicit model presets:
 - **Light**: Whisper Tiny/Base (local, fastest setup)
-- **Balanced**: Parakeet CTC 0.6B (experimental, not recommended)
+- **Balanced**: Parakeet TDT 0.6B v3 ONNX source (experimental)
 - **Best**: Whisper Large-v3 Turbo (local quality-focused)
 - **Cloud**: OpenAI Whisper API
 

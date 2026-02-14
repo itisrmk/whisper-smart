@@ -19,7 +19,7 @@ enum STTProviderKind: String, CaseIterable, Codable, Identifiable {
     var displayName: String {
         switch self {
         case .appleSpeech: return "Apple Speech (on-device)"
-        case .parakeet:    return "NVIDIA Parakeet (experimental, not recommended)"
+        case .parakeet:    return "NVIDIA Parakeet TDT 0.6B v3 (experimental)"
         case .whisper:     return "Whisper (local)"
         case .openaiAPI:   return "OpenAI Whisper API"
         case .stub:        return "Stub (testing only)"
@@ -273,10 +273,10 @@ struct ModelVariant: Equatable, Identifiable {
 // MARK: - Known Model Variants
 
 extension ModelVariant {
-    /// NVIDIA Parakeet CTC 0.6B (INT8 ONNX) — compact, fast, English-focused.
+    /// NVIDIA Parakeet TDT 0.6B v3 (ONNX export) — multilingual, local, experimental.
     static let parakeetCTC06B = ModelVariant(
         id: ParakeetModelCatalog.ctc06BVariantID,
-        displayName: "Parakeet CTC 0.6B (experimental, not recommended)",
+        displayName: "Parakeet TDT 0.6B v3 (experimental)",
         sizeBytes: 41_000_000,
         minimumValidBytes: 30_000_000,
         relativePath: "models/parakeet-ctc-0.6b.onnx"

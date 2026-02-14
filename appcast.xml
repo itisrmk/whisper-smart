@@ -6,6 +6,24 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.2</title>
+      <description>v0.2.2 - Parakeet source alignment + Qwen TTS preview option
+
+New in this release:
+- Balanced Parakeet mapping aligned to TDT v3 ONNX source path
+- Removed stale recommended messaging in provider UX
+- Added one-click Qwen3-TTS option in Text-to-Speech (Preview)
+- Kept STT flow stable with passing smoke/typecheck gates</description>
+      <pubDate>Sat, 14 Feb 2026 16:09:35 -0700</pubDate>
+      <enclosure
+        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.2/Whisper-Smart-0.2.2.dmg"
+        sparkle:shortVersionString="0.2.2"
+        sparkle:version="202602141609"
+        length="4460521"
+        type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.1</title>
       <description>v0.2.1 - Parakeet hardening + release safety polish
 

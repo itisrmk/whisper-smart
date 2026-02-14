@@ -7,6 +7,7 @@ enum DictationFeatureFlags {
     private enum Key {
         static let postProcessingPipelineEnabled = "postProcessingPipelineEnabled"
         static let commandModeScaffoldEnabled = "commandModeScaffoldEnabled"
+        static let ttsPlaceholderEnabled = "ttsPlaceholderEnabled"
     }
 
     static var postProcessingPipelineEnabled: Bool {
@@ -27,6 +28,17 @@ enum DictationFeatureFlags {
         }
         set {
             defaults.set(newValue, forKey: Key.commandModeScaffoldEnabled)
+        }
+    }
+
+    /// Placeholder gate for upcoming text-to-speech settings UI.
+    /// Disabled by default so STT flow remains unchanged.
+    static var ttsPlaceholderEnabled: Bool {
+        get {
+            defaults.bool(forKey: Key.ttsPlaceholderEnabled)
+        }
+        set {
+            defaults.set(newValue, forKey: Key.ttsPlaceholderEnabled)
         }
     }
 }

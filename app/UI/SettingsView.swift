@@ -1369,7 +1369,7 @@ private struct ProviderSettingsTab: View {
         var subtitle: String {
             switch self {
             case .light: return "Whisper Tiny/Base · fastest local"
-            case .balanced: return "Parakeet CTC 0.6B · experimental (not recommended)"
+            case .balanced: return "Parakeet TDT 0.6B v3 · local ONNX (experimental)"
             case .best: return "Whisper Large-v3 Turbo · highest local accuracy"
             case .cloud: return "OpenAI Whisper API · remote transcription"
             }
@@ -1388,13 +1388,14 @@ private struct ProviderSettingsTab: View {
     @StateObject private var downloadState = ModelDownloadState(variant: .parakeetCTC06B)
     @StateObject private var whisperInstaller = WhisperModelInstaller.shared
     @StateObject private var whisperRuntimeInstaller = WhisperRuntimeInstaller.shared
+    @StateObject private var ttsPlaceholderDownloader = TTSModelPlaceholderDownloader.shared
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
             NeuSection(icon: "waveform.and.mic", title: "Smart Model Selection") {
                 VStack(alignment: .leading, spacing: VFSpacing.lg) {
-                    Text("Choose a preset. If host prerequisites (Apple Command Line Tools, make, Python/venv) are missing, setup fails fast with guidance and Whisper Smart falls back to Apple Speech.")
+                    Text("Choose a one-click STT preset. If host prerequisites (Apple Command Line Tools, make, Python/venv) are missing, setup fails fast with guidance and Whisper Smart falls back to Apple Speech.")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
 
@@ -1413,6 +1414,58 @@ private struct ProviderSettingsTab: View {
                     }
                 }
             }
+
+            NeuSection(icon: "speaker.wave.3.fill", title: "Text-to-Speech (Preview)") {
+                VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                    Text("One-click TTS model option")
+                        .font(VFFont.settingsBody)
+                        .foregroundStyle(VFColor.textPrimary)
+
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                            Text("\(TTSModelPlaceholderOption.qwen3CustomVoice.displayName)")
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textPrimary)
+                            Text("Download preview assets in one click. Synthesis runtime is not integrated yet, so this does not alter STT behavior.")
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+                        }
+                        Spacer()
+
+                        switch ttsPlaceholderDownloader.phase {
+                        case .downloading:
+                            profileActionButton(title: "Downloading…", isPrimary: true, enabled: false) {}
+                        case .ready:
+                            installedChip(label: "Preview Assets Downloaded", color: VFColor.accentFallback)
+                        case .idle, .failed:
+                            profileActionButton(title: "Download", isPrimary: true, enabled: true) {
+                                DictationFeatureFlags.ttsPlaceholderEnabled = true
+                                ttsPlaceholderDownloader.downloadPreviewAsset()
+                            }
+                        }
+                    }
+
+                    switch ttsPlaceholderDownloader.phase {
+                    case .idle:
+                        Text("Availability: Preview-only. TTS synthesis is coming soon.")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                    case .downloading:
+                        Text("Availability: Downloading preview assets…")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                    case .ready(let localPath):
+                        Text("Availability: Preview assets ready at \(localPath). TTS synthesis is not yet enabled in this build.")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                            .textSelection(.enabled)
+                    case .failed(let message):
+                        Text(message)
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.error)
+                    }
+                }
+            }
         }
         .onAppear {
             syncDownloadState(for: selectedKind)
@@ -1420,6 +1473,7 @@ private struct ProviderSettingsTab: View {
             openAIAPIKey = DictationProviderPolicy.openAIAPIKey
             whisperRuntimeInstaller.refreshState()
             whisperInstaller.refreshState()
+            ttsPlaceholderDownloader.refresh()
         }
     }
 
@@ -1615,7 +1669,7 @@ private struct ProviderSettingsTab: View {
             whisperInstaller.refreshState()
         case .balanced:
             _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
-                id: "hf_parakeet_ctc06b_int8",
+                id: "hf_parakeet_tdt06b_v3_onnx",
                 for: ModelVariant.parakeetCTC06B.id
             )
             selectProvider(.parakeet)
@@ -1632,7 +1686,7 @@ private struct ProviderSettingsTab: View {
 
     private func downloadParakeetProfile() {
         _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
-            id: "hf_parakeet_ctc06b_int8",
+            id: "hf_parakeet_tdt06b_v3_onnx",
             for: ModelVariant.parakeetCTC06B.id
         )
         selectProvider(.parakeet)
