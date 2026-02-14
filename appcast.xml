@@ -6,10 +6,15 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
-      <title>Version 0.1.0</title>
-      <description>Initial release with dictation, microphone selection, and auto-updates.</description>
-      <pubDate>Sat, 14 Feb 2026 01:15:00 -0700</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.1.0/Whisper-Smart-0.1.0.zip" sparkle:version="0.1.0" length="5000000" type="application/octet-stream"/>
+      <title>Version 0.1.1</title>
+      <description>v0.1.1 - Microphone Selection Support
+
+New in this release:
+- Added ability to select default microphone in Settings
+- Integrated Sparkle auto-update system
+- Bug fixes and improvements</description>
+      <pubDate>Sat, 14 Feb 2026 01:22:00 -0700</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.1.1/Whisper-Smart-0.1.1.dmg" sparkle:version="0.1.1" length="4435263" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
   </channel>
