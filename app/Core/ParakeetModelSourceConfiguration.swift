@@ -238,11 +238,23 @@ private extension ParakeetModelSourceConfigurationStore {
             return [
                 ParakeetModelSourceOption(
                     id: "hf_parakeet_tdt06b_v3_onnx",
-                    displayName: "nvidia/parakeet-tdt-0.6b-v3 ONNX mapping (community export, experimental)",
-                    modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/model.onnx",
+                    displayName: "Hugging Face · nemo128.onnx (recommended)",
+                    modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/nemo128.onnx",
                     modelDataURLString: nil,
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",
-                    modelExpectedSizeBytes: 350_000_000,
+                    modelExpectedSizeBytes: 35_000_000,
+                    tokenizerExpectedSizeBytes: 100_000,
+                    modelSHA256: nil,
+                    tokenizerSHA256: nil,
+                    isBuiltIn: true
+                ),
+                ParakeetModelSourceOption(
+                    id: "hf_parakeet_tdt06b_v3_encoder_split",
+                    displayName: "Hugging Face · encoder-model.onnx + .data (mirror)",
+                    modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx",
+                    modelDataURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx.data",
+                    tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",
+                    modelExpectedSizeBytes: 40_000_000,
                     tokenizerExpectedSizeBytes: 100_000,
                     modelSHA256: nil,
                     tokenizerSHA256: nil,

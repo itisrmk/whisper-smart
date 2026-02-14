@@ -11,14 +11,15 @@ final class ModelDownloaderService: NSObject {
 
     private final class DownloadContext {
         let variant: ModelVariant
-        let source: ParakeetResolvedModelSource
+        var source: ParakeetResolvedModelSource
         weak var state: ModelDownloadState?
         var task: URLSessionDownloadTask
-        let resumeDataKey: String
+        var resumeDataKey: String
         var isUserCancelled = false
         var completionError: String?
         var retryCount = 0
         var expectedContentLength: Int64?
+        var attemptedSourceIDs: Set<String>
 
         init(
             variant: ModelVariant,
@@ -32,6 +33,7 @@ final class ModelDownloaderService: NSObject {
             self.state = state
             self.task = task
             self.resumeDataKey = resumeDataKey
+            self.attemptedSourceIDs = [source.selectedSourceID]
         }
     }
 
@@ -291,6 +293,10 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
             }
 
             if let completionError = context.completionError {
+                if self.tryAutoSwitchSourceAfter404(context: context, previousTaskID: task.taskIdentifier) {
+                    return
+                }
+
                 completionAction = {
                     state.transitionToFailed(message: completionError)
                 }
@@ -323,6 +329,47 @@ private extension ModelDownloaderService {
     private func removeContext(forTaskID taskID: Int) -> DownloadContext? {
         guard let variantID = variantIDByTaskID.removeValue(forKey: taskID) else { return nil }
         return activeDownloadsByVariantID.removeValue(forKey: variantID)
+    }
+
+    private func tryAutoSwitchSourceAfter404(context: DownloadContext, previousTaskID: Int) -> Bool {
+        guard let failure = context.completionError?.lowercased(), failure.contains("http 404") else {
+            return false
+        }
+
+        let sourceStore = ParakeetModelSourceConfigurationStore.shared
+        let alternatives = sourceStore.availableSources(for: context.variant.id)
+            .filter { $0.id != context.source.selectedSourceID }
+            .filter { context.attemptedSourceIDs.contains($0.id) == false }
+
+        guard let fallback = alternatives.first(where: { $0.modelURL != nil }) else {
+            return false
+        }
+
+        _ = sourceStore.selectSource(id: fallback.id, for: context.variant.id)
+        let resolved = sourceStore.resolvedSource(for: context.variant.id)
+        guard let fallbackURL = resolved.modelURL else {
+            return false
+        }
+
+        let nextTask = session.downloadTask(with: fallbackURL)
+
+        variantIDByTaskID.removeValue(forKey: previousTaskID)
+        variantIDByTaskID[nextTask.taskIdentifier] = context.variant.id
+
+        context.source = resolved
+        context.resumeDataKey = Self.resumeDataKey(variantID: context.variant.id, source: resolved)
+        context.task = nextTask
+        context.retryCount = 0
+        context.completionError = nil
+        context.expectedContentLength = nil
+        context.attemptedSourceIDs.insert(fallback.id)
+
+        logger.warning(
+            "Primary source returned HTTP 404 for \(context.variant.id, privacy: .public). Auto-switching to source \(resolved.selectedSourceName, privacy: .public)."
+        )
+
+        nextTask.resume()
+        return true
     }
 
     static func moveDownloadedFileAtomically(from sourceURL: URL, to destinationURL: URL) -> String? {

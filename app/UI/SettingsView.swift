@@ -1391,6 +1391,23 @@ private struct ProviderSettingsTab: View {
     @StateObject private var ttsPlaceholderDownloader = TTSModelPlaceholderDownloader.shared
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
 
+    private enum ProviderMessageSeverity {
+        case info
+        case warning
+        case error
+
+        var color: Color {
+            switch self {
+            case .info:
+                return VFColor.textSecondary
+            case .warning:
+                return Color(red: 1.0, green: 0.74, blue: 0.34)
+            case .error:
+                return VFColor.error
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
             NeuSection(icon: "waveform.and.mic", title: "Smart Model Selection") {
@@ -1447,22 +1464,16 @@ private struct ProviderSettingsTab: View {
 
                     switch ttsPlaceholderDownloader.phase {
                     case .idle:
-                        Text("Availability: Preview-only. TTS synthesis is coming soon.")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
+                        statusText("Preview only. TTS synthesis is coming soon.", severity: .info)
                     case .downloading:
-                        Text("Availability: Downloading preview assets…")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
+                        statusText("Downloading preview assets…", severity: .info)
                     case .ready(let localPath):
-                        Text("Availability: Preview assets ready at \(localPath). TTS synthesis is not yet enabled in this build.")
+                        Text("Preview assets ready at \(localPath). TTS synthesis is not yet enabled in this build.")
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.textSecondary)
                             .textSelection(.enabled)
                     case .failed(let message):
-                        Text(message)
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.error)
+                        statusText(sanitizedStatusMessage(message, fallback: "Couldn’t download preview assets. Check your connection and try again."), severity: .error)
                     }
                 }
             }
@@ -1517,15 +1528,11 @@ private struct ProviderSettingsTab: View {
                         profileActionButton(title: "Cancel", enabled: true) {
                             whisperRuntimeInstaller.cancelInstall()
                         }
-                        Text("Installing runtime…")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
+                        statusText("Installing runtime…", severity: .info)
                     case .ready:
                         installedChip(label: "Runtime Ready")
                     case .failed(let message):
-                        Text(message)
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.error)
+                        statusText(sanitizedStatusMessage(message, fallback: "Couldn’t install runtime. Install required tools, then try again."), severity: runtimeFailureSeverity(for: message))
                     }
                 }
 
@@ -1561,9 +1568,7 @@ private struct ProviderSettingsTab: View {
                     case .ready:
                         installedChip(label: "Model Ready")
                     case .failed(let message):
-                        Text(message)
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.error)
+                        statusText(sanitizedStatusMessage(message, fallback: "Couldn’t download the model. Please retry."), severity: .error)
                     }
                 }
             }
@@ -1602,9 +1607,10 @@ private struct ProviderSettingsTab: View {
             }
 
             if diagnostics.usesFallback, let reason = diagnostics.fallbackReason {
-                Text(reason)
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.error)
+                statusText(
+                    friendlyFallbackMessage(reason),
+                    severity: fallbackSeverity(for: reason)
+                )
             }
         }
         .padding(VFSpacing.lg)
@@ -1729,6 +1735,62 @@ private struct ProviderSettingsTab: View {
         case .appleSpeech, .stub:
             return .light
         }
+    }
+
+    @ViewBuilder
+    private func statusText(_ message: String, severity: ProviderMessageSeverity) -> some View {
+        Text(message)
+            .font(VFFont.settingsCaption)
+            .foregroundStyle(severity.color)
+    }
+
+    private func fallbackSeverity(for reason: String) -> ProviderMessageSeverity {
+        let normalized = reason.lowercased()
+        if normalized.contains("failed") || normalized.contains("error") {
+            return .error
+        }
+        return .warning
+    }
+
+    private func runtimeFailureSeverity(for message: String) -> ProviderMessageSeverity {
+        let normalized = message.lowercased()
+        if normalized.contains("xcode-select") || normalized.contains("command line tools") || normalized.contains("make") {
+            return .warning
+        }
+        return .error
+    }
+
+    private func friendlyFallbackMessage(_ reason: String) -> String {
+        let normalized = reason.lowercased()
+        if normalized.contains("api key") {
+            return "Setup needed: add your OpenAI API key to use Cloud mode."
+        }
+        if normalized.contains("disabled") {
+            return "Setup needed: enable cloud fallback to use Cloud mode."
+        }
+        if normalized.contains("model") && normalized.contains("not ready") {
+            return "Setup needed: download the model to finish setup."
+        }
+        if normalized.contains("runtime") && normalized.contains("not integrated") {
+            return "Balanced mode is still experimental in this build; Apple Speech will be used for now."
+        }
+        if normalized.contains("runtime bootstrap failed") {
+            return "Setup needed: repair the local runtime, then try again."
+        }
+        return "Setup needed before this provider can run."
+    }
+
+    private func sanitizedStatusMessage(_ message: String, fallback: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return fallback }
+
+        let lower = trimmed.lowercased()
+        if lower.contains("http") || lower.contains("nsurl") || lower.contains("domain=") || lower.contains("code=") || lower.contains("exit ") {
+            return fallback
+        }
+
+        let firstLine = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
+        return firstLine.count > 140 ? fallback : firstLine
     }
 
     private func profileActionButton(
@@ -1999,10 +2061,10 @@ private struct ModelDownloadRow: View {
                 HStack(alignment: .top, spacing: VFSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
-                        .foregroundStyle(VFColor.error)
-                    Text(sourceError)
+                        .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
+                    Text("Setup needed: \(sourceError)")
                         .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.error)
+                        .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
                 }
             }
 
@@ -2020,7 +2082,7 @@ private struct ModelDownloadRow: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(VFColor.error)
-                    Text(message)
+                    Text(sanitizedDownloadError(message))
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.error)
                 }
@@ -2053,11 +2115,36 @@ private struct ModelDownloadRow: View {
             )
 
         case .failed:
-            downloadActionButton(
-                label: "Retry",
-                icon: "arrow.clockwise.circle.fill",
-                isEnabled: downloadState.variant.hasDownloadSource
-            )
+            HStack(spacing: VFSpacing.sm) {
+                downloadActionButton(
+                    label: "Retry",
+                    icon: "arrow.clockwise.circle.fill",
+                    isEnabled: downloadState.variant.hasDownloadSource
+                )
+
+                if hasAlternateSource {
+                    Button {
+                        switchToAlternateSource()
+                    } label: {
+                        Text("Try mirror")
+                            .font(VFFont.pillLabel)
+                            .foregroundStyle(VFColor.textPrimary)
+                            .padding(.horizontal, VFSpacing.md)
+                            .padding(.vertical, VFSpacing.sm)
+                            .background(
+                                Capsule()
+                                    .fill(VFColor.glass3)
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(VFColor.glassBorder, lineWidth: 0.8)
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDownloading)
+                    .opacity(isDownloading ? 0.5 : 1.0)
+                }
+            }
 
         case .downloading:
             Button {
@@ -2206,6 +2293,10 @@ private struct ModelDownloadRow: View {
         sourceStore.availableSources(for: downloadState.variant.id)
     }
 
+    private var hasAlternateSource: Bool {
+        sourceOptions.contains(where: { $0.id != selectedSourceID && $0.modelURL != nil })
+    }
+
     private var selectedSourceDisplayName: String {
         sourceOptions.first(where: { $0.id == selectedSourceID })?.displayName
             ?? downloadState.variant.configuredSourceDisplayName
@@ -2224,8 +2315,8 @@ private struct ModelDownloadRow: View {
             return "Downloading (\(Int(progress * 100))%)"
         case .ready:
             return "Ready - \(downloadState.variant.validationStatus)"
-        case .failed(let message):
-            return "Failed - \(message)"
+        case .failed:
+            return "Download failed"
         }
     }
 
@@ -2243,6 +2334,13 @@ private struct ModelDownloadRow: View {
         downloadState.reset()
     }
 
+    private func switchToAlternateSource() {
+        guard let alternate = sourceOptions.first(where: { $0.id != selectedSourceID && $0.modelURL != nil }) else {
+            return
+        }
+        selectSource(alternate.id)
+    }
+
     private func saveCustomSource() {
         let error = sourceStore.saveCustomSource(
             modelURLString: customModelURL,
@@ -2252,6 +2350,30 @@ private struct ModelDownloadRow: View {
         sourceConfigurationError = error
         refreshSourceStateFromStore()
         downloadState.reset()
+    }
+
+    private func sanitizedDownloadError(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "Download failed. Please retry."
+        }
+
+        let lower = trimmed.lowercased()
+        if lower.contains("http 404") {
+            return "Source file was not found (HTTP 404). Try mirror or retry."
+        }
+        if lower.contains("http") {
+            return "Download failed due to a network/server issue. Please retry."
+        }
+        if lower.contains("timed out") {
+            return "Download timed out. Please retry."
+        }
+
+        let firstLine = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
+        if firstLine.count > 140 || lower.contains("domain=") || lower.contains("code=") {
+            return "Download failed. Please retry."
+        }
+        return firstLine
     }
 }
 
