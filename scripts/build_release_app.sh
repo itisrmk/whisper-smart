@@ -28,6 +28,9 @@ cp "$REPO_ROOT/.build/arm64-apple-macosx/release/$APP_NAME" "$EXECUTABLE_PATH"
 mkdir -p "$CONTENTS_DIR/Frameworks"
 cp -R "$REPO_ROOT/.build/arm64-apple-macosx/release/Sparkle.framework" "$CONTENTS_DIR/Frameworks/"
 
+# Ensure runtime can find embedded frameworks
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH" 2>/dev/null || true
+
 ICON_FILE_NAME="AppIcon.icns"
 if [ -f "$LOGO_PATH" ]; then
   echo "Generating app icon from $LOGO_PATH…"
