@@ -6,15 +6,20 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
-      <title>Version 0.1.2</title>
-      <description>v0.1.2 - Provider label fix
+      <title>Version 0.1.3</title>
+      <description>v0.1.3 - Update pipeline reliability fix
 
 New in this release:
-- Fixed Transcript Log provider mismatch (Whisper sessions could display Apple Speech)
-- Uses provider snapshot from recording start for accurate log attribution
-- Includes prior DMG launch/runtime fix and Applications drag shortcut</description>
-      <pubDate>Sat, 14 Feb 2026 02:40:00 -0700</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.1.2/Whisper-Smart-0.1.2.dmg" sparkle:version="0.1.2" length="4435563" type="application/octet-stream"/>
+- Fixed Sparkle startup (updater is explicitly started at launch)
+- Fixed appcast version metadata for reliable update detection
+- Includes prior provider-label and DMG fixes</description>
+      <pubDate>Sat, 14 Feb 2026 02:58:00 -0700</pubDate>
+      <enclosure
+        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.1.3/Whisper-Smart-0.1.3.dmg"
+        sparkle:shortVersionString="0.1.3"
+        sparkle:version="202602140300"
+        length="4435599"
+        type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
   </channel>
