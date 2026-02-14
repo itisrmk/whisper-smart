@@ -464,11 +464,11 @@ private enum VFThemeGuard {
         guard !didAssert else { return }
         didAssert = true
 
-        let glass0 = RGB(0.08, 0.08, 0.08)
-        let glass1 = RGB(0.13, 0.14, 0.18)
-        let glass2 = RGB(0.16, 0.17, 0.22)
-        let glass3 = RGB(0.19, 0.20, 0.26)
-        let accent = RGB(0.35, 0.58, 1.00)
+        let glass0 = RGB(r: 0.08, g: 0.08, b: 0.08)
+        let glass1 = RGB(r: 0.13, g: 0.14, b: 0.18)
+        let glass2 = RGB(r: 0.16, g: 0.17, b: 0.22)
+        let glass3 = RGB(r: 0.19, g: 0.20, b: 0.26)
+        let accent = RGB(r: 0.35, g: 0.58, b: 1.00)
 
         assert(luminance(glass0) < luminance(glass1), "Expected glass0 to be darker than glass1", file: file, line: line)
         assert(luminance(glass1) < luminance(glass2), "Expected glass1 to be darker than glass2", file: file, line: line)
@@ -481,7 +481,7 @@ private enum VFThemeGuard {
         assert(contrastRatio(textPrimary, glass1) >= 7.0, "textPrimary contrast on glass1 must stay >= 7.0", file: file, line: line)
         assert(contrastRatio(textSecondary, glass1) >= 4.5, "textSecondary contrast on glass1 must stay >= 4.5", file: file, line: line)
         assert(contrastRatio(textTertiary, glass1) >= 3.0, "textTertiary contrast on glass1 must stay >= 3.0", file: file, line: line)
-        assert(contrastRatio(RGB(0.05, 0.10, 0.18), accent) >= 4.5, "textOnAccent contrast must stay >= 4.5", file: file, line: line)
+        assert(contrastRatio(RGB(r: 0.05, g: 0.10, b: 0.18), accent) >= 4.5, "textOnAccent contrast must stay >= 4.5", file: file, line: line)
     }
 
     private struct RGB {

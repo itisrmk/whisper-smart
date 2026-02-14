@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var transcribeStartAt: Date?
     private var latestTranscriptForLog: String = ""
     private var activeAppNameForLog: String = "Unknown"
+    private var activeProviderNameForLog: String = ""
     private var usesProviderFallback = false
     private var healthBadgeLabel = ""
     private var activityBadgeLabel = ""
@@ -416,6 +417,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             transcribeStartAt = nil
             latestTranscriptForLog = ""
             activeAppNameForLog = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
+            // Snapshot provider name at session start so transcript logs reflect
+            // the provider that actually handled this recording session.
+            activeProviderNameForLog = sttProvider.displayName
             activityBadgeLabel = "REC"
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
         case .transcribing:
@@ -435,7 +439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
 
             TranscriptLogStore.shared.append(
-                provider: sttProvider.displayName,
+                provider: activeProviderNameForLog.isEmpty ? sttProvider.displayName : activeProviderNameForLog,
                 appName: activeAppNameForLog,
                 durationMs: latencyMs,
                 text: latestTranscriptForLog,
@@ -445,17 +449,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recordStartAt = nil
             transcribeStartAt = nil
             latestTranscriptForLog = ""
+            activeProviderNameForLog = ""
         case .idle:
             activityBadgeLabel = ""
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
             recordStartAt = nil
             transcribeStartAt = nil
+            activeProviderNameForLog = ""
         case .error:
             activityBadgeLabel = "Issue"
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
             if !latestTranscriptForLog.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 TranscriptLogStore.shared.append(
-                    provider: sttProvider.displayName,
+                    provider: activeProviderNameForLog.isEmpty ? sttProvider.displayName : activeProviderNameForLog,
                     appName: activeAppNameForLog,
                     durationMs: nil,
                     text: latestTranscriptForLog,
@@ -465,6 +471,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recordStartAt = nil
             transcribeStartAt = nil
             latestTranscriptForLog = ""
+            activeProviderNameForLog = ""
         }
     }
 
