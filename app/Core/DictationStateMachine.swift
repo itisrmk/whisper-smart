@@ -337,6 +337,9 @@ final class DictationStateMachine {
         var didBeginSTTSession = false
         onTranscriptChange?("")
 
+        // Set the selected input device before starting capture
+        audioCapture.inputDeviceUID = DictationWorkflowSettings.selectedInputDeviceUID
+
         do {
             logger.info("Starting recording session with provider: \(providerName, privacy: .public)")
             try sttProvider.beginSession()

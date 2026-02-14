@@ -1,0 +1,14 @@
+timestamp: 2026-02-13T20:02:16Z
+head: 41152bf83ae626f74dd7c8925960a3fefeec00ef
+head_subject: Fix keyboard key title rendering to guarantee visible glyphs
+artifact_dir: VerificationArtifacts/v6-20260213-125910
+files:
+- VerificationArtifacts/v6-20260213-125910/manual-notes-launch.png
+- VerificationArtifacts/v6-20260213-125910/build-keyboard.log
+- VerificationArtifacts/v6-20260213-125910/manual-after-return.png
+- VerificationArtifacts/v6-20260213-125910/test-keyboard-targeted.log
+- VerificationArtifacts/v6-20260213-125910/verification-metadata.txt
+- VerificationArtifacts/v6-20260213-125910/build-app.log
+- VerificationArtifacts/v6-20260213-125910/bootstrap.log
+- VerificationArtifacts/v6-20260213-125910/manual-sms-open.png
+- VerificationArtifacts/v6-20260213-125910/manual-sim-current.png

@@ -84,6 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ── Startup permission diagnostics ──
         PermissionDiagnostics.logAll()
 
+        // ── Initialize update manager ──
+        UpdateManager.start()
+
         menuBar.install()
         menuBar.updateDictationAction(for: stateMachine.state)
         updateBubbleVisibility(for: stateMachine.state)

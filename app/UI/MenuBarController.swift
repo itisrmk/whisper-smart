@@ -210,6 +210,14 @@ final class MenuBarController {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let checkUpdatesItem = NSMenuItem(
+            title: "Check for Updates...",
+            action: #selector(handleCheckForUpdates),
+            keyEquivalent: ""
+        )
+        checkUpdatesItem.target = self
+        menu.addItem(checkUpdatesItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
@@ -235,6 +243,10 @@ final class MenuBarController {
 
     @objc private func handleQuit() {
         onQuit?()
+    }
+
+    @objc private func handleCheckForUpdates() {
+        UpdateManager.shared.checkForUpdates()
     }
 
     @objc private func handleRetryHotkeyMonitor() {

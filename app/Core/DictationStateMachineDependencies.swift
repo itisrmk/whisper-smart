@@ -14,6 +14,7 @@ protocol AudioCapturing: AnyObject {
     var onError: ((Error) -> Void)? { get set }
     var onAudioLevel: ((Float) -> Void)? { get set }
     var onInterruption: ((AudioCaptureService.InterruptionReason) -> Void)? { get set }
+    var inputDeviceUID: String? { get set }
     func start() throws
     func stop()
 }

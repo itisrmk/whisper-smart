@@ -41,14 +41,8 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
         case returnKey
     }
 
-    private struct PressPalette {
-        let normal: UIColor
-        let highlighted: UIColor
-    }
-
     private var keyModelTitles: [ObjectIdentifier: String] = [:]
     private var keyRoles: [ObjectIdentifier: KeyboardKeyRole] = [:]
-    private var pressPalettes: [ObjectIdentifier: PressPalette] = [:]
 
     #if DEBUG
     private var debugLegendDumpCount = 0
@@ -282,7 +276,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     private func rebuildKeyboardRows() {
         keyModelTitles.removeAll(keepingCapacity: true)
         keyRoles.removeAll(keepingCapacity: true)
-        pressPalettes.removeAll(keepingCapacity: true)
 
         keyboardStack.arrangedSubviews.forEach {
             keyboardStack.removeArrangedSubview($0)
@@ -534,34 +527,24 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
     }
 
     private func applyPressBehavior(to button: UIButton, normalColor: UIColor, highlightedColor: UIColor, usesConfiguration: Bool) {
-        if usesConfiguration {
-            pressPalettes.removeValue(forKey: ObjectIdentifier(button))
-            removeLegacyPressTargets(from: button)
-            button.configurationUpdateHandler = { btn in
-                let resolvedBackground: UIColor
-                if !btn.isEnabled {
-                    resolvedBackground = normalColor.withAlphaComponent(0.5)
-                } else if btn.isHighlighted || btn.isSelected {
-                    resolvedBackground = highlightedColor
-                } else {
-                    resolvedBackground = normalColor
-                }
-
-                if var configuration = btn.configuration {
-                    configuration.baseBackgroundColor = resolvedBackground
-                    btn.configuration = configuration
-                }
+        button.configurationUpdateHandler = { btn in
+            let resolvedBackground: UIColor
+            if !btn.isEnabled {
+                resolvedBackground = normalColor.withAlphaComponent(0.5)
+            } else if btn.isHighlighted || btn.isSelected {
+                resolvedBackground = highlightedColor
+            } else {
+                resolvedBackground = normalColor
             }
-            button.setNeedsUpdateConfiguration()
-            return
-        }
 
-        button.configurationUpdateHandler = nil
-        pressPalettes[ObjectIdentifier(button)] = PressPalette(normal: normalColor, highlighted: highlightedColor)
-        removeLegacyPressTargets(from: button)
-        button.addTarget(self, action: #selector(legacyKeyTouchDown(_:)), for: [.touchDown, .touchDragEnter])
-        button.addTarget(self, action: #selector(legacyKeyTouchUp(_:)), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
-        updateLegacyPressAppearance(for: button, isHighlighted: false)
+            if usesConfiguration, var configuration = btn.configuration {
+                configuration.baseBackgroundColor = resolvedBackground
+                btn.configuration = configuration
+            } else {
+                btn.backgroundColor = resolvedBackground
+            }
+        }
+        button.setNeedsUpdateConfiguration()
     }
 
     private func applyTitleColors(to button: UIButton, base: UIColor) {
@@ -590,28 +573,6 @@ final class KeyboardViewController: UIInputViewController, UIInputViewAudioFeedb
 
     private func modelTitle(for button: UIButton) -> String? {
         keyModelTitles[ObjectIdentifier(button)]
-    }
-
-    private func removeLegacyPressTargets(from button: UIButton) {
-        button.removeTarget(self, action: #selector(legacyKeyTouchDown(_:)), for: [.touchDown, .touchDragEnter])
-        button.removeTarget(self, action: #selector(legacyKeyTouchUp(_:)), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
-    }
-
-    @objc private func legacyKeyTouchDown(_ sender: UIButton) {
-        updateLegacyPressAppearance(for: sender, isHighlighted: true)
-    }
-
-    @objc private func legacyKeyTouchUp(_ sender: UIButton) {
-        updateLegacyPressAppearance(for: sender, isHighlighted: false)
-    }
-
-    private func updateLegacyPressAppearance(for button: UIButton, isHighlighted: Bool) {
-        guard let palette = pressPalettes[ObjectIdentifier(button)] else { return }
-        if !button.isEnabled {
-            button.backgroundColor = palette.normal.withAlphaComponent(0.5)
-        } else {
-            button.backgroundColor = (isHighlighted || button.isSelected) ? palette.highlighted : palette.normal
-        }
     }
 
     #if DEBUG

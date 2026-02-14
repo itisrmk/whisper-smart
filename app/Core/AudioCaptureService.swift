@@ -32,6 +32,8 @@ final class AudioCaptureService {
 
     var desiredSampleRate: Double = 16_000
     var desiredChannelCount: AVAudioChannelCount = 1
+    /// Specific input device UID to use. If nil or empty, uses system default.
+    var inputDeviceUID: String?
 
     // MARK: - Private state
 
@@ -43,6 +45,8 @@ final class AudioCaptureService {
     private var defaultInputDeviceListenerInstalled = false
     private var defaultInputDeviceListenerBlock: AudioObjectPropertyListenerBlock?
     private let listenerQueue = DispatchQueue(label: "com.visperflow.audio-listeners", qos: .utility)
+    /// Saved original default device UID to restore after capture
+    private var originalDefaultDeviceUID: String?
 
     // MARK: - Lifecycle
 
@@ -70,8 +74,44 @@ final class AudioCaptureService {
         }
         logger.info("Microphone authorized, starting capture")
 
+        // Resolve input node and format
         let inputNode = engine.inputNode
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
+
+        // If a specific device is selected, try to configure the engine to use it
+        if let deviceUID = inputDeviceUID, !deviceUID.isEmpty {
+            if let deviceID = findAudioDeviceID(byUID: deviceUID) {
+                // Save the current default device to restore later
+                originalDefaultDeviceUID = getDefaultInputDeviceUID()
+
+                // Configure the input node to use the specific device
+                var deviceIDValue = deviceID
+
+                // Set the default input device for the system (temporarily)
+                var propertyAddress = AudioObjectPropertyAddress(
+                    mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain
+                )
+
+                let status = AudioObjectSetPropertyData(
+                    AudioObjectID(kAudioObjectSystemObject),
+                    &propertyAddress,
+                    0,
+                    nil,
+                    UInt32(MemoryLayout<AudioDeviceID>.size),
+                    &deviceIDValue
+                )
+
+                if status == noErr {
+                    logger.info("Successfully set input device to: \(deviceUID, privacy: .public)")
+                } else {
+                    logger.warning("Failed to set input device, using system default: \(status)")
+                }
+            } else {
+                logger.warning("Selected device UID not found: \(deviceUID, privacy: .public), using system default")
+            }
+        }
 
         guard let captureFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -140,6 +180,28 @@ final class AudioCaptureService {
         engine.stop()
         converter = nil
         isRunning = false
+
+        // Restore the original default input device if we changed it
+        if let originalUID = originalDefaultDeviceUID,
+           let deviceID = findAudioDeviceID(byUID: originalUID) {
+            var deviceIDValue = deviceID
+            var propertyAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+
+            AudioObjectSetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &propertyAddress,
+                0,
+                nil,
+                UInt32(MemoryLayout<AudioDeviceID>.size),
+                &deviceIDValue
+            )
+            originalDefaultDeviceUID = nil
+        }
+
         unregisterInterruptionObservers()
     }
 
@@ -235,6 +297,81 @@ final class AudioCaptureService {
         defaultInputDeviceListenerBlock = nil
     }
 
+    private func findAudioDeviceID(byUID uid: String) -> AudioDeviceID? {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var dataSize: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize
+        )
+
+        guard status == noErr else { return nil }
+
+        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
+
+        status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &deviceIDs
+        )
+
+        guard status == noErr else { return nil }
+
+        for deviceID in deviceIDs {
+            var uidAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+
+            var deviceUID: CFString = "" as CFString
+            var uidSize = UInt32(MemoryLayout<CFString>.size)
+
+            status = AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &deviceUID)
+
+            if status == noErr && (deviceUID as String) == uid {
+                return deviceID
+            }
+        }
+
+        return nil
+    }
+
+    private func getDefaultInputDeviceUID() -> String? {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var deviceUID: CFString = "" as CFString
+        var dataSize = UInt32(MemoryLayout<CFString>.size)
+
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &deviceUID
+        )
+
+        guard status == noErr else { return nil }
+        return deviceUID as String
+    }
+
     private static func normalizedLevel(from buffer: AVAudioPCMBuffer) -> Float? {
         guard let data = buffer.floatChannelData?[0] else { return nil }
         let frameCount = Int(buffer.frameLength)
@@ -262,6 +399,7 @@ enum AudioCaptureError: Error, LocalizedError {
     case interrupted
     case conversionFailed
     case microphonePermissionDenied
+    case deviceNotFound
 
     var errorDescription: String? {
         switch self {
@@ -275,6 +413,155 @@ enum AudioCaptureError: Error, LocalizedError {
             return "Failed to create audio format converter."
         case .microphonePermissionDenied:
             return "Microphone access denied — grant permission in System Settings → Privacy & Security → Microphone."
+        case .deviceNotFound:
+            return "Selected audio input device not found. Using system default."
+        }
+    }
+}
+
+// MARK: - Audio Input Device
+
+/// Represents an available audio input device.
+struct AudioInputDevice: Identifiable, Hashable {
+    let id: String  // UID
+    let name: String
+    let isDefault: Bool
+
+    static func == (lhs: AudioInputDevice, rhs: AudioInputDevice) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+/// Helper to enumerate available audio input devices.
+enum AudioDeviceManager {
+    /// Returns all available audio input devices.
+    static func availableInputDevices() -> [AudioInputDevice] {
+        var devices: [AudioInputDevice] = []
+
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var dataSize: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize
+        )
+
+        guard status == noErr else { return [] }
+
+        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
+
+        status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &deviceIDs
+        )
+
+        guard status == noErr else { return [] }
+
+        // Get default input device UID
+        var defaultDeviceUID = ""
+        var defaultAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var defaultUIDSize = UInt32(MemoryLayout<CFString>.size)
+        AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultAddress,
+            0,
+            nil,
+            &defaultUIDSize,
+            &defaultDeviceUID
+        )
+
+        for deviceID in deviceIDs {
+            // Check if device has input channels
+            var inputAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyStreamConfiguration,
+                mScope: kAudioDevicePropertyScopeInput,
+                mElement: kAudioObjectPropertyElementMain
+            )
+
+            var inputSize: UInt32 = 0
+            status = AudioObjectGetPropertyDataSize(deviceID, &inputAddress, 0, nil, &inputSize)
+
+            guard status == noErr, inputSize > 0 else { continue }
+
+            let bufferListPointer = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: 1)
+            defer { bufferListPointer.deallocate() }
+
+            status = AudioObjectGetPropertyData(deviceID, &inputAddress, 0, nil, &inputSize, bufferListPointer)
+
+            guard status == noErr else { continue }
+
+            let bufferList = bufferListPointer.pointee
+            var hasInputChannels = false
+            if bufferList.mNumberBuffers > 0 {
+                let buffer = bufferList.mBuffers
+                if buffer.mNumberChannels > 0 {
+                    hasInputChannels = true
+                }
+            }
+
+            guard hasInputChannels else { continue }
+
+            // Get device name
+            var nameAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceNameCFString,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+
+            var name: CFString = "" as CFString
+            var nameSize = UInt32(MemoryLayout<CFString>.size)
+            status = AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &name)
+
+            guard status == noErr else { continue }
+
+            // Get device UID
+            var uidAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+
+            var uid: CFString = "" as CFString
+            var uidSize = UInt32(MemoryLayout<CFString>.size)
+            status = AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &uid)
+
+            guard status == noErr else { continue }
+
+            let deviceUID = uid as String
+            let deviceName = name as String
+
+            devices.append(AudioInputDevice(
+                id: deviceUID,
+                name: deviceName,
+                isDefault: deviceUID == defaultDeviceUID
+            ))
+        }
+
+        // Sort: default first, then alphabetical
+        return devices.sorted { d1, d2 in
+            if d1.isDefault { return true }
+            if d2.isDefault { return false }
+            return d1.name.localizedCaseInsensitiveCompare(d2.name) == .orderedAscending
         }
     }
 }

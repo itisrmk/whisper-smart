@@ -45,6 +45,7 @@ targets:
     scheme:
       testTargets:
         - iOSWhisperSmartTests
+        - iOSWhisperSmartUITests
   iOSWhisperSmartWidgets:
     type: app-extension
     platform: iOS
@@ -94,5 +95,19 @@ targets:
       base:
         INFOPLIST_FILE: ""
         GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: iOSWhisperSmart
+
+  iOSWhisperSmartUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: UITests
+    settings:
+      base:
+        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: iOSWhisperSmart
     dependencies:
       - target: iOSWhisperSmart

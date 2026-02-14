@@ -18,23 +18,15 @@ EXECUTABLE_PATH="$MACOS_DIR/$APP_NAME"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-SOURCES=()
-while IFS= read -r -d '' file; do
-  SOURCES+=("$file")
-done < <(find "$REPO_ROOT/app" -name '*.swift' -print0)
-
-if [ ${#SOURCES[@]} -eq 0 ]; then
-  echo "No Swift sources found under app/."
-  exit 1
-fi
-
 echo "Building release binary for $APP_NAME…"
-swiftc -O \
-  -sdk "$(xcrun --show-sdk-path)" \
-  -target "$(uname -m)-apple-macosx14.0" \
-  -F "$(xcrun --show-sdk-path)/System/Library/Frameworks" \
-  "${SOURCES[@]}" \
-  -o "$EXECUTABLE_PATH"
+swift build -c release --package-path "$REPO_ROOT"
+
+# Copy the built executable
+cp "$REPO_ROOT/.build/arm64-apple-macosx/release/$APP_NAME" "$EXECUTABLE_PATH"
+
+# Copy Sparkle framework
+mkdir -p "$CONTENTS_DIR/Frameworks"
+cp -R "$REPO_ROOT/.build/arm64-apple-macosx/release/Sparkle.framework" "$CONTENTS_DIR/Frameworks/"
 
 ICON_FILE_NAME="AppIcon.icns"
 if [ -f "$LOGO_PATH" ]; then
@@ -90,6 +82,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <string>NSApplication</string>
   <key>CFBundleIconFile</key>
   <string>$ICON_FILE_NAME</string>
+  <key>SUFeedURL</key>
+  <string>https://raw.githubusercontent.com/itisrmk/whisper-smart/master/appcast.xml</string>
 </dict>
 </plist>
 PLIST

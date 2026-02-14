@@ -245,6 +245,10 @@ private struct GeneralSettingsTab: View {
     @AppStorage("postProcessingPipelineEnabled") private var postProcessingPipelineEnabled = true
     @AppStorage("commandModeScaffoldEnabled") private var commandModeScaffoldEnabled = false
 
+    @State private var availableInputDevices: [AudioInputDevice] = []
+    @State private var selectedInputDeviceUID: String = ""
+    @State private var inputDeviceMenuExpanded = false
+
     @State private var silenceTimeoutSeconds = DictationWorkflowSettings.silenceTimeoutSeconds
     @State private var insertionMode = DictationWorkflowSettings.insertionMode
     @State private var perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
@@ -307,6 +311,79 @@ private struct GeneralSettingsTab: View {
                             .foregroundStyle(VFColor.textPrimary)
                     }
                     .menuStyle(.borderlessButton)
+                }
+                NeuDivider()
+                // Microphone selection
+                HStack {
+                    VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                        Text("Input device")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+                        Text("Choose a specific microphone")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                    }
+                    Spacer()
+                    Menu {
+                        Button {
+                            selectedInputDeviceUID = ""
+                            DictationWorkflowSettings.selectedInputDeviceUID = ""
+                        } label: {
+                            HStack {
+                                Text("System Default")
+                                if selectedInputDeviceUID.isEmpty {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                        if !availableInputDevices.isEmpty {
+                            Divider()
+                        }
+                        ForEach(availableInputDevices) { device in
+                            Button {
+                                selectedInputDeviceUID = device.id
+                                DictationWorkflowSettings.selectedInputDeviceUID = device.id
+                            } label: {
+                                HStack {
+                                    Text(device.name)
+                                    if device.id == selectedInputDeviceUID {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: VFSpacing.xs) {
+                            Text(selectedInputDeviceName)
+                                .font(VFFont.pillLabel)
+                                .foregroundStyle(VFColor.textPrimary)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(
+                            Capsule()
+                                .fill(VFColor.glass3)
+                                .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                                .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
+                                .overlay(
+                                    Capsule()
+                                        .stroke(
+                                            LinearGradient(
+                                                stops: [
+                                                    .init(color: Color.white.opacity(0.08), location: 0),
+                                                    .init(color: .clear, location: 0.4),
+                                                ],
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            ),
+                                            lineWidth: 0.5
+                                        )
+                                )
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(maxWidth: 180)
                 }
                 NeuDivider()
                 NeuToggleRow(
@@ -499,6 +576,10 @@ private struct GeneralSettingsTab: View {
             developerModeEnabled = DictationWorkflowSettings.developerModeEnabled
             voiceCommandFormattingEnabled = DictationWorkflowSettings.voiceCommandFormattingEnabled
 
+            // Load available input devices
+            availableInputDevices = AudioDeviceManager.availableInputDevices()
+            selectedInputDeviceUID = DictationWorkflowSettings.selectedInputDeviceUID
+
             perAppProfiles = parsePerAppProfiles(from: perAppDefaultsJSON)
             snippetRows = parsePhraseMap(from: snippetsJSON)
             correctionRows = parsePhraseMap(from: correctionDictionaryJSON)
@@ -519,6 +600,16 @@ private struct GeneralSettingsTab: View {
 
     private var selectedOverlayMode: DictationOverlayMode {
         DictationOverlayMode(rawValue: overlayModeRaw) ?? .topCenterWaveform
+    }
+
+    private var selectedInputDeviceName: String {
+        if selectedInputDeviceUID.isEmpty {
+            return "System Default"
+        }
+        if let device = availableInputDevices.first(where: { $0.id == selectedInputDeviceUID }) {
+            return device.name
+        }
+        return "System Default"
     }
 
     @ViewBuilder

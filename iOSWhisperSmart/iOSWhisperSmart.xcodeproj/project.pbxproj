@@ -1,0 +1,1006 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		00DC1DCD3E010E9D2B24F001 /* DictationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B09C2C96153A5BC3C653462 /* DictationViewModel.swift */; };
+		0FBFCF7DECA3CDCB6BFA3399 /* KeyboardLaunchAutoStopPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 415BE87858AAB970F94DFAF1 /* KeyboardLaunchAutoStopPolicyTests.swift */; };
+		10AFF99FC8CDE141BEB94B39 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 324247C945CF2B76A8B6C92D /* OnboardingView.swift */; };
+		1922C168776BFE5388E3DABF /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C76B9D8ACA151977BAB0094F /* RootTabView.swift */; };
+		2137C9D2199DAE34660464B7 /* KeyboardLayoutHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D54D55A1B6662C2DB2502B9 /* KeyboardLayoutHelper.swift */; };
+		249380C636472FD217DC3953 /* KeyboardTapInteractionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60101EE49763377EF8593E1 /* KeyboardTapInteractionUITests.swift */; };
+		29D0B6AF83F2A0CEB652FE0F /* DictationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71FA18D57433DEB6E1877BA2 /* DictationView.swift */; };
+		2CECA81C6B5885EED47A60C3 /* OpenAITranscriptionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED49D7D4ED9B9D4927D65E4B /* OpenAITranscriptionClient.swift */; };
+		2EE67343A8CA9F1D3414124E /* KeyboardCompanionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B431620F94EC294CDD9A9DB2 /* KeyboardCompanionStore.swift */; };
+		3B0AFABAC3B7BEC9C64CB4A6 /* KeyboardLayoutMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 223B86A4FEE0C243624DFDB3 /* KeyboardLayoutMetrics.swift */; };
+		443AB53DA1C5F94DFD251304 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE290FAE701196FE6601281B /* AppSettings.swift */; };
+		47ABEE16E239480640300EF8 /* iOSWhisperSmartApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFDCDF4AC8A517A89452CE13 /* iOSWhisperSmartApp.swift */; };
+		47D0D45E591B1556645206F0 /* AppleSpeechRecognizerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C75DF600189F4FCE6FF44C /* AppleSpeechRecognizerService.swift */; };
+		49843FD557864C78C91A60A7 /* KeyboardCompanionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F2CBB12E5F769540B78BBDC /* KeyboardCompanionStoreTests.swift */; };
+		4FFC68D1BC559BEBA630A75B /* iOSWhisperSmartKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F9BAA77995EDC6BBAA77D165 /* iOSWhisperSmartKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		51EB48D602AE15AD3D18EFAE /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD5773268A170BE41875266 /* SettingsView.swift */; };
+		52333D1806822325E0DBC959 /* KeyboardTapHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BE30E3DB976049ED655C45C /* KeyboardTapHostView.swift */; };
+		5431E94C4BF270147E6B1D87 /* TrustModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DABF7901C1032943767F3E49 /* TrustModels.swift */; };
+		5DD7B73F19C0524131DCAF71 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCC44F9B7B99006B0482F7F /* ShareSheet.swift */; };
+		70CFFEA49D07A6547824ABE5 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F8912AE99A0761481C46D8 /* KeyboardViewController.swift */; };
+		718A845E8437FED583C5198E /* KeyboardCompanionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B431620F94EC294CDD9A9DB2 /* KeyboardCompanionStore.swift */; };
+		7F690802C5134FBE3CDFD79A /* DictationSessionReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62AEB309407CBBE1E8273390 /* DictationSessionReducerTests.swift */; };
+		82A2568C5ABC445130A47684 /* DictationLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E11D8A7963BD55686F3270 /* DictationLiveActivityAttributes.swift */; };
+		905BEB33E038EA54DB83F7C9 /* DictationLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A25B760764B1EE2AE31880B1 /* DictationLiveActivityWidget.swift */; };
+		92464DBD1D51D7A154EB69FA /* KeyboardLayoutMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 223B86A4FEE0C243624DFDB3 /* KeyboardLayoutMetrics.swift */; };
+		941A62BD361EAD1B6FD53555 /* KeyboardLayoutHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D54D55A1B6662C2DB2502B9 /* KeyboardLayoutHelper.swift */; };
+		A42765DA7D1AB154F5E7ACB4 /* KeyboardLayoutMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D840E639DC9159B0A11A82A /* KeyboardLayoutMetricsTests.swift */; };
+		AC673D46D23162C8D04D7582 /* CloudTranscriptionPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29663A89CD6E55E54088FDDC /* CloudTranscriptionPolicyTests.swift */; };
+		AFDE002EC347C9DFD719AEA1 /* WhisperSmartWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6130D83F0D4494FC0864B55A /* WhisperSmartWidgetsBundle.swift */; };
+		B601C13B8FAC60940A95517B /* TranscriptHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8F9BB8AF544C9DBC6B56595 /* TranscriptHistoryStore.swift */; };
+		B856291932717D365A2001A7 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E9DB99E7FEBFEB7F81B88FB /* KeychainService.swift */; };
+		BBACC074C0D960345D7E18B4 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66C75F97C273B438B3A7DBF2 /* HistoryView.swift */; };
+		C2C189A90963F321FB6068D8 /* OpenAICloudSpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E21FA1886F0662EB58E4DE3 /* OpenAICloudSpeechService.swift */; };
+		CCCEE8983328E27CF5D4F217 /* KeyboardMicFlowStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9497D6B1F5DFE97DBC93A713 /* KeyboardMicFlowStateMachineTests.swift */; };
+		DF2B6EA375108CEB2B8DE597 /* DictationLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E11D8A7963BD55686F3270 /* DictationLiveActivityAttributes.swift */; };
+		E14C37D066C88CC7B5C7BC99 /* AppDeepLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0702EA98FA2E4130C65BC037 /* AppDeepLink.swift */; };
+		E2FE1A22D1FFE9BAE50B612E /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FAA0DAF31C68E78B9697F5D /* NetworkMonitor.swift */; };
+		E661269358CFBAEF0BD7176A /* KeyboardLaunchAutoStopPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDBA292BCE5F3E2FF12A6953 /* KeyboardLaunchAutoStopPolicy.swift */; };
+		E9894FB4E4C36AE598447AFF /* KeyboardMicFlowStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E32C55335F22304D44BE7CE0 /* KeyboardMicFlowStateMachine.swift */; };
+		EA88502D182B14D181EB85D1 /* SpeechToTextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107CFC546F3EE75C55018599 /* SpeechToTextService.swift */; };
+		EB321016A3E0D286743C2FDC /* KeyboardMicFlowStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E32C55335F22304D44BE7CE0 /* KeyboardMicFlowStateMachine.swift */; };
+		EE211807C3AFF54B51E0B050 /* CloudTranscriptionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A342BB316CEF789318B7293 /* CloudTranscriptionPolicy.swift */; };
+		F60A85B79A73EC6BC1823B0D /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D0BD948BA1B642F0AA7318 /* Theme.swift */; };
+		F772C1E753F5D5159D5F0EA0 /* DictationSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CA05F78011030A2C3EDEFF9 /* DictationSessionState.swift */; };
+		FB4585494FD4573D6909B555 /* KeyboardLayoutHelperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C4168DF7E079AF60351205 /* KeyboardLayoutHelperTests.swift */; };
+		FD632DD272456DF755CB2593 /* AppDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BE155F429E1BEF8FBCBD55 /* AppDeepLinkTests.swift */; };
+		FD69F002D4AD649BD8C86E33 /* StartDictationAppIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C52DF9BE1E9A7534706B789D /* StartDictationAppIntent.swift */; };
+		FF0FE63AE7AF588C115FA727 /* Phase4TrustControlsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A39EF1467A39E95DCB93CAA9 /* Phase4TrustControlsTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		2B687FAADB4B56AE1A8877D6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CF7E6AD0F14A674B85E632D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E204EDAB7DD15765060D71F5;
+			remoteInfo = iOSWhisperSmart;
+		};
+		6D03E6982F7839C4637A0E05 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CF7E6AD0F14A674B85E632D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E204EDAB7DD15765060D71F5;
+			remoteInfo = iOSWhisperSmart;
+		};
+		7492AC4F53F73B34ECA3501A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CF7E6AD0F14A674B85E632D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 09AC7E454D611F35855EB93D;
+			remoteInfo = iOSWhisperSmartKeyboard;
+		};
+		C7B7E143DD7B43CFFC3C8384 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CF7E6AD0F14A674B85E632D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E204EDAB7DD15765060D71F5;
+			remoteInfo = iOSWhisperSmart;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		BD161CF39188F3324BA011A2 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				4FFC68D1BC559BEBA630A75B /* iOSWhisperSmartKeyboard.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0702EA98FA2E4130C65BC037 /* AppDeepLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDeepLink.swift; sourceTree = "<group>"; };
+		0D840E639DC9159B0A11A82A /* KeyboardLayoutMetricsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayoutMetricsTests.swift; sourceTree = "<group>"; };
+		0FAA0DAF31C68E78B9697F5D /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
+		107CFC546F3EE75C55018599 /* SpeechToTextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechToTextService.swift; sourceTree = "<group>"; };
+		16F8912AE99A0761481C46D8 /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
+		187426E453F67070AEAA5BA9 /* iOSWhisperSmart.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = iOSWhisperSmart.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		223B86A4FEE0C243624DFDB3 /* KeyboardLayoutMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayoutMetrics.swift; sourceTree = "<group>"; };
+		24C4168DF7E079AF60351205 /* KeyboardLayoutHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayoutHelperTests.swift; sourceTree = "<group>"; };
+		29663A89CD6E55E54088FDDC /* CloudTranscriptionPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudTranscriptionPolicyTests.swift; sourceTree = "<group>"; };
+		324247C945CF2B76A8B6C92D /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		3E9DB99E7FEBFEB7F81B88FB /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		3F2CBB12E5F769540B78BBDC /* KeyboardCompanionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCompanionStoreTests.swift; sourceTree = "<group>"; };
+		415BE87858AAB970F94DFAF1 /* KeyboardLaunchAutoStopPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLaunchAutoStopPolicyTests.swift; sourceTree = "<group>"; };
+		44C75DF600189F4FCE6FF44C /* AppleSpeechRecognizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSpeechRecognizerService.swift; sourceTree = "<group>"; };
+		48E11D8A7963BD55686F3270 /* DictationLiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationLiveActivityAttributes.swift; sourceTree = "<group>"; };
+		4CA05F78011030A2C3EDEFF9 /* DictationSessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationSessionState.swift; sourceTree = "<group>"; };
+		55D0BD948BA1B642F0AA7318 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		6130D83F0D4494FC0864B55A /* WhisperSmartWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSmartWidgetsBundle.swift; sourceTree = "<group>"; };
+		62AEB309407CBBE1E8273390 /* DictationSessionReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationSessionReducerTests.swift; sourceTree = "<group>"; };
+		654EDD3607EDE71AB2A4A5B0 /* iOSWhisperSmartTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = iOSWhisperSmartTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		66C75F97C273B438B3A7DBF2 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		6E21FA1886F0662EB58E4DE3 /* OpenAICloudSpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICloudSpeechService.swift; sourceTree = "<group>"; };
+		71FA18D57433DEB6E1877BA2 /* DictationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationView.swift; sourceTree = "<group>"; };
+		7BE30E3DB976049ED655C45C /* KeyboardTapHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTapHostView.swift; sourceTree = "<group>"; };
+		7CD5773268A170BE41875266 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		80BE155F429E1BEF8FBCBD55 /* AppDeepLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDeepLinkTests.swift; sourceTree = "<group>"; };
+		8D54D55A1B6662C2DB2502B9 /* KeyboardLayoutHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayoutHelper.swift; sourceTree = "<group>"; };
+		8F29602DFF973AF124F530DA /* iOSWhisperSmart.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iOSWhisperSmart.entitlements; sourceTree = "<group>"; };
+		9497D6B1F5DFE97DBC93A713 /* KeyboardMicFlowStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMicFlowStateMachineTests.swift; sourceTree = "<group>"; };
+		95A90CB9D1A1DC5E9ABF38E8 /* iOSWhisperSmartWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = iOSWhisperSmartWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		9A342BB316CEF789318B7293 /* CloudTranscriptionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudTranscriptionPolicy.swift; sourceTree = "<group>"; };
+		9B09C2C96153A5BC3C653462 /* DictationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationViewModel.swift; sourceTree = "<group>"; };
+		A25B760764B1EE2AE31880B1 /* DictationLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationLiveActivityWidget.swift; sourceTree = "<group>"; };
+		A39EF1467A39E95DCB93CAA9 /* Phase4TrustControlsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Phase4TrustControlsTests.swift; sourceTree = "<group>"; };
+		B431620F94EC294CDD9A9DB2 /* KeyboardCompanionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCompanionStore.swift; sourceTree = "<group>"; };
+		B60101EE49763377EF8593E1 /* KeyboardTapInteractionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTapInteractionUITests.swift; sourceTree = "<group>"; };
+		C518BEDE7B2964A00A52CE49 /* iOSWhisperSmartKeyboard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iOSWhisperSmartKeyboard.entitlements; sourceTree = "<group>"; };
+		C52DF9BE1E9A7534706B789D /* StartDictationAppIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartDictationAppIntent.swift; sourceTree = "<group>"; };
+		C76B9D8ACA151977BAB0094F /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
+		CDCC44F9B7B99006B0482F7F /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
+		DABF7901C1032943767F3E49 /* TrustModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustModels.swift; sourceTree = "<group>"; };
+		DE290FAE701196FE6601281B /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		E32C55335F22304D44BE7CE0 /* KeyboardMicFlowStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMicFlowStateMachine.swift; sourceTree = "<group>"; };
+		E8F9BB8AF544C9DBC6B56595 /* TranscriptHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptHistoryStore.swift; sourceTree = "<group>"; };
+		ED49D7D4ED9B9D4927D65E4B /* OpenAITranscriptionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAITranscriptionClient.swift; sourceTree = "<group>"; };
+		EFDCDF4AC8A517A89452CE13 /* iOSWhisperSmartApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSWhisperSmartApp.swift; sourceTree = "<group>"; };
+		F9BAA77995EDC6BBAA77D165 /* iOSWhisperSmartKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = iOSWhisperSmartKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA3615B556C8BCE79E6F4235 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FA48ABD7AD52DB71C33FBF97 /* iOSWhisperSmartUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = iOSWhisperSmartUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FDBA292BCE5F3E2FF12A6953 /* KeyboardLaunchAutoStopPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLaunchAutoStopPolicy.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		18959E78A7B885CDCE8A7AF8 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				9585A82B49C088A23705CE0C /* AppCore */,
+				BB89E9A681DB6E3C49B2F417 /* Audio */,
+				728240FE89545411C60053ED /* STTAdapters */,
+				7F9271778D8DD6A22CDEBA44 /* UI */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		1896A68B4C55BFAA1DB75985 /* Dictation */ = {
+			isa = PBXGroup;
+			children = (
+				71FA18D57433DEB6E1877BA2 /* DictationView.swift */,
+				9B09C2C96153A5BC3C653462 /* DictationViewModel.swift */,
+				66C75F97C273B438B3A7DBF2 /* HistoryView.swift */,
+			);
+			path = Dictation;
+			sourceTree = "<group>";
+		};
+		34267DABF2F383F9FC9FDCE9 /* KeyboardExtension */ = {
+			isa = PBXGroup;
+			children = (
+				FA3615B556C8BCE79E6F4235 /* Info.plist */,
+				C518BEDE7B2964A00A52CE49 /* iOSWhisperSmartKeyboard.entitlements */,
+				16F8912AE99A0761481C46D8 /* KeyboardViewController.swift */,
+			);
+			path = KeyboardExtension;
+			sourceTree = "<group>";
+		};
+		419FD89BAD153140D4EFD0BE /* App */ = {
+			isa = PBXGroup;
+			children = (
+				8F29602DFF973AF124F530DA /* iOSWhisperSmart.entitlements */,
+				EFDCDF4AC8A517A89452CE13 /* iOSWhisperSmartApp.swift */,
+				7BE30E3DB976049ED655C45C /* KeyboardTapHostView.swift */,
+				C76B9D8ACA151977BAB0094F /* RootTabView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		4FE38D23EAAC2F985125476D /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				B60101EE49763377EF8593E1 /* KeyboardTapInteractionUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		52CC131D74E370A0D2C75EA9 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				CDCC44F9B7B99006B0482F7F /* ShareSheet.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+		5B79C01527523249625292CC /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				187426E453F67070AEAA5BA9 /* iOSWhisperSmart.app */,
+				F9BAA77995EDC6BBAA77D165 /* iOSWhisperSmartKeyboard.appex */,
+				654EDD3607EDE71AB2A4A5B0 /* iOSWhisperSmartTests.xctest */,
+				FA48ABD7AD52DB71C33FBF97 /* iOSWhisperSmartUITests.xctest */,
+				95A90CB9D1A1DC5E9ABF38E8 /* iOSWhisperSmartWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		63A1C709C1C0229DEB1F31C2 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				A25B760764B1EE2AE31880B1 /* DictationLiveActivityWidget.swift */,
+				6130D83F0D4494FC0864B55A /* WhisperSmartWidgetsBundle.swift */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		6E1760E2BA4057E9F931CBC1 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				7CD5773268A170BE41875266 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		728240FE89545411C60053ED /* STTAdapters */ = {
+			isa = PBXGroup;
+			children = (
+				6E21FA1886F0662EB58E4DE3 /* OpenAICloudSpeechService.swift */,
+				ED49D7D4ED9B9D4927D65E4B /* OpenAITranscriptionClient.swift */,
+				107CFC546F3EE75C55018599 /* SpeechToTextService.swift */,
+			);
+			path = STTAdapters;
+			sourceTree = "<group>";
+		};
+		7A7BCB502E3959F2DEE75A14 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				324247C945CF2B76A8B6C92D /* OnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		7F9271778D8DD6A22CDEBA44 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				55D0BD948BA1B642F0AA7318 /* Theme.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		9585A82B49C088A23705CE0C /* AppCore */ = {
+			isa = PBXGroup;
+			children = (
+				0702EA98FA2E4130C65BC037 /* AppDeepLink.swift */,
+				DE290FAE701196FE6601281B /* AppSettings.swift */,
+				9A342BB316CEF789318B7293 /* CloudTranscriptionPolicy.swift */,
+				48E11D8A7963BD55686F3270 /* DictationLiveActivityAttributes.swift */,
+				4CA05F78011030A2C3EDEFF9 /* DictationSessionState.swift */,
+				B431620F94EC294CDD9A9DB2 /* KeyboardCompanionStore.swift */,
+				FDBA292BCE5F3E2FF12A6953 /* KeyboardLaunchAutoStopPolicy.swift */,
+				8D54D55A1B6662C2DB2502B9 /* KeyboardLayoutHelper.swift */,
+				223B86A4FEE0C243624DFDB3 /* KeyboardLayoutMetrics.swift */,
+				E32C55335F22304D44BE7CE0 /* KeyboardMicFlowStateMachine.swift */,
+				3E9DB99E7FEBFEB7F81B88FB /* KeychainService.swift */,
+				0FAA0DAF31C68E78B9697F5D /* NetworkMonitor.swift */,
+				E8F9BB8AF544C9DBC6B56595 /* TranscriptHistoryStore.swift */,
+				DABF7901C1032943767F3E49 /* TrustModels.swift */,
+			);
+			path = AppCore;
+			sourceTree = "<group>";
+		};
+		A052F4838ADE00582313259E /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				C52DF9BE1E9A7534706B789D /* StartDictationAppIntent.swift */,
+			);
+			path = Intents;
+			sourceTree = "<group>";
+		};
+		A2D0C261615281F9B57F9E4B /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				1896A68B4C55BFAA1DB75985 /* Dictation */,
+				7A7BCB502E3959F2DEE75A14 /* Onboarding */,
+				6E1760E2BA4057E9F931CBC1 /* Settings */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		BB89E9A681DB6E3C49B2F417 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				44C75DF600189F4FCE6FF44C /* AppleSpeechRecognizerService.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		C4B01436ACCBF3C480D860EF /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				80BE155F429E1BEF8FBCBD55 /* AppDeepLinkTests.swift */,
+				29663A89CD6E55E54088FDDC /* CloudTranscriptionPolicyTests.swift */,
+				62AEB309407CBBE1E8273390 /* DictationSessionReducerTests.swift */,
+				3F2CBB12E5F769540B78BBDC /* KeyboardCompanionStoreTests.swift */,
+				415BE87858AAB970F94DFAF1 /* KeyboardLaunchAutoStopPolicyTests.swift */,
+				24C4168DF7E079AF60351205 /* KeyboardLayoutHelperTests.swift */,
+				0D840E639DC9159B0A11A82A /* KeyboardLayoutMetricsTests.swift */,
+				9497D6B1F5DFE97DBC93A713 /* KeyboardMicFlowStateMachineTests.swift */,
+				A39EF1467A39E95DCB93CAA9 /* Phase4TrustControlsTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		D27408C2940A479C3B42FF2D = {
+			isa = PBXGroup;
+			children = (
+				419FD89BAD153140D4EFD0BE /* App */,
+				18959E78A7B885CDCE8A7AF8 /* Core */,
+				A2D0C261615281F9B57F9E4B /* Features */,
+				A052F4838ADE00582313259E /* Intents */,
+				34267DABF2F383F9FC9FDCE9 /* KeyboardExtension */,
+				C4B01436ACCBF3C480D860EF /* Tests */,
+				4FE38D23EAAC2F985125476D /* UITests */,
+				52CC131D74E370A0D2C75EA9 /* Utilities */,
+				63A1C709C1C0229DEB1F31C2 /* Widgets */,
+				5B79C01527523249625292CC /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		09AC7E454D611F35855EB93D /* iOSWhisperSmartKeyboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFD86038EC6DDDA7DC1050DF /* Build configuration list for PBXNativeTarget "iOSWhisperSmartKeyboard" */;
+			buildPhases = (
+				4ACD612402D5602EFBE9C5AC /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = iOSWhisperSmartKeyboard;
+			packageProductDependencies = (
+			);
+			productName = iOSWhisperSmartKeyboard;
+			productReference = F9BAA77995EDC6BBAA77D165 /* iOSWhisperSmartKeyboard.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		4C9BCAE29433273B69570994 /* iOSWhisperSmartUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 508F38CD910086767CE3240B /* Build configuration list for PBXNativeTarget "iOSWhisperSmartUITests" */;
+			buildPhases = (
+				596C15ECCFB527EC23E15619 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0712B4B85645611CD649BEE1 /* PBXTargetDependency */,
+			);
+			name = iOSWhisperSmartUITests;
+			packageProductDependencies = (
+			);
+			productName = iOSWhisperSmartUITests;
+			productReference = FA48ABD7AD52DB71C33FBF97 /* iOSWhisperSmartUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		A98C66D2E6ED3A7AD36F9FFF /* iOSWhisperSmartWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8216B5EA34C722F23AD473C7 /* Build configuration list for PBXNativeTarget "iOSWhisperSmartWidgets" */;
+			buildPhases = (
+				7BF5A836DBD18CB0FD0ADDC5 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E753B29A43CAEB9DA45CCA08 /* PBXTargetDependency */,
+			);
+			name = iOSWhisperSmartWidgets;
+			packageProductDependencies = (
+			);
+			productName = iOSWhisperSmartWidgets;
+			productReference = 95A90CB9D1A1DC5E9ABF38E8 /* iOSWhisperSmartWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		BD9C31117F728CA6B670FEE5 /* iOSWhisperSmartTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3953F379761A5B7737EBD51A /* Build configuration list for PBXNativeTarget "iOSWhisperSmartTests" */;
+			buildPhases = (
+				09AAE9F3FF2B475C4ABF23F7 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1883A3F3446A6558FD988D9B /* PBXTargetDependency */,
+			);
+			name = iOSWhisperSmartTests;
+			packageProductDependencies = (
+			);
+			productName = iOSWhisperSmartTests;
+			productReference = 654EDD3607EDE71AB2A4A5B0 /* iOSWhisperSmartTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		E204EDAB7DD15765060D71F5 /* iOSWhisperSmart */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 86C434A72E04222250515FC8 /* Build configuration list for PBXNativeTarget "iOSWhisperSmart" */;
+			buildPhases = (
+				7D0FB342CD72FDB2197AD7A9 /* Sources */,
+				BD161CF39188F3324BA011A2 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				45F0CA4FA6DF626DF2918D97 /* PBXTargetDependency */,
+			);
+			name = iOSWhisperSmart;
+			packageProductDependencies = (
+			);
+			productName = iOSWhisperSmart;
+			productReference = 187426E453F67070AEAA5BA9 /* iOSWhisperSmart.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CF7E6AD0F14A674B85E632D1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					09AC7E454D611F35855EB93D = {
+						ProvisioningStyle = Automatic;
+					};
+					4C9BCAE29433273B69570994 = {
+						TestTargetID = E204EDAB7DD15765060D71F5;
+					};
+					A98C66D2E6ED3A7AD36F9FFF = {
+						ProvisioningStyle = Automatic;
+					};
+					E204EDAB7DD15765060D71F5 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = E7D895D0CC9D8F57F6DAE30D /* Build configuration list for PBXProject "iOSWhisperSmart" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = D27408C2940A479C3B42FF2D;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E204EDAB7DD15765060D71F5 /* iOSWhisperSmart */,
+				09AC7E454D611F35855EB93D /* iOSWhisperSmartKeyboard */,
+				BD9C31117F728CA6B670FEE5 /* iOSWhisperSmartTests */,
+				4C9BCAE29433273B69570994 /* iOSWhisperSmartUITests */,
+				A98C66D2E6ED3A7AD36F9FFF /* iOSWhisperSmartWidgets */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		09AAE9F3FF2B475C4ABF23F7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FD632DD272456DF755CB2593 /* AppDeepLinkTests.swift in Sources */,
+				AC673D46D23162C8D04D7582 /* CloudTranscriptionPolicyTests.swift in Sources */,
+				7F690802C5134FBE3CDFD79A /* DictationSessionReducerTests.swift in Sources */,
+				49843FD557864C78C91A60A7 /* KeyboardCompanionStoreTests.swift in Sources */,
+				0FBFCF7DECA3CDCB6BFA3399 /* KeyboardLaunchAutoStopPolicyTests.swift in Sources */,
+				FB4585494FD4573D6909B555 /* KeyboardLayoutHelperTests.swift in Sources */,
+				A42765DA7D1AB154F5E7ACB4 /* KeyboardLayoutMetricsTests.swift in Sources */,
+				CCCEE8983328E27CF5D4F217 /* KeyboardMicFlowStateMachineTests.swift in Sources */,
+				FF0FE63AE7AF588C115FA727 /* Phase4TrustControlsTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4ACD612402D5602EFBE9C5AC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2EE67343A8CA9F1D3414124E /* KeyboardCompanionStore.swift in Sources */,
+				2137C9D2199DAE34660464B7 /* KeyboardLayoutHelper.swift in Sources */,
+				3B0AFABAC3B7BEC9C64CB4A6 /* KeyboardLayoutMetrics.swift in Sources */,
+				E9894FB4E4C36AE598447AFF /* KeyboardMicFlowStateMachine.swift in Sources */,
+				70CFFEA49D07A6547824ABE5 /* KeyboardViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		596C15ECCFB527EC23E15619 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				249380C636472FD217DC3953 /* KeyboardTapInteractionUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7BF5A836DBD18CB0FD0ADDC5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				82A2568C5ABC445130A47684 /* DictationLiveActivityAttributes.swift in Sources */,
+				905BEB33E038EA54DB83F7C9 /* DictationLiveActivityWidget.swift in Sources */,
+				AFDE002EC347C9DFD719AEA1 /* WhisperSmartWidgetsBundle.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7D0FB342CD72FDB2197AD7A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E14C37D066C88CC7B5C7BC99 /* AppDeepLink.swift in Sources */,
+				443AB53DA1C5F94DFD251304 /* AppSettings.swift in Sources */,
+				47D0D45E591B1556645206F0 /* AppleSpeechRecognizerService.swift in Sources */,
+				EE211807C3AFF54B51E0B050 /* CloudTranscriptionPolicy.swift in Sources */,
+				DF2B6EA375108CEB2B8DE597 /* DictationLiveActivityAttributes.swift in Sources */,
+				F772C1E753F5D5159D5F0EA0 /* DictationSessionState.swift in Sources */,
+				29D0B6AF83F2A0CEB652FE0F /* DictationView.swift in Sources */,
+				00DC1DCD3E010E9D2B24F001 /* DictationViewModel.swift in Sources */,
+				BBACC074C0D960345D7E18B4 /* HistoryView.swift in Sources */,
+				718A845E8437FED583C5198E /* KeyboardCompanionStore.swift in Sources */,
+				E661269358CFBAEF0BD7176A /* KeyboardLaunchAutoStopPolicy.swift in Sources */,
+				941A62BD361EAD1B6FD53555 /* KeyboardLayoutHelper.swift in Sources */,
+				92464DBD1D51D7A154EB69FA /* KeyboardLayoutMetrics.swift in Sources */,
+				EB321016A3E0D286743C2FDC /* KeyboardMicFlowStateMachine.swift in Sources */,
+				52333D1806822325E0DBC959 /* KeyboardTapHostView.swift in Sources */,
+				B856291932717D365A2001A7 /* KeychainService.swift in Sources */,
+				E2FE1A22D1FFE9BAE50B612E /* NetworkMonitor.swift in Sources */,
+				10AFF99FC8CDE141BEB94B39 /* OnboardingView.swift in Sources */,
+				C2C189A90963F321FB6068D8 /* OpenAICloudSpeechService.swift in Sources */,
+				2CECA81C6B5885EED47A60C3 /* OpenAITranscriptionClient.swift in Sources */,
+				1922C168776BFE5388E3DABF /* RootTabView.swift in Sources */,
+				51EB48D602AE15AD3D18EFAE /* SettingsView.swift in Sources */,
+				5DD7B73F19C0524131DCAF71 /* ShareSheet.swift in Sources */,
+				EA88502D182B14D181EB85D1 /* SpeechToTextService.swift in Sources */,
+				FD69F002D4AD649BD8C86E33 /* StartDictationAppIntent.swift in Sources */,
+				F60A85B79A73EC6BC1823B0D /* Theme.swift in Sources */,
+				B601C13B8FAC60940A95517B /* TranscriptHistoryStore.swift in Sources */,
+				5431E94C4BF270147E6B1D87 /* TrustModels.swift in Sources */,
+				47ABEE16E239480640300EF8 /* iOSWhisperSmartApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0712B4B85645611CD649BEE1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E204EDAB7DD15765060D71F5 /* iOSWhisperSmart */;
+			targetProxy = 6D03E6982F7839C4637A0E05 /* PBXContainerItemProxy */;
+		};
+		1883A3F3446A6558FD988D9B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E204EDAB7DD15765060D71F5 /* iOSWhisperSmart */;
+			targetProxy = 2B687FAADB4B56AE1A8877D6 /* PBXContainerItemProxy */;
+		};
+		45F0CA4FA6DF626DF2918D97 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 09AC7E454D611F35855EB93D /* iOSWhisperSmartKeyboard */;
+			targetProxy = 7492AC4F53F73B34ECA3501A /* PBXContainerItemProxy */;
+		};
+		E753B29A43CAEB9DA45CCA08 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E204EDAB7DD15765060D71F5 /* iOSWhisperSmart */;
+			targetProxy = C7B7E143DD7B43CFFC3C8384 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		057C027A2250C01B4C55427C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = KeyboardExtension/iOSWhisperSmartKeyboard.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = KeyboardExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.visperflow.iOSWhisperSmart.keyboard;
+				PRODUCT_NAME = iOSWhisperSmartKeyboard;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		094023B3A267B3DA9BFDCE24 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = iOSWhisperSmart;
+			};
+			name = Release;
+		};
+		3267018F1159A9BF77B1BCDC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iOSWhisperSmart.app/iOSWhisperSmart";
+			};
+			name = Debug;
+		};
+		40B93D88D6A6F44687A94981 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/iOSWhisperSmart.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				INFOPLIST_KEY_CFBundleURLTypes = (
+					{
+						CFBundleURLName = com.visperflow.iOSWhisperSmart;
+						CFBundleURLSchemes = (
+							whispersmart,
+						);
+					},
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_NAME = iOSWhisperSmart;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		45488524E6ACD4E8B506869A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = KeyboardExtension/iOSWhisperSmartKeyboard.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = KeyboardExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.visperflow.iOSWhisperSmart.keyboard;
+				PRODUCT_NAME = iOSWhisperSmartKeyboard;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		49B6B6F3B54E84AD40922589 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = iOSWhisperSmart;
+			};
+			name = Debug;
+		};
+		4B7EE820F139A008CE2B4C17 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iOSWhisperSmart.app/iOSWhisperSmart";
+			};
+			name = Release;
+		};
+		785DFA96046D5B4D32E30DF6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = WhisperSmart;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "WhisperSmart needs microphone access for live dictation.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "WhisperSmart needs speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.visperflow.iOSWhisperSmart;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.1;
+			};
+			name = Debug;
+		};
+		8AE705B0BC62A05523C0842B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				"INFOPLIST_KEY_NSExtension:NSExtensionPointIdentifier" = "com.apple.widgetkit-extension";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.visperflow.iOSWhisperSmart.widgets;
+				PRODUCT_NAME = iOSWhisperSmartWidgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		97184B22D6D2E7D45D0609F3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = WhisperSmart;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "WhisperSmart needs microphone access for live dictation.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "WhisperSmart needs speech recognition to convert your voice to text.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.visperflow.iOSWhisperSmart;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.1;
+			};
+			name = Release;
+		};
+		D2102ECAA587CF7B0AF8C062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				"INFOPLIST_KEY_NSExtension:NSExtensionPointIdentifier" = "com.apple.widgetkit-extension";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.visperflow.iOSWhisperSmart.widgets;
+				PRODUCT_NAME = iOSWhisperSmartWidgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D4CDA5B7B53B8C025A9EB1AE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/iOSWhisperSmart.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				INFOPLIST_KEY_CFBundleURLTypes = (
+					{
+						CFBundleURLName = com.visperflow.iOSWhisperSmart;
+						CFBundleURLSchemes = (
+							whispersmart,
+						);
+					},
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_NAME = iOSWhisperSmart;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3953F379761A5B7737EBD51A /* Build configuration list for PBXNativeTarget "iOSWhisperSmartTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3267018F1159A9BF77B1BCDC /* Debug */,
+				4B7EE820F139A008CE2B4C17 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		508F38CD910086767CE3240B /* Build configuration list for PBXNativeTarget "iOSWhisperSmartUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				49B6B6F3B54E84AD40922589 /* Debug */,
+				094023B3A267B3DA9BFDCE24 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8216B5EA34C722F23AD473C7 /* Build configuration list for PBXNativeTarget "iOSWhisperSmartWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8AE705B0BC62A05523C0842B /* Debug */,
+				D2102ECAA587CF7B0AF8C062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		86C434A72E04222250515FC8 /* Build configuration list for PBXNativeTarget "iOSWhisperSmart" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				40B93D88D6A6F44687A94981 /* Debug */,
+				D4CDA5B7B53B8C025A9EB1AE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CFD86038EC6DDDA7DC1050DF /* Build configuration list for PBXNativeTarget "iOSWhisperSmartKeyboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				45488524E6ACD4E8B506869A /* Debug */,
+				057C027A2250C01B4C55427C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E7D895D0CC9D8F57F6DAE30D /* Build configuration list for PBXProject "iOSWhisperSmart" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				785DFA96046D5B4D32E30DF6 /* Debug */,
+				97184B22D6D2E7D45D0609F3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CF7E6AD0F14A674B85E632D1 /* Project object */;
+}

@@ -29,6 +29,7 @@ enum DictationWorkflowSettings {
         static let customAIInstructions = "workflow.customAIInstructions"
         static let developerModeEnabled = "workflow.developerModeEnabled"
         static let voiceCommandFormattingEnabled = "workflow.voiceCommandFormattingEnabled"
+        static let selectedInputDeviceUID = "workflow.selectedInputDeviceUID"
     }
 
     /// One-shot mode auto-stop when no speech is detected for this many seconds.
@@ -142,6 +143,16 @@ enum DictationWorkflowSettings {
         }
         set {
             defaults.set(newValue, forKey: Key.voiceCommandFormattingEnabled)
+        }
+    }
+
+    /// Selected audio input device UID. Empty means use system default.
+    static var selectedInputDeviceUID: String {
+        get {
+            defaults.string(forKey: Key.selectedInputDeviceUID) ?? ""
+        }
+        set {
+            defaults.set(newValue, forKey: Key.selectedInputDeviceUID)
         }
     }
 }
