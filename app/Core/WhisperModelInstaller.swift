@@ -5,6 +5,7 @@ import os.log
 private let whisperInstallerLogger = Logger(subsystem: "com.visperflow", category: "WhisperInstaller")
 
 enum WhisperModelTier: String, CaseIterable, Identifiable {
+    case tinyEn = "tiny_en"
     case baseEn = "base_en"
     case smallEn = "small_en"
     case mediumEn = "medium_en"
@@ -14,6 +15,7 @@ enum WhisperModelTier: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .tinyEn: return "Whisper Tiny.en"
         case .baseEn: return "Whisper Base.en"
         case .smallEn: return "Whisper Small.en"
         case .mediumEn: return "Whisper Medium.en"
@@ -21,8 +23,17 @@ enum WhisperModelTier: String, CaseIterable, Identifiable {
         }
     }
 
+    var qualityBand: String {
+        switch self {
+        case .tinyEn, .baseEn: return "Light"
+        case .smallEn, .mediumEn: return "Balanced"
+        case .largeV3Turbo: return "Best"
+        }
+    }
+
     var fileName: String {
         switch self {
+        case .tinyEn: return "ggml-tiny.en.bin"
         case .baseEn: return "ggml-base.en.bin"
         case .smallEn: return "ggml-small.en.bin"
         case .mediumEn: return "ggml-medium.en.bin"
@@ -32,6 +43,7 @@ enum WhisperModelTier: String, CaseIterable, Identifiable {
 
     var approxSizeLabel: String {
         switch self {
+        case .tinyEn: return "~75 MB"
         case .baseEn: return "~141 MB"
         case .smallEn: return "~466 MB"
         case .mediumEn: return "~1.5 GB"

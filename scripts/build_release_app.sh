@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="${APP_NAME:-Whisper Smart}"
 BUNDLE_ID="${BUNDLE_ID:-com.whispersmart.desktop}"
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.2.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 LOGO_PATH="${LOGO_PATH:-$REPO_ROOT/logo.png}"
 

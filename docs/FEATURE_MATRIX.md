@@ -77,7 +77,7 @@
 | Menu-bar app | Yes | Yes | Yes | Yes | MVP: AppKit status item |
 | Recording status indicator | Yes | Yes | Yes | Yes | MVP: icon state changes |
 | Floating transcription overlay | Yes | Yes | Yes | Yes | MVP: minimal; V2: configurable |
-| Settings / preferences pane | Yes | Yes | Yes | Yes | MVP: hotkey, mic, model |
+| Settings / preferences pane | Yes | Yes | Yes | Yes | MVP: hotkey, mic, model; now includes Smart presets (Light/Balanced/Best/Cloud) with in-app download actions |
 | Auto-launch at login | Yes | Yes | Yes | Yes | MVP: LoginItem API |
 | Auto-update | Yes | No | Yes | Yes | V2: Sparkle framework |
 | Onboarding tutorial | Yes | No | Yes | Yes | V2: first-run experience |

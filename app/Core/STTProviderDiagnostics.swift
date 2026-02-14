@@ -329,15 +329,11 @@ enum STTProviderResolver {
             )
         }
 
-        let level: ProviderHealthLevel = .unavailable
-
-        return ProviderRuntimeDiagnostics(
-            timestamp: Date(),
+        return fallbackToApple(
             requestedKind: requestedKind,
-            effectiveKind: .parakeet,
-            healthLevel: level,
             checks: finalChecks,
-            fallbackReason: fallbackReason
+            fallbackReason: fallbackReason ?? "Parakeet local model/runtime is unavailable.",
+            environment: environment
         )
     }
 

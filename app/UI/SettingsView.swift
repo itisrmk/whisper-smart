@@ -1349,136 +1349,77 @@ extension Notification.Name {
 // MARK: - Provider Settings
 
 private struct ProviderSettingsTab: View {
-    private enum QualityProfile: String, CaseIterable, Identifiable {
-        case localFast
-        case localBest
-        case cloudBest
+    private enum SmartModelPreset: String, CaseIterable, Identifiable {
+        case light
+        case balanced
+        case best
+        case cloud
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .localFast: return "Local Fast"
-            case .localBest: return "Local Best"
-            case .cloudBest: return "Cloud Best"
+            case .light: return "Light"
+            case .balanced: return "Balanced"
+            case .best: return "Best"
+            case .cloud: return "Cloud"
             }
         }
 
         var subtitle: String {
             switch self {
-            case .localFast: return "Parakeet INT8 · lower storage"
-            case .localBest: return "Whisper large-v3 turbo · best local quality"
-            case .cloudBest: return "OpenAI cloud · best consistency"
+            case .light: return "Whisper Tiny/Base · fastest local"
+            case .balanced: return "Parakeet CTC 0.6B · good speed/quality"
+            case .best: return "Whisper Large-v3 Turbo · highest local accuracy"
+            case .cloud: return "OpenAI Whisper API · remote transcription"
             }
         }
 
-        var icon: String {
+        var provider: STTProviderKind {
             switch self {
-            case .localFast:
-                return "hare.fill"
-            case .localBest:
-                return "waveform.and.mic"
-            case .cloudBest:
-                return "cloud.sun.fill"
-            }
-        }
-
-        var vendorLabel: String {
-            switch self {
-            case .localFast:
-                return "NVIDIA"
-            case .localBest:
-                return "WHISPER"
-            case .cloudBest:
-                return "OPENAI"
-            }
-        }
-
-        var installHint: String {
-            switch self {
-            case .localFast:
-                return "~623 MB"
-            case .localBest:
-                return "~1.6 GB"
-            case .cloudBest:
-                return "No local download"
+            case .light, .best: return .whisper
+            case .balanced: return .parakeet
+            case .cloud: return .openaiAPI
             }
         }
     }
 
     @State private var selectedKind: STTProviderKind = STTProviderKind.loadSelection()
-    /// Shared download state — rebound to the active variant when the provider changes.
     @StateObject private var downloadState = ModelDownloadState(variant: .parakeetCTC06B)
     @StateObject private var whisperInstaller = WhisperModelInstaller.shared
     @StateObject private var whisperRuntimeInstaller = WhisperRuntimeInstaller.shared
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
-    @State private var whisperCLIPath = DictationProviderPolicy.whisperCLIPath
-    @State private var whisperModelPath = DictationProviderPolicy.whisperModelPath
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
-            NeuSection(icon: "cloud.fill", title: "Speech to Text") {
+            NeuSection(icon: "waveform.and.mic", title: "Smart Model Selection") {
                 VStack(alignment: .leading, spacing: VFSpacing.lg) {
-                    Text("Pick a profile, then use explicit install/download buttons")
+                    Text("Choose a preset. If requirements are missing, Whisper Smart safely falls back to Apple Speech and shows one-click setup actions.")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
 
                     VStack(spacing: VFSpacing.md) {
-                        qualityProfileCard(.localFast)
-                        qualityProfileCard(.localBest)
-                        qualityProfileCard(.cloudBest)
-                    }
-
-                    if selectedKind == .parakeet {
-                        VStack(alignment: .leading, spacing: VFSpacing.md) {
-                            Text("Advanced Parakeet Controls")
-                                .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.textSecondary)
-
-                            ModelDownloadRow(kind: .parakeet, downloadState: downloadState)
-
-                            HStack(spacing: VFSpacing.sm) {
-                                Button("Reinstall Parakeet Local") {
-                                    reinstallParakeetLocal()
-                                }
-                                .buttonStyle(.plain)
-                                .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.textPrimary)
-                                .padding(.horizontal, VFSpacing.md)
-                                .padding(.vertical, VFSpacing.sm)
-                                .background(Capsule().fill(VFColor.glass3))
-
-                                Button("Repair Runtime") {
-                                    ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
-                                }
-                                .buttonStyle(.plain)
-                                .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.textPrimary)
-                                .padding(.horizontal, VFSpacing.md)
-                                .padding(.vertical, VFSpacing.sm)
-                                .background(Capsule().fill(VFColor.glass3))
-                            }
+                        ForEach(SmartModelPreset.allCases) { preset in
+                            presetCard(preset)
                         }
                     }
 
-                    if selectedKind == .openaiAPI || selectedKind == .whisper {
+                    if selectedKind == .parakeet {
+                        ModelDownloadRow(kind: .parakeet, downloadState: downloadState)
+                    }
+
+                    if selectedKind == .whisper || selectedKind == .openaiAPI {
                         providerConfigurationSection
                     }
                 }
             }
         }
         .onAppear {
-            // Sync download state to the persisted provider on appear.
             syncDownloadState(for: selectedKind)
-            // Product default: keep cloud path available when API key is provided.
             DictationProviderPolicy.cloudFallbackEnabled = true
             openAIAPIKey = DictationProviderPolicy.openAIAPIKey
-            whisperCLIPath = DictationProviderPolicy.whisperCLIPath
-            whisperModelPath = DictationProviderPolicy.whisperModelPath
-
-            // Keep the user's requested provider visible in settings even when
-            // runtime/model prerequisites are missing, so install actions remain accessible.
-            _ = STTProviderResolver.diagnostics(for: selectedKind)
+            whisperRuntimeInstaller.refreshState()
+            whisperInstaller.refreshState()
         }
     }
 
@@ -1498,6 +1439,10 @@ private struct ProviderSettingsTab: View {
                 .buttonStyle(.plain)
                 .font(VFFont.settingsCaption)
                 .foregroundStyle(VFColor.textPrimary)
+
+                Text("OpenAI-compatible endpoints (including Qwen-hosted gateways) are not yet configurable in this build; this profile currently targets OpenAI's official endpoint.")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
             }
         } else if selectedKind == .whisper {
             VStack(alignment: .leading, spacing: VFSpacing.sm) {
@@ -1508,41 +1453,21 @@ private struct ProviderSettingsTab: View {
                 HStack(spacing: VFSpacing.sm) {
                     switch whisperRuntimeInstaller.phase {
                     case .notInstalled:
-                        Button("Install runtime") {
+                        profileActionButton(title: "Install runtime", enabled: true) {
                             whisperRuntimeInstaller.installWithHomebrew()
                         }
-                        .buttonStyle(.plain)
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textPrimary)
-                        .padding(.horizontal, VFSpacing.md)
-                        .padding(.vertical, VFSpacing.sm)
-                        .background(Capsule().fill(VFColor.glass3))
-                        Text("Installs whisper.cpp (whisper-cli) via Homebrew.")
+                        Text("Installs whisper.cpp runtime in-app using Homebrew.")
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.textSecondary)
-
                     case .installing:
-                        Button("Cancel") {
+                        profileActionButton(title: "Cancel", enabled: true) {
                             whisperRuntimeInstaller.cancelInstall()
                         }
-                        .buttonStyle(.plain)
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textPrimary)
-                        .padding(.horizontal, VFSpacing.md)
-                        .padding(.vertical, VFSpacing.sm)
-                        .background(Capsule().fill(VFColor.glass3))
                         Text("Installing runtime…")
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.textSecondary)
-
-                    case .ready(let path):
-                        Text("Runtime installed")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.success)
-                        Text(path)
-                            .font(.system(size: 10, weight: .regular, design: .monospaced))
-                            .foregroundStyle(VFColor.textTertiary)
-
+                    case .ready:
+                        installedChip(label: "Runtime Ready")
                     case .failed(let message):
                         Text(message)
                             .font(VFFont.settingsCaption)
@@ -1553,177 +1478,82 @@ private struct ProviderSettingsTab: View {
                 HStack(spacing: VFSpacing.sm) {
                     Menu {
                         ForEach(WhisperModelTier.allCases) { tier in
-                            Button("\(tier.displayName) (\(tier.approxSizeLabel))") {
+                            Button("\(tier.displayName) · \(tier.qualityBand) · \(tier.approxSizeLabel)") {
                                 whisperInstaller.setTier(tier)
                             }
                         }
                     } label: {
-                        HStack(spacing: VFSpacing.xs) {
-                            Text(whisperInstaller.selectedTier.displayName)
-                                .font(VFFont.settingsCaption)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.system(size: 9, weight: .semibold))
-                        }
-                        .foregroundStyle(VFColor.textPrimary)
-                        .padding(.horizontal, VFSpacing.md)
-                        .padding(.vertical, VFSpacing.sm)
-                        .background(Capsule().fill(VFColor.glass3))
+                        Text("\(whisperInstaller.selectedTier.displayName) · \(whisperInstaller.selectedTier.qualityBand)")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textPrimary)
+                            .padding(.horizontal, VFSpacing.md)
+                            .padding(.vertical, VFSpacing.sm)
+                            .background(Capsule().fill(VFColor.glass3))
                     }
                     .menuStyle(.borderlessButton)
 
                     switch whisperInstaller.phase {
-                    case .notInstalled(_):
-                        Button("Download model") {
+                    case .notInstalled:
+                        profileActionButton(title: "Download model", enabled: true) {
                             whisperInstaller.downloadSelectedModel()
                         }
-                        .buttonStyle(.plain)
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textPrimary)
-                        .padding(.horizontal, VFSpacing.md)
-                        .padding(.vertical, VFSpacing.sm)
-                        .background(Capsule().fill(VFColor.glass3))
-
                     case .downloading(_, let progress):
-                        Button("Cancel") {
+                        profileActionButton(title: "Cancel", enabled: true) {
                             whisperInstaller.cancel()
                         }
-                        .buttonStyle(.plain)
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textPrimary)
-                        .padding(.horizontal, VFSpacing.md)
-                        .padding(.vertical, VFSpacing.sm)
-                        .background(Capsule().fill(VFColor.glass3))
-
                         Text("\(Int(progress * 100))%")
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.textSecondary)
-
-                    case .ready(_):
-                        Text("Model installed")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.success)
-
+                    case .ready:
+                        installedChip(label: "Model Ready")
                     case .failed(let message):
                         Text(message)
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.error)
                     }
                 }
-
-                Text("Whisper Local becomes active when runtime + model are both installed.")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
-            }
-            .onAppear {
-                whisperRuntimeInstaller.refreshState()
-                whisperInstaller.refreshState()
-                whisperCLIPath = DictationProviderPolicy.whisperCLIPath
-                whisperModelPath = DictationProviderPolicy.whisperModelPath
             }
         }
     }
 
-    private func qualityProfileCard(_ profile: QualityProfile) -> some View {
-        let isActive = (activeQualityProfile == profile)
+    private func presetCard(_ preset: SmartModelPreset) -> some View {
+        let diagnostics = STTProviderResolver.diagnostics(for: preset.provider)
+        let isActive = activePreset == preset
 
-        return VStack(alignment: .leading, spacing: VFSpacing.md) {
-            HStack(spacing: VFSpacing.sm) {
-                Image(systemName: profile.icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isActive ? VFColor.textOnAccent : VFColor.accentFallback)
-                    .frame(width: 24, height: 24)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(isActive ? VFColor.accentFallback : VFColor.accentFallback.opacity(0.16))
-                    )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(profile.title)
+        return VStack(alignment: .leading, spacing: VFSpacing.sm) {
+            HStack {
+                VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                    Text(preset.title)
                         .font(VFFont.settingsBody)
                         .foregroundStyle(VFColor.textPrimary)
-                    Text(profile.vendorLabel)
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .foregroundStyle(VFColor.textTertiary)
+                    Text(preset.subtitle)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
                 }
-
                 Spacer()
-
                 Circle()
                     .fill(isActive ? VFColor.accentFallback : VFColor.controlInset)
                     .frame(width: 10, height: 10)
             }
 
-            Text(profile.subtitle)
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textSecondary)
-                .lineLimit(2)
-                .lineSpacing(2)
-
-            Text(profile.installHint)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(VFColor.textTertiary)
-                .padding(.horizontal, VFSpacing.sm)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(VFColor.controlInset)
-                        .overlay(
-                            Capsule()
-                                .stroke(VFColor.glassBorder, lineWidth: 0.6)
-                        )
-                )
-
-            Rectangle()
-                .fill(VFColor.glassBorder.opacity(0.45))
-                .frame(height: 1)
-
             HStack(spacing: VFSpacing.sm) {
                 if isActive {
                     installedChip(label: "Selected", color: VFColor.accentFallback)
                 } else {
-                    profileActionButton(
-                        title: "Use",
-                        isPrimary: true,
-                        enabled: true
-                    ) {
-                        applyQualityProfile(profile)
+                    profileActionButton(title: "Use", isPrimary: true, enabled: true) {
+                        applyPreset(preset)
                     }
                 }
+                setupActionButton(for: preset)
+            }
 
-                switch profile {
-                case .localFast:
-                    if !isParakeetInstalled {
-                        profileActionButton(title: "Download", enabled: true) {
-                            downloadParakeetProfile()
-                        }
-                    } else {
-                        installedChip(label: "Installed")
-                    }
-
-                case .localBest:
-                    if !whisperRuntimeIsReady {
-                        profileActionButton(title: "Install runtime", enabled: true) {
-                            whisperRuntimeInstaller.installWithHomebrew()
-                        }
-                    }
-
-                    if !isWhisperLargeInstalled {
-                        profileActionButton(title: "Download", enabled: true) {
-                            downloadWhisperLargeProfile()
-                        }
-                    } else {
-                        installedChip(label: "Installed")
-                    }
-
-                case .cloudBest:
-                    profileActionButton(title: "API Key", enabled: true) {
-                        selectProvider(.openaiAPI)
-                    }
-                }
+            if diagnostics.usesFallback, let reason = diagnostics.fallbackReason {
+                Text(reason)
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.error)
             }
         }
         .padding(VFSpacing.lg)
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
                 .fill(isActive ? VFColor.glass3 : VFColor.glass1)
@@ -1734,46 +1564,70 @@ private struct ProviderSettingsTab: View {
         )
     }
 
-    private func profileActionButton(
-        title: String,
-        isPrimary: Bool = false,
-        enabled: Bool = true,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(isPrimary ? VFColor.textOnAccent : VFColor.textPrimary)
-                .padding(.horizontal, VFSpacing.sm)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(isPrimary ? VFColor.accentFallback : VFColor.glass3)
-                        .overlay(
-                            Capsule()
-                                .stroke(VFColor.glassBorder, lineWidth: 0.7)
-                        )
-                )
+    @ViewBuilder
+    private func setupActionButton(for preset: SmartModelPreset) -> some View {
+        switch preset {
+        case .balanced:
+            if !ModelVariant.parakeetCTC06B.isDownloaded {
+                profileActionButton(title: "Download", enabled: ModelVariant.parakeetCTC06B.hasDownloadSource) {
+                    downloadParakeetProfile()
+                }
+            } else {
+                installedChip(label: "Installed")
+            }
+        case .light:
+            if !whisperRuntimeIsReady {
+                profileActionButton(title: "Install runtime", enabled: true) {
+                    whisperRuntimeInstaller.installWithHomebrew()
+                }
+            } else if !whisperModelInstalled([.tinyEn, .baseEn]) {
+                profileActionButton(title: "Download", enabled: true) {
+                    whisperInstaller.setTier(.baseEn)
+                    whisperInstaller.downloadSelectedModel()
+                }
+            } else {
+                installedChip(label: "Installed")
+            }
+        case .best:
+            if !whisperRuntimeIsReady {
+                profileActionButton(title: "Install runtime", enabled: true) {
+                    whisperRuntimeInstaller.installWithHomebrew()
+                }
+            } else if !whisperModelInstalled([.largeV3Turbo]) {
+                profileActionButton(title: "Download", enabled: true) {
+                    downloadWhisperLargeProfile()
+                }
+            } else {
+                installedChip(label: "Installed")
+            }
+        case .cloud:
+            profileActionButton(title: "API Key", enabled: true) {
+                selectProvider(.openaiAPI)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1.0 : 0.5)
     }
 
-    private func installedChip(label: String, color: Color = VFColor.success) -> some View {
-        Text(label)
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .foregroundStyle(color)
-            .padding(.horizontal, VFSpacing.sm)
-            .padding(.vertical, 5)
-            .background(
-                Capsule()
-                    .fill(color.opacity(0.14))
-                    .overlay(
-                        Capsule()
-                            .stroke(color.opacity(0.4), lineWidth: 0.7)
-                    )
+    private func applyPreset(_ preset: SmartModelPreset) {
+        switch preset {
+        case .light:
+            whisperInstaller.setTier(whisperModelInstalled([.tinyEn]) ? .tinyEn : .baseEn)
+            selectProvider(.whisper)
+            whisperInstaller.refreshState()
+        case .balanced:
+            _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
+                id: "hf_parakeet_ctc06b_int8",
+                for: ModelVariant.parakeetCTC06B.id
             )
+            selectProvider(.parakeet)
+            syncDownloadState(for: .parakeet)
+            downloadState.reset()
+        case .best:
+            whisperInstaller.setTier(.largeV3Turbo)
+            selectProvider(.whisper)
+            whisperInstaller.refreshState()
+        case .cloud:
+            selectProvider(.openaiAPI)
+        }
     }
 
     private func downloadParakeetProfile() {
@@ -1794,83 +1648,69 @@ private struct ProviderSettingsTab: View {
     }
 
     private var whisperRuntimeIsReady: Bool {
-        if case .ready = whisperRuntimeInstaller.phase {
-            return true
-        }
+        if case .ready = whisperRuntimeInstaller.phase { return true }
         return false
     }
 
-    private var isParakeetInstalled: Bool {
-        guard let modelURL = ModelVariant.parakeetCTC06B.localURL,
-              FileManager.default.fileExists(atPath: modelURL.path),
-              let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
-              let size = attrs[.size] as? Int64,
-              size > 100_000_000 else {
-            return false
+    private func whisperModelInstalled(_ tiers: [WhisperModelTier]) -> Bool {
+        tiers.contains { tier in
+            let path = whisperInstaller.localModelURL(for: tier).path
+            guard FileManager.default.fileExists(atPath: path),
+                  let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                  let size = attrs[.size] as? Int64 else {
+                return false
+            }
+            return size > 10_000_000
         }
-
-        let tokenizerURL = modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt")
-        return FileManager.default.fileExists(atPath: tokenizerURL.path)
     }
 
-    private var isWhisperLargeInstalled: Bool {
-        let largeURL = whisperInstaller.localModelURL(for: .largeV3Turbo)
-        guard FileManager.default.fileExists(atPath: largeURL.path),
-              let attrs = try? FileManager.default.attributesOfItem(atPath: largeURL.path),
-              let size = attrs[.size] as? Int64 else {
-            return false
-        }
-        return size > 10_000_000
-    }
-
-    private var activeQualityProfile: QualityProfile {
+    private var activePreset: SmartModelPreset {
         switch selectedKind {
         case .openaiAPI:
-            return .cloudBest
-        case .whisper:
-            return .localBest
+            return .cloud
         case .parakeet:
-            return .localFast
+            return .balanced
+        case .whisper:
+            return whisperInstaller.selectedTier == .largeV3Turbo ? .best : .light
         case .appleSpeech, .stub:
-            return .localFast
+            return .light
         }
     }
 
-    private func applyQualityProfile(_ profile: QualityProfile) {
-        switch profile {
-        case .cloudBest:
-            selectProvider(.openaiAPI)
+    private func profileActionButton(
+        title: String,
+        isPrimary: Bool = false,
+        enabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(isPrimary ? VFColor.textOnAccent : VFColor.textPrimary)
+                .padding(.horizontal, VFSpacing.sm)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(isPrimary ? VFColor.accentFallback : VFColor.glass3)
+                        .overlay(Capsule().stroke(VFColor.glassBorder, lineWidth: 0.7))
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
+    }
 
-        case .localFast:
-            _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
-                id: "hf_parakeet_ctc06b_int8",
-                for: ModelVariant.parakeetCTC06B.id
+    private func installedChip(label: String, color: Color = VFColor.success) -> some View {
+        Text(label)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(color)
+            .padding(.horizontal, VFSpacing.sm)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(color.opacity(0.14))
+                    .overlay(Capsule().stroke(color.opacity(0.4), lineWidth: 0.7))
             )
-            selectProvider(.parakeet)
-            syncDownloadState(for: .parakeet)
-            downloadState.reset()
-
-        case .localBest:
-            whisperInstaller.setTier(.largeV3Turbo)
-            selectProvider(.whisper)
-            whisperInstaller.refreshState()
-        }
-    }
-
-    private func reinstallParakeetLocal() {
-        let fm = FileManager.default
-        if let modelURL = ModelVariant.parakeetCTC06B.localURL {
-            try? fm.removeItem(at: modelURL)
-            try? fm.removeItem(at: modelURL.appendingPathExtension("data"))
-            try? fm.removeItem(at: modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt"))
-        }
-
-        for runtimeRoot in AppStoragePaths.runtimeRootCandidates(fileManager: fm) {
-            try? fm.removeItem(at: runtimeRoot)
-        }
-
-        downloadState.reset()
-        ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
     }
 
     private func selectProvider(_ kind: STTProviderKind) {
@@ -1880,25 +1720,9 @@ private struct ProviderSettingsTab: View {
         NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
     }
 
-    /// Rebind the download state to the correct variant for the selected provider.
     private func syncDownloadState(for kind: STTProviderKind) {
         if let variant = kind.defaultVariant {
             downloadState.rebind(to: variant)
-        }
-    }
-
-    private var providerCaption: String {
-        switch selectedKind {
-        case .appleSpeech:
-            return "Real transcription via Apple Speech framework. Works on-device with no setup required."
-        case .parakeet:
-            return "Local ONNX inference via NVIDIA Parakeet. Runtime is auto-bootstrapped by the app; use Repair Parakeet Runtime if diagnostics report issues."
-        case .whisper:
-            return "Local whisper-cli runtime. Requires explicit CLI + model paths and passes capability checks before it becomes selectable."
-        case .openaiAPI:
-            return "Cloud fallback provider. Requires explicit opt-in and a valid OpenAI API key before it becomes selectable."
-        case .stub:
-            return "Testing only — does not transcribe. Select Apple Speech for real transcription."
         }
     }
 }
