@@ -189,7 +189,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add appcast.xml
           git commit -m "chore(release): update appcast for v${VERSION}"
-          git push origin HEAD:main
+          # Keep legacy Sparkle clients (old SUFeedURL -> master) receiving updates.
+          git push origin HEAD:main HEAD:master
 
       - name: Create and Push Tag
         env:
