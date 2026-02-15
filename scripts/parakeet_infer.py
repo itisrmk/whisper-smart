@@ -5,7 +5,6 @@ This runner uses onnx-asr with the NVIDIA Parakeet TDT 0.6B v3 family
 (`nemo-parakeet-tdt-0.6b-v3`) and supports:
   - one-shot inference
   - runtime/model check
-  - explicit local bundle preparation
   - persistent JSON-line worker mode
 """
 
@@ -64,24 +63,16 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Validate runtime/dependencies/model without running inference.",
     )
     parser.add_argument(
-        "--prepare",
-        action="store_true",
-        help="Prepare local Parakeet bundle from hub model artifacts and exit.",
-    )
-    parser.add_argument(
         "--serve",
         action="store_true",
         help="Run as a persistent JSON-line worker for repeated inference requests.",
     )
 
     args = parser.parse_args(argv)
-
-    mode_count = int(bool(args.check)) + int(bool(args.prepare)) + int(bool(args.serve))
-    if mode_count > 1:
-        parser.error("--check, --prepare, and --serve are mutually exclusive")
-    if mode_count == 0 and not args.audio:
-        parser.error("--audio is required unless --check, --prepare, or --serve is used")
-
+    if args.check and args.serve:
+        parser.error("--check and --serve are mutually exclusive")
+    if not args.check and not args.serve and not args.audio:
+        parser.error("--audio is required unless --check or --serve is used")
     return args
 
 
@@ -137,8 +128,16 @@ def load_parakeet_model(onnx_asr, bundle_dir: Path):
 def canonicalize_bundle(model_path: Path, bundle_dir: Path, explicit_tokenizer: Optional[str]) -> None:
     encoder_source = find_first_file(
         bundle_dir,
-        [CANONICAL_ENCODER, "encoder-model.onnx", "model.int8.onnx", "model.onnx"],
+        [
+            CANONICAL_ENCODER,
+            model_path.name,
+            "encoder-model.onnx",
+            "model.int8.onnx",
+            "model.onnx",
+        ],
     )
+    if encoder_source is None and model_path.exists() and model_path.is_file():
+        encoder_source = model_path
     if encoder_source is None:
         raise RunnerError(
             "MODEL_LOAD_ERROR: Missing encoder artifact after onnx-asr model preparation."
@@ -199,9 +198,8 @@ def prepare_bundle(model_path: Path, explicit_tokenizer: Optional[str]) -> Path:
     model_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_dir = model_path.parent
 
-    onnx_asr = load_onnx_asr()
-    _ = load_parakeet_model(onnx_asr, bundle_dir)
     canonicalize_bundle(model_path=model_path, bundle_dir=bundle_dir, explicit_tokenizer=explicit_tokenizer)
+    _ = load_parakeet_model(load_onnx_asr(), bundle_dir)
     return bundle_dir
 
 
@@ -235,10 +233,6 @@ def run_inference(model_path: Path, audio_path: Path, explicit_tokenizer: Option
 def check_runtime(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
     engine = InferenceEngine(model_path, explicit_tokenizer)
     engine.close()
-
-
-def prepare_runtime_bundle(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
-    _ = prepare_bundle(model_path=model_path, explicit_tokenizer=explicit_tokenizer)
 
 
 def write_worker_response(request_id: str, ok: bool, payload: Dict[str, object]) -> None:
@@ -295,11 +289,6 @@ def serve_loop(model_path: Path, explicit_tokenizer: Optional[str]) -> int:
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
     model_path = Path(args.model).expanduser().resolve()
-
-    if args.prepare:
-        prepare_runtime_bundle(model_path, args.tokenizer)
-        print("ok")
-        return 0
 
     if args.check:
         check_runtime(model_path, args.tokenizer)

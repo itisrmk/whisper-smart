@@ -46,15 +46,10 @@ final class ModelDownloaderService: NSObject {
     private let auxiliaryArtifactTimeoutSeconds: TimeInterval = 12 * 60 * 60
     private let auxiliaryRequestTimeoutSeconds: TimeInterval = 60
     private let preflightTimeoutSeconds: TimeInterval = 45
-    private let parakeetPrepareTimeoutSeconds: TimeInterval = 90 * 60
     private let backgroundSessionIdentifier = "com.visperflow.modeldownloader.background.v1"
     private var activeDownloadsByVariantID: [String: DownloadContext] = [:]
     private var variantIDByTaskID: [Int: String] = [:]
     private var resumeDataByDownloadKey: [String: Data] = [:]
-    private var parakeetPrepareInFlight = false
-    private var parakeetPrepareCancelled = false
-    private weak var parakeetPrepareState: ModelDownloadState?
-    private var parakeetPrepareProcess: Process?
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.background(withIdentifier: backgroundSessionIdentifier)
@@ -79,11 +74,6 @@ final class ModelDownloaderService: NSObject {
 
     /// Starts downloading the given variant and drives state transitions.
     func download(variant: ModelVariant, state: ModelDownloadState) {
-        if variant.id == ModelVariant.parakeetCTC06B.id {
-            prepareParakeetModel(variant: variant, state: state)
-            return
-        }
-
         // Already on disk and valid — just sync state.
         if variant.isDownloaded {
             logger.info("Model already downloaded and valid: \(variant.id)")
@@ -153,22 +143,6 @@ final class ModelDownloaderService: NSObject {
 
     /// Cancels an in-progress download while preserving resume data when possible.
     func cancel(variant: ModelVariant, state: ModelDownloadState) {
-        if variant.id == ModelVariant.parakeetCTC06B.id {
-            stateQueue.async {
-                if let process = self.parakeetPrepareProcess, process.isRunning {
-                    process.terminate()
-                }
-                self.parakeetPrepareProcess = nil
-                self.parakeetPrepareInFlight = false
-                self.parakeetPrepareCancelled = true
-                self.parakeetPrepareState = nil
-                DispatchQueue.main.async {
-                    state.reset()
-                }
-            }
-            return
-        }
-
         stateQueue.async {
             guard let context = self.activeDownloadsByVariantID[variant.id] else {
                 DispatchQueue.main.async {
@@ -405,178 +379,6 @@ private extension ModelDownloaderService {
         let sourceID = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !variantID.isEmpty, !sourceID.isEmpty else { return nil }
         return (variantID, sourceID)
-    }
-
-    private func prepareParakeetModel(variant: ModelVariant, state: ModelDownloadState) {
-        if variant.isDownloaded {
-            state.transitionToReady()
-            return
-        }
-
-        stateQueue.async {
-            self.parakeetPrepareState = state
-            if self.parakeetPrepareInFlight {
-                DispatchQueue.main.async {
-                    state.transitionToDownloading()
-                }
-                return
-            }
-
-            self.parakeetPrepareInFlight = true
-            self.parakeetPrepareCancelled = false
-            DispatchQueue.main.async {
-                state.transitionToDownloading()
-                state.updateProgress(0.02)
-            }
-
-            DispatchQueue.global(qos: .utility).async { [weak self] in
-                self?.runParakeetPrepareFlow(variant: variant)
-            }
-        }
-    }
-
-    private func runParakeetPrepareFlow(variant: ModelVariant) {
-        var completionError: String?
-        let source = variant.configuredSource
-        let modelURL = variant.localURL
-
-        do {
-            guard let source else {
-                throw NSError(
-                    domain: "ModelDownloaderService",
-                    code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: variant.downloadUnavailableReason ?? "Model source not configured."]
-                )
-            }
-            guard let modelURL else {
-                throw NSError(
-                    domain: "ModelDownloaderService",
-                    code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Cannot resolve model storage path."]
-                )
-            }
-
-            updateParakeetPrepareProgress(0.2)
-            let pythonCommand = try runtimeBootstrapManager.ensureRuntimeReady(forceRepair: true)
-            updateParakeetPrepareProgress(0.45)
-
-            let scriptURL = try resolveParakeetRunnerScriptURL()
-            if let prepareError = runParakeetPrepareCommand(
-                pythonCommand: pythonCommand,
-                scriptURL: scriptURL,
-                modelURL: modelURL,
-                tokenizerPath: nil
-            ) {
-                completionError = prepareError
-            } else {
-                updateParakeetPrepareProgress(0.9)
-                completionError = validateDownloadedModel(
-                    variant: variant,
-                    at: modelURL,
-                    source: source
-                )
-            }
-        } catch {
-            completionError = error.localizedDescription
-        }
-
-        stateQueue.async {
-            let wasCancelled = self.parakeetPrepareCancelled
-            let state = self.parakeetPrepareState
-            self.parakeetPrepareInFlight = false
-            self.parakeetPrepareCancelled = false
-            self.parakeetPrepareState = nil
-            self.parakeetPrepareProcess = nil
-
-            guard let state else { return }
-
-            DispatchQueue.main.async {
-                if wasCancelled {
-                    state.reset()
-                    return
-                }
-
-                if let completionError {
-                    state.transitionToFailed(message: completionError)
-                    self.postModelDownloadEvent(variantID: variant.id, isReady: false, message: completionError)
-                    return
-                }
-
-                state.transitionToReady()
-                self.postModelDownloadEvent(variantID: variant.id, isReady: true, message: nil)
-            }
-        }
-    }
-
-    private func updateParakeetPrepareProgress(_ progress: Double) {
-        stateQueue.async {
-            guard let state = self.parakeetPrepareState else { return }
-            DispatchQueue.main.async {
-                state.updateProgress(progress)
-            }
-        }
-    }
-
-    private func runParakeetPrepareCommand(
-        pythonCommand: String,
-        scriptURL: URL,
-        modelURL: URL,
-        tokenizerPath: String?
-    ) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-
-        var arguments = [pythonCommand, scriptURL.path, "--prepare", "--model", modelURL.path]
-        if let tokenizerPath, !tokenizerPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            arguments += ["--tokenizer", tokenizerPath]
-        }
-        process.arguments = arguments
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        let timeoutGroup = DispatchGroup()
-        timeoutGroup.enter()
-        process.terminationHandler = { _ in timeoutGroup.leave() }
-
-        do {
-            try process.run()
-        } catch {
-            process.terminationHandler = nil
-            timeoutGroup.leave()
-            return "Parakeet setup launch failed: \(error.localizedDescription)"
-        }
-
-        stateQueue.sync {
-            parakeetPrepareProcess = process
-        }
-
-        if timeoutGroup.wait(timeout: .now() + parakeetPrepareTimeoutSeconds) == .timedOut {
-            process.terminate()
-            return "Parakeet setup timed out while preparing local runtime artifacts. Automatic setup will retry."
-        }
-
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        let stdout = String(data: stdoutData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let stderr = String(data: stderrData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        guard process.terminationStatus == 0 else {
-            let details = !stderr.isEmpty ? stderr : stdout
-            if let mapped = mappedPreflightFailure(details: details, exitCode: process.terminationStatus) {
-                return mapped
-            }
-            if details.isEmpty {
-                return "Parakeet setup failed with exit status \(process.terminationStatus)."
-            }
-            return "Parakeet setup failed: \(details)"
-        }
-
-        return nil
     }
 
     private func ensureContext(forTask task: URLSessionTask) -> DownloadContext? {
