@@ -176,13 +176,44 @@ enum DictationProviderPolicy {
 
     static var openAIAPIKey: String {
         get {
-            let stored = defaults.string(forKey: Key.openAIAPIKey) ?? ""
-            if !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let stored = normalizedOpenAIAPIKey(defaults.string(forKey: Key.openAIAPIKey) ?? "")
+            if !stored.isEmpty {
                 return stored
             }
-            return ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
+            return normalizedOpenAIAPIKey(ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
         }
-        set { defaults.set(newValue, forKey: Key.openAIAPIKey) }
+        set {
+            let normalized = normalizedOpenAIAPIKey(newValue)
+            if normalized.isEmpty {
+                defaults.removeObject(forKey: Key.openAIAPIKey)
+            } else {
+                defaults.set(normalized, forKey: Key.openAIAPIKey)
+            }
+        }
+    }
+
+    static func normalizedOpenAIAPIKey(_ raw: String) -> String {
+        var key = raw
+            .replacingOccurrences(of: "\u{FEFF}", with: "")
+            .replacingOccurrences(of: "\u{200B}", with: "")
+            .replacingOccurrences(of: "\u{200C}", with: "")
+            .replacingOccurrences(of: "\u{200D}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if key.hasPrefix("Bearer ") || key.hasPrefix("bearer ") {
+            key = String(key.dropFirst("Bearer ".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if (key.hasPrefix("\"") && key.hasSuffix("\""))
+            || (key.hasPrefix("'") && key.hasSuffix("'"))
+            || (key.hasPrefix("`") && key.hasSuffix("`")) {
+            key = String(key.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // OpenAI keys do not contain spaces/newlines; remove paste artifacts.
+        key = key.components(separatedBy: .whitespacesAndNewlines).joined()
+        return key
     }
 
     static var whisperCLIPath: String {

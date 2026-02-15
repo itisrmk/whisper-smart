@@ -1,5 +1,6 @@
 import SwiftUI
 import Carbon.HIToolbox
+import AppKit
 
 /// Root settings view hosted in its own `NSWindow`.
 /// Dark neumorphic design with soft raised cards, inset controls,
@@ -1389,6 +1390,8 @@ private struct ProviderSettingsTab: View {
     @StateObject private var whisperInstaller = WhisperModelInstaller.shared
     @StateObject private var whisperRuntimeInstaller = WhisperRuntimeInstaller.shared
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
+    @State private var openAIAPIKeyStatusMessage: String?
+    @State private var openAIAPIKeyStatusSeverity: ProviderMessageSeverity = .info
 
     private enum ProviderMessageSeverity {
         case info
@@ -1437,6 +1440,7 @@ private struct ProviderSettingsTab: View {
             syncDownloadState(for: selectedKind)
             DictationProviderPolicy.cloudFallbackEnabled = true
             openAIAPIKey = DictationProviderPolicy.openAIAPIKey
+            openAIAPIKeyStatusMessage = nil
             whisperRuntimeInstaller.refreshState()
             whisperInstaller.refreshState()
         }
@@ -1449,15 +1453,30 @@ private struct ProviderSettingsTab: View {
                 Text("OpenAI API key")
                     .font(VFFont.settingsBody)
                     .foregroundStyle(VFColor.textPrimary)
-                SecureField("sk-...", text: $openAIAPIKey)
+                TextField("sk-...", text: $openAIAPIKey)
                     .textFieldStyle(.roundedBorder)
-                Button("Save API Key") {
-                    DictationProviderPolicy.openAIAPIKey = openAIAPIKey
-                    NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+                    .onChange(of: openAIAPIKey) { _, newValue in
+                        let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(newValue)
+                        if normalized != newValue {
+                            openAIAPIKey = normalized
+                        }
+                    }
+                    .onSubmit {
+                        persistOpenAIAPIKey()
+                    }
+
+                HStack(spacing: VFSpacing.sm) {
+                    profileActionButton(title: "Paste & Save", isPrimary: true, enabled: true) {
+                        pasteAndSaveOpenAIAPIKey()
+                    }
+                    profileActionButton(title: "Save API Key", enabled: true) {
+                        persistOpenAIAPIKey()
+                    }
                 }
-                .buttonStyle(.plain)
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textPrimary)
+
+                if let status = openAIAPIKeyStatusMessage {
+                    statusText(status, severity: openAIAPIKeyStatusSeverity)
+                }
 
                 Text("OpenAI-compatible endpoints (including Qwen-hosted gateways) are not yet configurable in this build; this profile currently targets OpenAI's official endpoint.")
                     .font(VFFont.settingsCaption)
@@ -1829,6 +1848,39 @@ private struct ProviderSettingsTab: View {
         kind.saveSelection()
         syncDownloadState(for: kind)
         NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+    }
+
+    private func persistOpenAIAPIKey(_ explicitKey: String? = nil) {
+        let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(explicitKey ?? openAIAPIKey)
+        openAIAPIKey = normalized
+        DictationProviderPolicy.openAIAPIKey = normalized
+        DictationProviderPolicy.cloudFallbackEnabled = true
+        NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+
+        if normalized.isEmpty {
+            openAIAPIKeyStatusSeverity = .warning
+            openAIAPIKeyStatusMessage = "No key detected. Paste your OpenAI key and save again."
+            return
+        }
+
+        if normalized.lowercased().hasPrefix("sk-") {
+            openAIAPIKeyStatusSeverity = .info
+            openAIAPIKeyStatusMessage = "API key saved."
+        } else {
+            openAIAPIKeyStatusSeverity = .warning
+            openAIAPIKeyStatusMessage = "API key saved, but format looks unusual. Expected prefix: sk-"
+        }
+    }
+
+    private func pasteAndSaveOpenAIAPIKey() {
+        guard let clipboard = NSPasteboard.general.string(forType: .string),
+              !clipboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            openAIAPIKeyStatusSeverity = .warning
+            openAIAPIKeyStatusMessage = "Clipboard is empty. Copy your OpenAI key and retry."
+            return
+        }
+
+        persistOpenAIAPIKey(clipboard)
     }
 
     private func syncDownloadState(for kind: STTProviderKind) {

@@ -295,6 +295,41 @@ private func runTokenizerValidationSmoke() throws {
     print("✓ Tokenizer validator smoke passed")
 }
 
+private func runOpenAIAPIKeyNormalizationSmoke() throws {
+    let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(
+        "  Bearer  \"sk-test-abc\n123\" \u{200B}"
+    )
+    try expect(
+        normalized == "sk-test-abc123",
+        "OpenAI API key normalization should strip paste artifacts, quotes, and bearer prefix."
+    )
+
+    let defaults = UserDefaults.standard
+    let key = "provider.openAI.apiKey"
+    let previousRaw = defaults.string(forKey: key)
+    defer {
+        if let previousRaw {
+            defaults.set(previousRaw, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    DictationProviderPolicy.openAIAPIKey = " Bearer sk-live-\nxyz "
+    try expect(
+        defaults.string(forKey: key) == "sk-live-xyz",
+        "OpenAI API key should be stored in normalized form."
+    )
+
+    DictationProviderPolicy.openAIAPIKey = " \n "
+    try expect(
+        defaults.object(forKey: key) == nil,
+        "Empty OpenAI API key should clear persisted storage."
+    )
+
+    print("✓ OpenAI API key normalization smoke passed")
+}
+
 @main
 struct QASmokeMain {
     static func main() {
@@ -306,6 +341,7 @@ struct QASmokeMain {
             try runLegacyCanarySourceMigrationSmoke()
             try runParakeetArtifactMetadataSmoke()
             try runTokenizerValidationSmoke()
+            try runOpenAIAPIKeyNormalizationSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {
             fputs("Smoke test failure: \(error)\n", stderr)
