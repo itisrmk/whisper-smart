@@ -4,9 +4,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="${APP_NAME:-Whisper Smart}"
 BUNDLE_ID="${BUNDLE_ID:-com.whispersmart.desktop}"
-VERSION="${VERSION:-0.2.10}"
+VERSION="${VERSION:-0.2.11}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 LOGO_PATH="${LOGO_PATH:-$REPO_ROOT/logo.png}"
+PARAKEET_RUNNER_SOURCE="$REPO_ROOT/scripts/parakeet_infer.py"
 
 BUILD_DIR="$REPO_ROOT/.build/release"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
@@ -49,6 +50,14 @@ if [ -f "$LOGO_PATH" ]; then
 fi
 
 cp "$LOGO_PATH" "$RESOURCES_DIR/logo.png" 2>/dev/null || true
+
+if [ ! -f "$PARAKEET_RUNNER_SOURCE" ]; then
+  echo "Missing Parakeet runner script at $PARAKEET_RUNNER_SOURCE"
+  exit 1
+fi
+
+mkdir -p "$RESOURCES_DIR/scripts"
+cp "$PARAKEET_RUNNER_SOURCE" "$RESOURCES_DIR/scripts/parakeet_infer.py"
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
