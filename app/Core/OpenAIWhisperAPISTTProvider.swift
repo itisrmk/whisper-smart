@@ -35,6 +35,14 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
             throw STTError.authenticationFailed(underlying: nil)
         }
 
+        let endpoint = DictationProviderPolicy.resolvedOpenAIEndpointConfiguration()
+        if let endpointError = DictationProviderPolicy.validateOpenAIEndpoint(
+            baseURL: endpoint.baseURL,
+            model: endpoint.model
+        ) {
+            throw STTError.providerError(message: endpointError)
+        }
+
         if currentSessionActive {
             throw STTError.providerError(message: "Cloud session already active.")
         }
@@ -86,10 +94,21 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
                 return .failure(.authenticationFailed(underlying: nil))
             }
 
+            let endpoint = DictationProviderPolicy.resolvedOpenAIEndpointConfiguration()
+            if let endpointError = DictationProviderPolicy.validateOpenAIEndpoint(
+                baseURL: endpoint.baseURL,
+                model: endpoint.model
+            ) {
+                return .failure(.providerError(message: endpointError))
+            }
+            guard let transcriptionURL = endpoint.transcriptionURL else {
+                return .failure(.providerError(message: "Cloud endpoint could not be resolved."))
+            }
+
             let wav = AudioWAVEncoding.make16BitMonoWAV(samples: samples, sampleRate: 16_000)
             let boundary = "Boundary-\(UUID().uuidString)"
 
-            var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
+            var request = URLRequest(url: transcriptionURL)
             request.httpMethod = "POST"
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -99,6 +118,7 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
             request.httpBody = makeMultipartBody(
                 boundary: boundary,
                 wavData: wav,
+                model: endpoint.model,
                 prompt: customPrompt.isEmpty ? nil : customPrompt
             )
 
@@ -128,12 +148,12 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
         }
     }
 
-    private func makeMultipartBody(boundary: String, wavData: Data, prompt: String?) -> Data {
+    private func makeMultipartBody(boundary: String, wavData: Data, model: String, prompt: String?) -> Data {
         var body = Data()
 
         body.append("--\(boundary)\r\n")
         body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n")
-        body.append("whisper-1\r\n")
+        body.append(model + "\r\n")
 
         body.append("--\(boundary)\r\n")
         body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n")

@@ -395,10 +395,27 @@ enum STTProviderResolver {
             )
         )
 
-        guard environment.cloudFallbackEnabled(), hasAPIKey else {
+        let endpoint = DictationProviderPolicy.resolvedOpenAIEndpointConfiguration()
+        let endpointError = DictationProviderPolicy.validateOpenAIEndpoint(
+            baseURL: endpoint.baseURL,
+            model: endpoint.model
+        )
+        checks.append(
+            ProviderHealthCheck(
+                id: "openai.endpoint",
+                title: "Cloud Endpoint",
+                isPassing: endpointError == nil,
+                detail: endpointError ?? "\(endpoint.profile.displayName): \(endpoint.baseURL)"
+            )
+        )
+
+        guard environment.cloudFallbackEnabled(), hasAPIKey, endpointError == nil else {
             let reason = !environment.cloudFallbackEnabled()
                 ? "OpenAI Whisper API is disabled until cloud fallback is explicitly enabled."
-                : "OpenAI Whisper API requires an API key."
+                : (!hasAPIKey
+                    ? "OpenAI Whisper API requires an API key."
+                    : "OpenAI Whisper API endpoint is not configured correctly."
+                )
             return fallbackToApple(requestedKind: requestedKind, checks: checks, fallbackReason: reason, environment: environment)
         }
 

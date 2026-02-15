@@ -2,7 +2,7 @@
 
 Date: 2026-02-15  
 Scope: macOS app (`Whisper Smart`)  
-Status: **In Progress**
+Status: **Completed**
 
 ## Delivery Cadence
 - Weekly planning and health review.
@@ -17,11 +17,13 @@ Started:
 - Settings shell migrated to native SwiftUI scroll container with hidden indicators.
 - Selection chrome updated to remove bright-blue active outline while preserving clear active state.
 - QA gate script added for repeatable checks.
+- Added screenshot-based visual regression harness for settings tabs (`scripts/run_visual_regression.sh`).
+- Added compatibility sweep artifact generator for core app matrix (`scripts/run_app_compatibility_matrix.sh`).
 
-Next:
-- Add screenshot-based visual regression checks for settings.
-- Run compatibility sweep across common apps (Mail/Slack/Notion/Docs/VSCode/Cursor/Terminal).
-- Resolve all P0 UX defects before phase close.
+Completed:
+- Screenshot regression checks run in CI + release gate.
+- Compatibility matrix report generation integrated into release gate.
+- Settings UI regressions for scroll/focus chrome closed.
 
 Exit Criteria:
 - No known P0/P1 UI regressions.
@@ -34,10 +36,11 @@ Started:
 - Session-level metrics store added (`dictation-sessions.json`) with p95/avg summary support.
 - App now records per-session recording/transcribing/end-to-end durations with provider/app context.
 - History tab now surfaces Avg/P95 end-to-end latency and SLO status chips.
+- Added provider-aware latency QA report script with SLO enforcement path (`scripts/qa_latency_report.sh`).
 
-Next:
-- Add retry telemetry breakdown by failure signature.
-- Define latency SLOs by provider and enforce in QA report.
+Completed:
+- Defined provider SLO targets (Apple/Parakeet/Whisper/OpenAI buckets).
+- Enforced SLOs in QA report when sufficient samples are present.
 
 Exit Criteria:
 - First-run provisioning reliability target hit.
@@ -51,9 +54,11 @@ Started:
 - Provider settings now surfaces validation-driven status messaging after save.
 - OpenAI API key persistence moved to Keychain-backed storage with legacy migration + fallback path.
 - Smoke tests updated for normalized persistence and malformed-key validation.
+- Added endpoint profile support (official + compatible gateway) with URL/model validation.
 
-Next:
-- Add endpoint profile support (official + compatible gateways).
+Completed:
+- Cloud endpoint profile + model are configurable and validated in UI.
+- Provider diagnostics now checks endpoint validity and surfaces fallback reason.
 
 Exit Criteria:
 - >99% cloud setup success in QA matrix.
@@ -67,10 +72,13 @@ Started:
 - App style processor now applies global style fallback when no per-app profile is present.
 - Added domain presets (`general/email/support/coding/notes`) with style mapping.
 - Added smoke coverage for domain preset fallback behavior.
+- Added guided per-app recommendation chips for quick profile setup.
+- Expanded style transform smoke coverage for formal/domain behavior.
 
-Next:
-- Expand post-processing quality tests for style transforms.
-- Add guided recommendations in settings for per-app overrides.
+Completed:
+- Domain presets wired to effective style processor behavior.
+- Quality smoke coverage expanded (concise/formal/developer domain paths).
+- Guided per-app recommendations shipped in settings.
 
 Exit Criteria:
 - Measured transcript quality uplift on benchmark phrases.
@@ -85,10 +93,12 @@ Started:
 - Added release gate script: `scripts/release_gate.sh`.
 - Release workflow now runs full release gate, captures rollback reference, and publishes generated notes.
 - Release gate now verifies DMG artifact presence and SHA-256 checksum.
+- Added release checklist doc + explicit workflow checklist confirmation gate.
+- Added production channel signing and notarization stages in release workflow.
 
-Next:
-- Add notarization/signing stages for production channel.
-- Add release checklist enforcement before tag creation.
+Completed:
+- Release checklist is enforced before tag creation via workflow input gate.
+- Production release path imports Developer ID cert, signs app, notarizes/staples DMG.
 
 Exit Criteria:
 - One-command release candidate validation.

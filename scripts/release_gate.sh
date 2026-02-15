@@ -10,6 +10,9 @@ bash scripts/typecheck.sh
 echo "==> Release gate: QA smoke"
 bash scripts/run_qa_smoke.sh
 
+echo "==> Release gate: visual regression"
+bash scripts/run_visual_regression.sh
+
 echo "==> Release gate: production build"
 swift build -c release
 
@@ -24,6 +27,12 @@ fi
 
 echo "==> Release gate: DMG checksum"
 shasum -a 256 "$DMG_PATH"
+
+echo "==> Release gate: latency QA report"
+QA_ENFORCE_SLO=1 QA_ALLOW_EMPTY=1 bash scripts/qa_latency_report.sh
+
+echo "==> Release gate: compatibility sweep artifact"
+bash scripts/run_app_compatibility_matrix.sh >/dev/null
 
 echo
 echo "Release gate PASSED."

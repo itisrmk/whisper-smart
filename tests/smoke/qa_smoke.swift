@@ -360,6 +360,27 @@ private func runOpenAIAPIKeyNormalizationSmoke() throws {
         throw SmokeFailure.assertion("Expected invalid character key to be malformed.")
     }
 
+    let normalizedBaseURL = DictationProviderPolicy.normalizedOpenAIBaseURL(" https://api.openai.com/ ")
+    try expect(
+        normalizedBaseURL == "https://api.openai.com",
+        "OpenAI endpoint base URL should normalize whitespace and trailing slash."
+    )
+    let endpointError = DictationProviderPolicy.validateOpenAIEndpoint(
+        baseURL: "not-a-url",
+        model: "whisper-1"
+    )
+    try expect(
+        endpointError != nil,
+        "Invalid endpoint URL should fail endpoint validation."
+    )
+    try expect(
+        DictationProviderPolicy.validateOpenAIEndpoint(
+            baseURL: "https://api.openai.com",
+            model: "whisper-1"
+        ) == nil,
+        "Valid OpenAI endpoint configuration should pass validation."
+    )
+
     print("✓ OpenAI API key normalization smoke passed")
 }
 
@@ -438,6 +459,50 @@ private func runDomainPresetFallbackSmoke() throws {
     print("✓ Domain preset fallback smoke passed")
 }
 
+private func runFormalStyleTransformSmoke() throws {
+    let defaults = UserDefaults.standard
+    let writingStyleKey = "workflow.defaultWritingStyle"
+    let domainPresetKey = "workflow.defaultDomainPreset"
+    let previousWritingStyle = defaults.string(forKey: writingStyleKey)
+    let previousDomainPreset = defaults.string(forKey: domainPresetKey)
+    defer {
+        if let previousWritingStyle {
+            defaults.set(previousWritingStyle, forKey: writingStyleKey)
+        } else {
+            defaults.removeObject(forKey: writingStyleKey)
+        }
+        if let previousDomainPreset {
+            defaults.set(previousDomainPreset, forKey: domainPresetKey)
+        } else {
+            defaults.removeObject(forKey: domainPresetKey)
+        }
+    }
+
+    DictationWorkflowSettings.defaultDomainPreset = .general
+    DictationWorkflowSettings.defaultWritingStyle = .formal
+
+    let input = "i'm sure we can't ship if we don't test"
+    let output = AppStyleProfileProcessor().process(
+        input,
+        context: TranscriptPostProcessingContext(isFinal: true, timestamp: Date())
+    ).lowercased()
+
+    try expect(
+        output.contains("i am"),
+        "Formal style should expand 'i'm' to 'I am'."
+    )
+    try expect(
+        output.contains("cannot"),
+        "Formal style should expand 'can't' to 'cannot'."
+    )
+    try expect(
+        output.contains("do not"),
+        "Formal style should expand 'don't' to 'do not'."
+    )
+
+    print("✓ Formal style transform smoke passed")
+}
+
 @main
 struct QASmokeMain {
     static func main() {
@@ -452,6 +517,7 @@ struct QASmokeMain {
             try runOpenAIAPIKeyNormalizationSmoke()
             try runGlobalWritingStyleFallbackSmoke()
             try runDomainPresetFallbackSmoke()
+            try runFormalStyleTransformSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {
             fputs("Smoke test failure: \(error)\n", stderr)

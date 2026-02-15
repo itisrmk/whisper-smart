@@ -267,14 +267,18 @@ struct AppStyleProfileProcessor: TranscriptPostProcessor {
 
     private func formalize(_ text: String) -> String {
         var output = text
-        let replacements: [String: String] = [
-            " can't ": " cannot ",
-            " won't ": " will not ",
-            " i'm ": " I am ",
-            " don't ": " do not "
+        let replacements: [(String, String)] = [
+            (#"\bcan't\b"#, "cannot"),
+            (#"\bwon't\b"#, "will not"),
+            (#"\bi'm\b"#, "I am"),
+            (#"\bdon't\b"#, "do not")
         ]
-        for (from, to) in replacements {
-            output = output.replacingOccurrences(of: from, with: to, options: .caseInsensitive)
+        for (pattern, replacement) in replacements {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+                continue
+            }
+            let range = NSRange(output.startIndex..<output.endIndex, in: output)
+            output = regex.stringByReplacingMatches(in: output, options: [], range: range, withTemplate: replacement)
         }
         return output
     }

@@ -7,6 +7,19 @@ on:
         description: "Version number without v prefix (e.g. 0.2.18)"
         required: true
         type: string
+      channel:
+        description: "Release channel"
+        required: true
+        default: "beta"
+        type: choice
+        options:
+          - beta
+          - production
+      checklist_confirmed:
+        description: "I confirm the release checklist has been completed"
+        required: true
+        default: false
+        type: boolean
       notes:
         description: "Release notes"
         required: false
@@ -29,6 +42,66 @@ jobs:
       - name: Release Gate
         run: bash scripts/release_gate.sh
 
+      - name: Enforce Release Checklist Confirmation
+        if: ${{ !inputs.checklist_confirmed }}
+        run: |
+          echo "Checklist confirmation is required before tagging a release."
+          exit 1
+
+      - name: Validate Production Notarization Secrets
+        if: ${{ inputs.channel == 'production' }}
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for var_name in CERT_P12 CERT_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            value="${!var_name:-}"
+            if [[ -z "$value" ]]; then
+              echo "Missing required production secret: $var_name"
+              exit 1
+            fi
+          done
+
+      - name: Import Production Signing Certificate
+        if: ${{ inputs.channel == 'production' }}
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+
+      - name: Build Production-Signed DMG
+        if: ${{ inputs.channel == 'production' }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep 'Developer ID Application' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "Developer ID Application signing identity not found after certificate import."
+            exit 1
+          fi
+          CODESIGN_IDENTITY="$SIGNING_IDENTITY" VERSION="$VERSION" bash scripts/package_dmg.sh
+
+      - name: Notarize Production DMG
+        if: ${{ inputs.channel == 'production' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          DMG_PATH=".build/release/Whisper-Smart-mac.dmg"
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG_PATH"
+
       - name: Resolve Previous Tag
         id: previous_tag
         env:
@@ -47,6 +120,7 @@ jobs:
           INPUT_NOTES: ${{ inputs.notes }}
           PREVIOUS_TAG: ${{ steps.previous_tag.outputs.value }}
           REPOSITORY: ${{ github.repository }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
           NOTES_FILE="$(mktemp)"
@@ -55,6 +129,7 @@ jobs:
           else
             printf "Automated DMG release for v%s.\n\n" "${VERSION}" >> "$NOTES_FILE"
           fi
+          printf "Release channel: **%s**\n\n" "${CHANNEL}" >> "$NOTES_FILE"
           printf "Release artifact: \`.build/release/Whisper-Smart-mac.dmg\`\n\n" >> "$NOTES_FILE"
           if [[ -n "${PREVIOUS_TAG}" ]]; then
             printf "Rollback reference: https://github.com/%s/releases/tag/%s\n" "${REPOSITORY}" "${PREVIOUS_TAG}" >> "$NOTES_FILE"

@@ -24,5 +24,8 @@ jobs:
       - name: QA Smoke
         run: bash scripts/run_qa_smoke.sh
 
+      - name: Visual Regression
+        run: bash scripts/run_visual_regression.sh
+
       - name: Build Release
         run: swift build -c release

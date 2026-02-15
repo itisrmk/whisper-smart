@@ -101,8 +101,14 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 if command -v codesign >/dev/null 2>&1; then
-  echo "Applying ad-hoc code signature..."
-  codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+  SIGNING_IDENTITY="${CODESIGN_IDENTITY:--}"
+  if [ "$SIGNING_IDENTITY" = "-" ]; then
+    echo "Applying ad-hoc code signature..."
+    codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+  else
+    echo "Applying Developer ID signature: ${SIGNING_IDENTITY}"
+    codesign --force --deep --timestamp --options runtime --sign "$SIGNING_IDENTITY" "$APP_BUNDLE" >/dev/null
+  fi
 fi
 
 echo "App bundle created: ${APP_BUNDLE}"

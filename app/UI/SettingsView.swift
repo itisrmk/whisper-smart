@@ -8,6 +8,15 @@ import AppKit
 struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .general
 
+    init(initialTabRawValue: String? = nil) {
+        if let initialTabRawValue,
+           let initialTab = SettingsTab(rawValue: initialTabRawValue) {
+            _selectedTab = State(initialValue: initialTab)
+        } else {
+            _selectedTab = State(initialValue: .general)
+        }
+    }
+
     var body: some View {
         HStack(spacing: VFSpacing.md) {
             SettingsSidebar(selectedTab: $selectedTab)
@@ -771,7 +780,23 @@ private struct GeneralSettingsTab: View {
         var value: String = ""
     }
 
+    private struct AppProfileRecommendation: Identifiable {
+        let id: String
+        let appName: String
+        let bundleID: String
+        let style: String
+        let prefix: String
+        let suffix: String
+    }
+
     private let profileStyles = ["neutral", "formal", "casual", "concise", "developer"]
+    private let recommendedProfiles: [AppProfileRecommendation] = [
+        .init(id: "mail", appName: "Mail", bundleID: "com.apple.mail", style: "formal", prefix: "", suffix: ""),
+        .init(id: "slack", appName: "Slack", bundleID: "com.tinyspeck.slackmacgap", style: "casual", prefix: "", suffix: ""),
+        .init(id: "notion", appName: "Notion", bundleID: "notion.id", style: "concise", prefix: "", suffix: ""),
+        .init(id: "vscode", appName: "VS Code", bundleID: "com.microsoft.VSCode", style: "developer", prefix: "", suffix: ""),
+        .init(id: "cursor", appName: "Cursor", bundleID: "com.todesktop.230313mzl4w4u92", style: "developer", prefix: "", suffix: "")
+    ]
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
@@ -1215,6 +1240,24 @@ private struct GeneralSettingsTab: View {
                 }
                 .buttonStyle(addActionButtonStyle)
                 .padding(.top, VFSpacing.xs)
+
+                VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                    Text("Quick recommendations")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: VFSpacing.xs) {
+                            ForEach(recommendedProfiles) { recommendation in
+                                Button(recommendation.appName) {
+                                    applyRecommendedProfile(recommendation)
+                                }
+                                .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
             }
         }
     }
@@ -1475,6 +1518,29 @@ private struct GeneralSettingsTab: View {
 
         perAppDefaultsJSON = json
         DictationWorkflowSettings.perAppDefaultsJSON = json
+    }
+
+    private func applyRecommendedProfile(_ recommendation: AppProfileRecommendation) {
+        let normalizedBundleID = recommendation.bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedBundleID.isEmpty else { return }
+
+        if let index = perAppProfiles.firstIndex(where: {
+            $0.bundleID.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedBundleID
+        }) {
+            perAppProfiles[index].style = recommendation.style
+            perAppProfiles[index].prefix = recommendation.prefix
+            perAppProfiles[index].suffix = recommendation.suffix
+            return
+        }
+
+        perAppProfiles.append(
+            PerAppProfileDraft(
+                bundleID: normalizedBundleID,
+                style: recommendation.style,
+                prefix: recommendation.prefix,
+                suffix: recommendation.suffix
+            )
+        )
     }
 
     private enum PhraseMapTarget {
@@ -1877,6 +1943,9 @@ private struct ProviderSettingsTab: View {
     @StateObject private var whisperInstaller = WhisperModelInstaller.shared
     @StateObject private var whisperRuntimeInstaller = WhisperRuntimeInstaller.shared
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
+    @State private var openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
+    @State private var openAIBaseURL = DictationProviderPolicy.openAIBaseURL
+    @State private var openAIModel = DictationProviderPolicy.openAIModel
     @State private var openAIAPIKeyStatusMessage: String?
     @State private var openAIAPIKeyStatusSeverity: ProviderMessageSeverity = .info
 
@@ -1938,6 +2007,9 @@ private struct ProviderSettingsTab: View {
             syncDownloadState(for: selectedKind)
             DictationProviderPolicy.cloudFallbackEnabled = true
             openAIAPIKey = DictationProviderPolicy.openAIAPIKey
+            openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
+            openAIBaseURL = DictationProviderPolicy.openAIBaseURL
+            openAIModel = DictationProviderPolicy.openAIModel
             openAIAPIKeyStatusMessage = nil
             whisperRuntimeInstaller.refreshState()
             whisperInstaller.refreshState()
@@ -1947,7 +2019,59 @@ private struct ProviderSettingsTab: View {
     @ViewBuilder
     private var providerConfigurationSection: some View {
         if selectedKind == .openaiAPI {
-            VStack(alignment: .leading, spacing: VFSpacing.xs) {
+            VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                HStack {
+                    Text("Endpoint profile")
+                        .font(VFFont.settingsBody)
+                        .foregroundStyle(VFColor.textPrimary)
+                    Spacer()
+                    Menu {
+                        ForEach(DictationProviderPolicy.OpenAIEndpointProfile.allCases) { profile in
+                            Button(profile.displayName) {
+                                openAIEndpointProfile = profile
+                                DictationProviderPolicy.openAIEndpointProfile = profile
+                                if profile == .openAIOfficial {
+                                    openAIBaseURL = profile.defaultBaseURL
+                                    openAIModel = profile.defaultModel
+                                    DictationProviderPolicy.openAIBaseURL = openAIBaseURL
+                                    DictationProviderPolicy.openAIModel = openAIModel
+                                }
+                                openAIAPIKeyStatusMessage = nil
+                            }
+                        }
+                    } label: {
+                        Text(openAIEndpointProfile.displayName)
+                            .glassSelectPill()
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+
+                HStack(spacing: VFSpacing.sm) {
+                    VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                        Text("Base URL")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+                        TextField(openAIEndpointProfile.defaultBaseURL, text: $openAIBaseURL)
+                            .textFieldStyle(.plain)
+                            .glassInputField()
+                            .onSubmit {
+                                persistOpenAIEndpointConfiguration()
+                            }
+                    }
+
+                    VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                        Text("Model")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+                        TextField(openAIEndpointProfile.defaultModel, text: $openAIModel)
+                            .textFieldStyle(.plain)
+                            .glassInputField()
+                            .onSubmit {
+                                persistOpenAIEndpointConfiguration()
+                            }
+                    }
+                }
+
                 Text("OpenAI API key")
                     .font(VFFont.settingsBody)
                     .foregroundStyle(VFColor.textPrimary)
@@ -1965,6 +2089,9 @@ private struct ProviderSettingsTab: View {
                     }
 
                 HStack(spacing: VFSpacing.sm) {
+                    profileActionButton(title: "Save Endpoint", enabled: true) {
+                        persistOpenAIEndpointConfiguration()
+                    }
                     profileActionButton(title: "Paste & Save", isPrimary: true, enabled: true) {
                         pasteAndSaveOpenAIAPIKey()
                     }
@@ -1977,7 +2104,7 @@ private struct ProviderSettingsTab: View {
                     statusText(status, severity: openAIAPIKeyStatusSeverity)
                 }
 
-                Text("OpenAI-compatible endpoints (including Qwen-hosted gateways) are not yet configurable in this build; this profile currently targets OpenAI's official endpoint.")
+                Text("Supports official OpenAI and compatible self-hosted gateways that expose `/v1/audio/transcriptions`.")
                     .font(VFFont.settingsCaption)
                     .foregroundStyle(VFColor.textSecondary)
             }
@@ -2376,6 +2503,9 @@ private struct ProviderSettingsTab: View {
         if normalized.contains("api key") {
             return "Setup needed: add your OpenAI API key to use Cloud mode."
         }
+        if normalized.contains("endpoint") {
+            return "Setup needed: check Cloud endpoint URL/model in Provider settings."
+        }
         if normalized.contains("disabled") {
             return "Setup needed: enable cloud fallback to use Cloud mode."
         }
@@ -2449,7 +2579,31 @@ private struct ProviderSettingsTab: View {
         NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
     }
 
+    private func persistOpenAIEndpointConfiguration() {
+        openAIBaseURL = DictationProviderPolicy.normalizedOpenAIBaseURL(openAIBaseURL)
+        openAIModel = DictationProviderPolicy.normalizedOpenAIModel(openAIModel)
+
+        DictationProviderPolicy.openAIEndpointProfile = openAIEndpointProfile
+        DictationProviderPolicy.openAIBaseURL = openAIBaseURL
+        DictationProviderPolicy.openAIModel = openAIModel
+
+        NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+
+        if let endpointError = DictationProviderPolicy.validateOpenAIEndpoint(
+            baseURL: openAIBaseURL,
+            model: openAIModel
+        ) {
+            openAIAPIKeyStatusSeverity = .warning
+            openAIAPIKeyStatusMessage = "Endpoint saved, but configuration is invalid. \(endpointError)"
+            return
+        }
+
+        openAIAPIKeyStatusSeverity = .info
+        openAIAPIKeyStatusMessage = "Endpoint settings saved."
+    }
+
     private func persistOpenAIAPIKey(_ explicitKey: String? = nil) {
+        persistOpenAIEndpointConfiguration()
         let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(explicitKey ?? openAIAPIKey)
         openAIAPIKey = normalized
         let persistenceResult = DictationProviderPolicy.persistOpenAIAPIKey(normalized)

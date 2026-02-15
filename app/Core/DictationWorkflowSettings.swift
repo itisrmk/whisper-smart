@@ -260,6 +260,9 @@ enum DictationProviderPolicy {
     private enum Key {
         static let cloudFallbackEnabled = "provider.cloudFallbackEnabled"
         static let openAIAPIKeyLegacy = "provider.openAI.apiKey"
+        static let openAIEndpointProfile = "provider.openAI.endpointProfile"
+        static let openAIBaseURL = "provider.openAI.baseURL"
+        static let openAIModel = "provider.openAI.model"
         static let whisperCLIPath = "provider.whisper.cliPath"
         static let whisperModelPath = "provider.whisper.modelPath"
         static let whisperModelTier = "provider.whisper.modelTier"
@@ -276,6 +279,47 @@ enum DictationProviderPolicy {
         case malformed(reason: String)
     }
 
+    enum OpenAIEndpointProfile: String, CaseIterable, Identifiable {
+        case openAIOfficial = "openai_official"
+        case compatibleGateway = "compatible_gateway"
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .openAIOfficial:
+                return "OpenAI (official)"
+            case .compatibleGateway:
+                return "OpenAI-compatible gateway"
+            }
+        }
+
+        var defaultBaseURL: String {
+            switch self {
+            case .openAIOfficial:
+                return "https://api.openai.com"
+            case .compatibleGateway:
+                return "http://localhost:8000"
+            }
+        }
+
+        var defaultModel: String {
+            switch self {
+            case .openAIOfficial:
+                return "whisper-1"
+            case .compatibleGateway:
+                return "whisper-1"
+            }
+        }
+    }
+
+    struct OpenAIEndpointConfiguration: Equatable {
+        let profile: OpenAIEndpointProfile
+        let baseURL: String
+        let model: String
+        let transcriptionURL: URL?
+    }
+
     enum OpenAIAPIKeyPersistenceResult: Equatable {
         case cleared
         case savedSecurely
@@ -285,6 +329,50 @@ enum DictationProviderPolicy {
     static var cloudFallbackEnabled: Bool {
         get { defaults.bool(forKey: Key.cloudFallbackEnabled) }
         set { defaults.set(newValue, forKey: Key.cloudFallbackEnabled) }
+    }
+
+    static var openAIEndpointProfile: OpenAIEndpointProfile {
+        get {
+            guard let raw = defaults.string(forKey: Key.openAIEndpointProfile),
+                  let profile = OpenAIEndpointProfile(rawValue: raw) else {
+                return .openAIOfficial
+            }
+            return profile
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Key.openAIEndpointProfile)
+            // Keep base URL/model sane when switching profiles.
+            if normalizedOpenAIBaseURL(openAIBaseURL).isEmpty {
+                openAIBaseURL = newValue.defaultBaseURL
+            }
+            if normalizedOpenAIModel(openAIModel).isEmpty {
+                openAIModel = newValue.defaultModel
+            }
+        }
+    }
+
+    static var openAIBaseURL: String {
+        get {
+            let stored = defaults.string(forKey: Key.openAIBaseURL) ?? ""
+            let normalized = normalizedOpenAIBaseURL(stored)
+            if !normalized.isEmpty { return normalized }
+            return openAIEndpointProfile.defaultBaseURL
+        }
+        set {
+            defaults.set(normalizedOpenAIBaseURL(newValue), forKey: Key.openAIBaseURL)
+        }
+    }
+
+    static var openAIModel: String {
+        get {
+            let stored = defaults.string(forKey: Key.openAIModel) ?? ""
+            let normalized = normalizedOpenAIModel(stored)
+            if !normalized.isEmpty { return normalized }
+            return openAIEndpointProfile.defaultModel
+        }
+        set {
+            defaults.set(normalizedOpenAIModel(newValue), forKey: Key.openAIModel)
+        }
     }
 
     static var openAIAPIKey: String {
@@ -354,6 +442,73 @@ enum DictationProviderPolicy {
         // OpenAI keys do not contain spaces/newlines; remove paste artifacts.
         key = key.components(separatedBy: .whitespacesAndNewlines).joined()
         return key
+    }
+
+    static func normalizedOpenAIBaseURL(_ raw: String) -> String {
+        var value = raw
+            .replacingOccurrences(of: "\u{FEFF}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if value.hasSuffix("/") {
+            value.removeLast()
+        }
+        return value
+    }
+
+    static func normalizedOpenAIModel(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(of: "\u{FEFF}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func resolvedOpenAIEndpointConfiguration() -> OpenAIEndpointConfiguration {
+        let profile = openAIEndpointProfile
+        let baseURL = openAIBaseURL
+        let model = openAIModel
+        let transcriptionURL = normalizedTranscriptionURL(fromBase: baseURL)
+
+        return OpenAIEndpointConfiguration(
+            profile: profile,
+            baseURL: baseURL,
+            model: model,
+            transcriptionURL: transcriptionURL
+        )
+    }
+
+    static func validateOpenAIEndpoint(baseURL rawBaseURL: String, model rawModel: String) -> String? {
+        let baseURL = normalizedOpenAIBaseURL(rawBaseURL)
+        let model = normalizedOpenAIModel(rawModel)
+
+        guard !model.isEmpty else {
+            return "Model name cannot be empty."
+        }
+        guard let url = normalizedTranscriptionURL(fromBase: baseURL) else {
+            return "Endpoint URL is invalid. Example: https://api.openai.com"
+        }
+        guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+            return "Endpoint URL must start with http:// or https://."
+        }
+        return nil
+    }
+
+    private static func normalizedTranscriptionURL(fromBase rawBaseURL: String) -> URL? {
+        let baseURL = normalizedOpenAIBaseURL(rawBaseURL)
+        guard !baseURL.isEmpty, let url = URL(string: baseURL) else {
+            return nil
+        }
+        let normalizedPath = url.path.lowercased()
+        if url.path.isEmpty || url.path == "/" {
+            return url.appendingPathComponent("v1/audio/transcriptions")
+        }
+        if normalizedPath.hasSuffix("/v1") {
+            return url.appendingPathComponent("audio/transcriptions")
+        }
+        if normalizedPath.hasSuffix("/audio/transcriptions") {
+            return url
+        }
+        // If caller already provided `/v1/audio/transcriptions`, keep it.
+        // Otherwise append default OpenAI-compatible transcription path.
+        return url.appendingPathComponent("v1/audio/transcriptions")
     }
 
     static func validateOpenAIAPIKey(_ raw: String) -> OpenAIAPIKeyValidation {
