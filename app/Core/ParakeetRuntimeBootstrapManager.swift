@@ -32,9 +32,11 @@ final class ParakeetRuntimeBootstrapManager {
     private let queue = DispatchQueue(label: "com.visperflow.parakeet.bootstrap", qos: .userInitiated)
     private let statusLock = NSLock()
     private let fileManager = FileManager.default
-    // Include onnx-asr because current Parakeet inference relies on it for
-    // robust model signature support across ONNX exports.
-    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece", "onnx-asr"]
+    // Keep dependencies to the guaranteed core runtime. onnx-asr is optional
+    // and the runner already falls back to raw ONNX inference when absent.
+    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece"]
+    private let commandTimeoutSeconds: TimeInterval = 45 * 60
+    private let dependencyImportProbe = "import numpy, onnxruntime, sentencepiece"
 
     private var status = ParakeetRuntimeBootstrapStatus(
         phase: .idle,
@@ -58,7 +60,7 @@ final class ParakeetRuntimeBootstrapManager {
             do {
                 try runCommand(
                     executablePath: "/usr/bin/env",
-                    arguments: [override, "-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+                    arguments: [override, "-c", dependencyImportProbe],
                     step: "verify VISPERFLOW_PARAKEET_PYTHON override"
                 )
                 updateStatus(
@@ -178,21 +180,33 @@ private extension ParakeetRuntimeBootstrapManager {
                     runtimeDirectory: runtimeRoot,
                     pythonCommand: venvPythonURL.path
                 )
-                try runCommand(
-                    executablePath: venvPythonURL.path,
-                    arguments: ["-m", "pip", "install", "--upgrade", "pip"],
-                    step: "upgrade pip"
-                )
+                do {
+                    try runCommand(
+                        executablePath: venvPythonURL.path,
+                        arguments: [
+                            "-m", "pip", "install", "--disable-pip-version-check",
+                            "--no-input", "--progress-bar", "off", "--upgrade", "pip"
+                        ],
+                        step: "upgrade pip"
+                    )
+                } catch {
+                    // Continue with existing pip to keep bootstrap resilient when
+                    // pip self-upgrade fails transiently.
+                    bootstrapLogger.warning("pip upgrade failed; continuing with existing pip: \(error.localizedDescription, privacy: .public)")
+                }
 
                 updateStatus(
                     phase: .bootstrapping,
-                    detail: "Installing dependencies (numpy, onnxruntime, sentencepiece, onnx-asr)…",
+                    detail: "Installing dependencies (numpy, onnxruntime, sentencepiece)…",
                     runtimeDirectory: runtimeRoot,
                     pythonCommand: venvPythonURL.path
                 )
                 try runCommand(
                     executablePath: venvPythonURL.path,
-                    arguments: ["-m", "pip", "install", "--upgrade"] + runtimeDependencies,
+                    arguments: [
+                        "-m", "pip", "install", "--disable-pip-version-check",
+                        "--no-input", "--progress-bar", "off", "--upgrade"
+                    ] + runtimeDependencies,
                     step: "install Parakeet runtime dependencies"
                 )
 
@@ -204,7 +218,7 @@ private extension ParakeetRuntimeBootstrapManager {
                 )
                 try runCommand(
                     executablePath: venvPythonURL.path,
-                    arguments: ["-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+                    arguments: ["-c", dependencyImportProbe],
                     step: "verify runtime dependencies"
                 )
 
@@ -300,7 +314,7 @@ private extension ParakeetRuntimeBootstrapManager {
         do {
             try runCommand(
                 executablePath: pythonURL.path,
-                arguments: ["-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+                arguments: ["-c", dependencyImportProbe],
                 step: "verify managed runtime"
             )
             return true
@@ -328,7 +342,7 @@ private extension ParakeetRuntimeBootstrapManager {
         do {
             try runCommand(
                 executablePath: shimPythonURL.path,
-                arguments: ["-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+                arguments: ["-c", dependencyImportProbe],
                 step: "verify managed PYTHONPATH runtime"
             )
             return true
@@ -368,13 +382,17 @@ private extension ParakeetRuntimeBootstrapManager {
 
         updateStatus(
             phase: .bootstrapping,
-            detail: "Installing dependencies (numpy, onnxruntime, sentencepiece, onnx-asr)…",
+            detail: "Installing dependencies (numpy, onnxruntime, sentencepiece)…",
             runtimeDirectory: runtimeRoot,
             pythonCommand: bootstrapPythonCommand
         )
         _ = try runCommand(
             executablePath: "/usr/bin/env",
-            arguments: [bootstrapPythonCommand, "-m", "pip", "install", "--upgrade", "--target", sitePackagesDirectory.path] + runtimeDependencies,
+            arguments: [
+                bootstrapPythonCommand, "-m", "pip", "install",
+                "--disable-pip-version-check", "--no-input", "--progress-bar", "off",
+                "--upgrade", "--target", sitePackagesDirectory.path
+            ] + runtimeDependencies,
             step: "install managed runtime dependencies"
         )
 
@@ -393,7 +411,7 @@ private extension ParakeetRuntimeBootstrapManager {
         )
         _ = try runCommand(
             executablePath: shimURL.path,
-            arguments: ["-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+            arguments: ["-c", dependencyImportProbe],
             step: "verify managed runtime dependencies"
         )
 
@@ -449,6 +467,28 @@ private extension ParakeetRuntimeBootstrapManager {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        let stdoutData = NSMutableData()
+        let stderrData = NSMutableData()
+        let completion = DispatchSemaphore(value: 0)
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty {
+                stdoutData.append(chunk)
+            }
+        }
+
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty {
+                stderrData.append(chunk)
+            }
+        }
+
+        process.terminationHandler = { _ in
+            completion.signal()
+        }
+
         do {
             try process.run()
         } catch {
@@ -457,12 +497,31 @@ private extension ParakeetRuntimeBootstrapManager {
             )
         }
 
-        process.waitUntilExit()
+        let completed = completion.wait(timeout: .now() + commandTimeoutSeconds) == .success
+        if !completed {
+            process.terminate()
+            _ = completion.wait(timeout: .now() + 2)
+            if process.isRunning {
+                process.interrupt()
+            }
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
+            throw ParakeetRuntimeBootstrapError(
+                message: "Failed to \(step): command timed out after \(Int(commandTimeoutSeconds))s."
+            )
+        }
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+        let trailingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let trailingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        if !trailingStdout.isEmpty { stdoutData.append(trailingStdout) }
+        if !trailingStderr.isEmpty { stderrData.append(trailingStderr) }
+
+        let stdout = String(data: stdoutData as Data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stderr = String(data: stderrData as Data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         guard process.terminationStatus == 0 else {
             let details = !stderr.isEmpty ? stderr : stdout
