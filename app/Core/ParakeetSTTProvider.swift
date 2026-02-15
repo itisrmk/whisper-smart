@@ -369,15 +369,22 @@ private extension ParakeetSTTProvider {
     }
 
     func resolvedTokenizerPath() -> String? {
+        let fileManager = FileManager.default
+
         guard let source = variant.configuredSource else {
-            return variant.tokenizerLocalURL?.path
+            guard let tokenizerURL = variant.tokenizerLocalURL,
+                  fileManager.fileExists(atPath: tokenizerURL.path) else {
+                return nil
+            }
+            return tokenizerURL.path
         }
 
-        if source.tokenizerURL != nil {
-            return variant.tokenizerLocalURL(using: source)?.path
+        guard let tokenizerURL = variant.tokenizerLocalURL(using: source),
+              fileManager.fileExists(atPath: tokenizerURL.path) else {
+            return nil
         }
 
-        return variant.tokenizerLocalURL(using: source)?.path
+        return tokenizerURL.path
     }
 
     func checkArguments(modelURL: URL) -> [String] {

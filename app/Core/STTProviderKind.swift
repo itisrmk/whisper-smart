@@ -274,6 +274,15 @@ struct ModelVariant: Equatable, Identifiable {
         validationCacheLock.unlock()
     }
 
+    func invalidateValidationCache() {
+        let keyPrefix = "\(id)|"
+        Self.validationCacheLock.lock()
+        Self.validationCache = Self.validationCache.filter { cacheKey, _ in
+            !cacheKey.hasPrefix(keyPrefix)
+        }
+        Self.validationCacheLock.unlock()
+    }
+
     func minimumValidModelBytes(using source: ParakeetResolvedModelSource?) -> Int64 {
         // Some ONNX exports store most tensor weights in a sidecar file
         // (e.g. model.onnx.data). In that case the model graph file itself

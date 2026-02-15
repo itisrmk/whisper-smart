@@ -326,7 +326,7 @@ private extension ParakeetModelSourceConfigurationStore {
             return [
                 ParakeetModelSourceOption(
                     id: "hf_parakeet_tdt06b_v3_onnx",
-                    displayName: "Hugging Face · int8 encoder+decoder bundle (recommended)",
+                    displayName: "Hugging Face · NVIDIA Parakeet v3 ONNX bundle (recommended)",
                     modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.int8.onnx",
                     modelDataURLString: nil,
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",

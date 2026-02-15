@@ -157,6 +157,37 @@ private func runResolverSmoke() throws {
     print("  fallback health=\(fallback.healthLevel.rawValue), ready health=\(ready.healthLevel.rawValue)")
 }
 
+private func runParakeetNoSilentFallbackSmoke() throws {
+    let env = STTProviderResolver.Environment(
+        microphoneStatus: { .granted },
+        speechRecognitionStatus: { .granted },
+        speechRecognizerFactory: { SFSpeechRecognizer(locale: Locale(identifier: "en-US")) },
+        cloudFallbackEnabled: { false },
+        openAIAPIKey: { "" },
+        parakeetBootstrapStatus: {
+            ParakeetRuntimeBootstrapStatus(
+                phase: .bootstrapping,
+                detail: "bootstrapping",
+                runtimeDirectory: nil,
+                pythonCommand: nil,
+                timestamp: Date()
+            )
+        }
+    )
+
+    let diagnostics = STTProviderResolver.diagnostics(for: .parakeet, environment: env)
+    try expect(
+        diagnostics.effectiveKind == .parakeet,
+        "Parakeet should remain selected even while setup is in progress (no silent Apple fallback)."
+    )
+    try expect(
+        diagnostics.fallbackReason == nil,
+        "Parakeet diagnostics should not expose fallbackReason when effective kind remains Parakeet."
+    )
+
+    print("✓ Parakeet no-silent-fallback smoke passed")
+}
+
 
 private func runDownloadCompletionTransitionSmoke() throws {
     let state = ModelDownloadState(variant: .parakeetCTC06B)
@@ -270,6 +301,7 @@ struct QASmokeMain {
         do {
             try runStateMachineSmoke()
             try runResolverSmoke()
+            try runParakeetNoSilentFallbackSmoke()
             try runDownloadCompletionTransitionSmoke()
             try runLegacyCanarySourceMigrationSmoke()
             try runParakeetArtifactMetadataSmoke()

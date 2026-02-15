@@ -61,6 +61,7 @@ final class ModelDownloadState: ObservableObject {
 
     func transitionToReady() {
         // Verify the file actually passes validation before declaring ready.
+        variant.invalidateValidationCache()
         if variant.isDownloaded {
             phase = .ready
             logger.info("Model ready: \(self.variant.id) — \(self.variant.validationStatus)")
@@ -92,6 +93,7 @@ final class ModelDownloadState: ObservableObject {
 
     /// Syncs phase from on-disk state, handling incomplete/corrupt files.
     private func syncFromDisk() {
+        variant.invalidateValidationCache()
         if variant.isDownloaded {
             phase = .ready
             logger.info("Disk sync: model present and valid for \(self.variant.id)")

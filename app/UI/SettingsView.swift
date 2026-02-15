@@ -2078,12 +2078,12 @@ private struct ModelDownloadRow: View {
 
             DiagnosticLine(label: "Status", value: downloadStatusDetail)
             DiagnosticLine(label: "Source", value: downloadState.variant.configuredSourceDisplayName)
-            DiagnosticLine(label: "Files", value: "encoder-model.int8.onnx + decoder_joint-model.int8.onnx + vocab.txt")
+            DiagnosticLine(label: "Files", value: "encoder-model.int8.onnx + decoder_joint-model.int8.onnx + config.json + nemo128.onnx + vocab.txt")
             Text("Parakeet model setup runs automatically in the background.")
                 .font(VFFont.settingsCaption)
                 .foregroundStyle(VFColor.textSecondary)
 
-            if let modelCardURL = URL(string: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx") {
+            if let modelCardURL = URL(string: "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3") {
                 Link(destination: modelCardURL) {
                     Label("View model card", systemImage: "photo")
                         .font(VFFont.settingsCaption)

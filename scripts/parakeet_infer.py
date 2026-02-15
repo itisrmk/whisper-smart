@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Local Parakeet ONNX inference runner for VisperflowClone.
+"""Local Parakeet runner for Whisper Smart.
 
-Usage:
-  python3 scripts/parakeet_infer.py --model /path/model.onnx --audio /path/audio.wav
-  python3 scripts/parakeet_infer.py --check --model /path/model.onnx
+This runner uses onnx-asr with the NVIDIA Parakeet TDT 0.6B v3 family
+(`nemo-parakeet-tdt-0.6b-v3`) and supports:
+  - one-shot inference
+  - runtime/model check
+  - explicit local bundle preparation
+  - persistent JSON-line worker mode
 """
 
 from __future__ import annotations
@@ -11,13 +14,18 @@ from __future__ import annotations
 import argparse
 import atexit
 import json
-import os
 import shutil
 import sys
-import tempfile
-import wave
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Optional, Sequence
+
+
+PARAKEET_MODEL_ID = "nemo-parakeet-tdt-0.6b-v3"
+CANONICAL_ENCODER = "encoder-model.int8.onnx"
+CANONICAL_DECODER = "decoder_joint-model.int8.onnx"
+CANONICAL_CONFIG = "config.json"
+CANONICAL_NORMALIZER = "nemo128.onnx"
+CANONICAL_VOCAB = "vocab.txt"
 
 
 class RunnerError(RuntimeError):
@@ -32,34 +40,6 @@ def raise_dependency_error(module_name: str, exc: Exception) -> None:
     )
 
 
-def load_core_dependencies():
-    try:
-        import numpy as np  # type: ignore
-    except ModuleNotFoundError as exc:
-        raise_dependency_error("numpy", exc)
-    except Exception as exc:  # pragma: no cover - unexpected import failure
-        raise RunnerError(f"DEPENDENCY_ERROR: Failed to import numpy: {exc}") from exc
-
-    try:
-        import onnxruntime as ort  # type: ignore
-    except ModuleNotFoundError as exc:
-        raise_dependency_error("onnxruntime", exc)
-    except Exception as exc:  # pragma: no cover - unexpected import failure
-        raise RunnerError(f"DEPENDENCY_ERROR: Failed to import onnxruntime: {exc}") from exc
-
-    return np, ort
-
-
-def load_sentencepiece():
-    try:
-        import sentencepiece as spm  # type: ignore
-    except ModuleNotFoundError as exc:
-        raise_dependency_error("sentencepiece", exc)
-    except Exception as exc:  # pragma: no cover - unexpected import failure
-        raise RunnerError(f"DEPENDENCY_ERROR: Failed to import sentencepiece: {exc}") from exc
-    return spm
-
-
 def load_onnx_asr():
     try:
         import onnx_asr  # type: ignore
@@ -71,12 +51,12 @@ def load_onnx_asr():
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run local NVIDIA Parakeet ONNX inference.")
-    parser.add_argument("--model", required=True, help="Path to Parakeet ONNX model file.")
+    parser = argparse.ArgumentParser(description="Run local NVIDIA Parakeet inference.")
+    parser.add_argument("--model", required=True, help="Path to local model alias file.")
     parser.add_argument("--audio", help="Path to mono 16 kHz WAV audio.")
     parser.add_argument(
         "--tokenizer",
-        help="Optional tokenizer path (tokenizer.model, tokenizer.json, or vocab.txt).",
+        help="Optional tokenizer override path (tokenizer.model, tokenizer.json, or vocab.txt).",
     )
     parser.add_argument(
         "--check",
@@ -84,15 +64,24 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Validate runtime/dependencies/model without running inference.",
     )
     parser.add_argument(
+        "--prepare",
+        action="store_true",
+        help="Prepare local Parakeet bundle from hub model artifacts and exit.",
+    )
+    parser.add_argument(
         "--serve",
         action="store_true",
         help="Run as a persistent JSON-line worker for repeated inference requests.",
     )
+
     args = parser.parse_args(argv)
-    if args.check and args.serve:
-        parser.error("--check and --serve cannot be used together")
-    if not args.check and not args.serve and not args.audio:
-        parser.error("--audio is required unless --check is used")
+
+    mode_count = int(bool(args.check)) + int(bool(args.prepare)) + int(bool(args.serve))
+    if mode_count > 1:
+        parser.error("--check, --prepare, and --serve are mutually exclusive")
+    if mode_count == 0 and not args.audio:
+        parser.error("--audio is required unless --check, --prepare, or --serve is used")
+
     return args
 
 
@@ -103,415 +92,131 @@ def ensure_file_exists(path: Path, label: str) -> None:
         raise RunnerError(f"{label} is not a file: {path}")
 
 
-def load_session(model_path: Path, ort):
-    so = ort.SessionOptions()
-    so.log_severity_level = 3
-    try:
-        return ort.InferenceSession(str(model_path), sess_options=so, providers=["CPUExecutionProvider"])
-    except Exception as exc:
-        raise RunnerError(
-            "MODEL_LOAD_ERROR: Failed to load ONNX model. "
-            "Ensure the file is a valid Parakeet ONNX export. "
-            f"Details: {exc}"
-        ) from exc
-
-
-def read_wav_mono_16k(audio_path: Path, np):
-    try:
-        with wave.open(str(audio_path), "rb") as wf:
-            channels = wf.getnchannels()
-            sample_width = wf.getsampwidth()
-            sample_rate = wf.getframerate()
-            frame_count = wf.getnframes()
-            frame_bytes = wf.readframes(frame_count)
-    except wave.Error as exc:
-        raise RunnerError(
-            "AUDIO_FORMAT_ERROR: Failed to parse WAV input. "
-            "Provide a valid PCM WAV file. "
-            f"Details: {exc}"
-        ) from exc
-
-    if channels != 1:
-        raise RunnerError(f"AUDIO_FORMAT_ERROR: Expected mono WAV but received {channels} channels.")
-    if sample_width != 2:
-        raise RunnerError(
-            f"AUDIO_FORMAT_ERROR: Expected 16-bit PCM WAV but sample width is {sample_width} bytes."
-        )
-    if sample_rate != 16_000:
-        raise RunnerError(
-            f"AUDIO_FORMAT_ERROR: Expected 16 kHz WAV but received {sample_rate} Hz."
-        )
-
-    samples = np.frombuffer(frame_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-    if samples.size == 0:
-        raise RunnerError("AUDIO_FORMAT_ERROR: WAV file contains no audio frames.")
-    return samples
-
-
-def pick_audio_input(session_inputs):
-    float_inputs = [inp for inp in session_inputs if "tensor(float)" in inp.type]
-    if not float_inputs:
-        raise RunnerError(
-            "MODEL_SIGNATURE_ERROR: ONNX model has no float tensor input for audio."
-        )
-
-    preferred = ("audio", "signal", "wave", "input")
-    for inp in float_inputs:
-        lowered = inp.name.lower()
-        if any(token in lowered for token in preferred):
-            return inp
-    return float_inputs[0]
-
-
-def pick_length_input(session_inputs):
-    int_inputs = [
-        inp
-        for inp in session_inputs
-        if "tensor(int64)" in inp.type or "tensor(int32)" in inp.type
-    ]
-    preferred = ("length", "len", "duration")
-    for inp in int_inputs:
-        lowered = inp.name.lower()
-        if any(token in lowered for token in preferred):
-            return inp
-    if len(int_inputs) == 1:
-        return int_inputs[0]
-    return None
-
-
-def make_audio_tensor(audio, input_arg, np):
-    rank = len(input_arg.shape) if input_arg.shape is not None else None
-    if rank == 1:
-        return audio.astype(np.float32)
-    if rank is None or rank == 2:
-        return audio.astype(np.float32)[None, :]
-    raise RunnerError(
-        "MODEL_SIGNATURE_ERROR: Unsupported audio input rank "
-        f"{rank} for '{input_arg.name}'. "
-        "Expected rank 1 or 2 raw-audio input."
-    )
-
-
-def make_length_tensor(sample_count: int, input_arg, np):
-    dtype = np.int64 if "int64" in input_arg.type else np.int32
-    return np.array([sample_count], dtype=dtype)
-
-
-def model_metadata(session) -> Dict[str, str]:
-    meta = session.get_modelmeta()
-    raw = meta.custom_metadata_map or {}
-    return dict(raw)
-
-
-def parse_blank_id(meta: Dict[str, str]) -> int:
-    for key in ("blank_id", "ctc_blank_id", "ctcBlankId"):
-        if key in meta:
-            try:
-                return int(meta[key])
-            except ValueError:
-                pass
-    return 0
-
-
-def parse_token_list(value: str) -> Optional[List[str]]:
-    if not value:
-        return None
-
-    try:
-        parsed = json.loads(value)
-        if isinstance(parsed, list):
-            return [str(x) for x in parsed]
-        if isinstance(parsed, dict):
-            pairs = []
-            for key, val in parsed.items():
-                try:
-                    idx = int(key)
-                except ValueError:
-                    continue
-                pairs.append((idx, str(val)))
-            if pairs:
-                pairs.sort(key=lambda x: x[0])
-                return [token for _, token in pairs]
-    except json.JSONDecodeError:
-        pass
-
-    if "\n" in value:
-        lines = [line.strip() for line in value.splitlines() if line.strip()]
-        if lines:
-            return lines
-
-    if "|" in value:
-        parts = [part for part in value.split("|")]
-        if len(parts) > 10:
-            return parts
-    return None
-
-
-def labels_from_metadata(meta: Dict[str, str]) -> Optional[List[str]]:
-    for key in ("labels", "vocabulary", "vocab", "tokens", "id2label"):
-        if key in meta:
-            parsed = parse_token_list(meta[key])
-            if parsed:
-                return parsed
-    return None
-
-
-def ctc_collapse(token_ids: Iterable[int], blank_id: int) -> List[int]:
-    collapsed: List[int] = []
-    previous = None
-    for token in token_ids:
-        if token == blank_id:
-            previous = token
-            continue
-        if token != previous:
-            collapsed.append(int(token))
-        previous = token
-    return collapsed
-
-
-def infer_token_ids(outputs, meta: Dict[str, str], np) -> List[int]:
-    blank_id = parse_blank_id(meta)
-
-    for output in outputs:
-        if not hasattr(output, "dtype") or not hasattr(output, "ndim"):
-            continue
-
-        if np.issubdtype(output.dtype, np.integer):
-            flattened = output.reshape(-1).astype(np.int64).tolist()
-            return ctc_collapse(flattened, blank_id)
-
-        if np.issubdtype(output.dtype, np.floating):
-            logits = output
-            if logits.ndim == 3:
-                logits = logits[0]
-            if logits.ndim != 2:
-                continue
-            token_ids = np.argmax(logits, axis=-1).astype(np.int64).tolist()
-            return ctc_collapse(token_ids, blank_id)
-
-    raise RunnerError(
-        "MODEL_OUTPUT_ERROR: Could not find a supported logits/token-id output tensor."
-    )
-
-
-def find_tokenizer_path(model_path: Path, explicit: Optional[str]) -> Optional[Path]:
-    if explicit:
-        path = Path(explicit).expanduser().resolve()
-        ensure_file_exists(path, "Tokenizer file")
-        return path
-
-    model_dir = model_path.parent
-    for filename in ("tokenizer.model", "tokenizer.json", "vocab.txt"):
-        candidate = model_dir / filename
+def find_first_file(root: Path, names: Sequence[str]) -> Optional[Path]:
+    for name in names:
+        candidate = root / name
         if candidate.exists() and candidate.is_file():
             return candidate
+
+    for name in names:
+        matches = [p for p in root.rglob(name) if p.is_file()]
+        if matches:
+            matches.sort(key=lambda p: (len(p.parts), str(p)))
+            return matches[0]
+
     return None
 
 
-def decode_with_vocab(token_ids: List[int], vocab: List[str]) -> str:
-    pieces: List[str] = []
-    for token_id in token_ids:
-        if 0 <= token_id < len(vocab):
-            pieces.append(vocab[token_id])
-    text = "".join(pieces)
-    return normalize_text(text)
+def copy_if_needed(source: Path, destination: Path) -> None:
+    if source.resolve() == destination.resolve():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
 
 
-def decode_with_tokenizer_json(token_ids: List[int], tokenizer_path: Path) -> str:
-    try:
-        with tokenizer_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as exc:
-        raise RunnerError(f"TOKENIZER_ERROR: Failed to parse tokenizer.json: {exc}") from exc
+def load_parakeet_model(onnx_asr, bundle_dir: Path):
+    last_error: Optional[Exception] = None
+    for quant in ("int8", None):
+        try:
+            return onnx_asr.load_model(
+                PARAKEET_MODEL_ID,
+                path=str(bundle_dir),
+                quantization=quant,
+                providers=["CPUExecutionProvider"],
+            )
+        except Exception as exc:
+            last_error = exc
 
-    model_obj = data.get("model", {})
-    vocab_map = model_obj.get("vocab")
-    if not isinstance(vocab_map, dict):
-        raise RunnerError("TOKENIZER_ERROR: tokenizer.json missing model.vocab object.")
-
-    if not vocab_map:
-        raise RunnerError("TOKENIZER_ERROR: tokenizer.json model.vocab is empty.")
-
-    max_id = max(int(v) for v in vocab_map.values())
-    vocab = [""] * (max_id + 1)
-    for token, idx in vocab_map.items():
-        vocab[int(idx)] = token
-    return decode_with_vocab(token_ids, vocab)
-
-
-def decode_with_vocab_file(token_ids: List[int], vocab_path: Path) -> str:
-    try:
-        with vocab_path.open("r", encoding="utf-8") as f:
-            vocab = [line.rstrip("\n\r") for line in f]
-    except Exception as exc:
-        raise RunnerError(f"TOKENIZER_ERROR: Failed to read vocab.txt: {exc}") from exc
-    return decode_with_vocab(token_ids, vocab)
-
-
-def decode_with_sentencepiece(token_ids: List[int], tokenizer_path: Path) -> str:
-    spm = load_sentencepiece()
-    try:
-        processor = spm.SentencePieceProcessor(model_file=str(tokenizer_path))
-    except Exception as exc:
-        raise RunnerError(f"TOKENIZER_ERROR: Failed to load tokenizer.model: {exc}") from exc
-    try:
-        text = processor.decode(token_ids)
-    except Exception as exc:
-        raise RunnerError(f"TOKENIZER_ERROR: SentencePiece decode failed: {exc}") from exc
-    return normalize_text(text)
-
-
-def normalize_text(text: str) -> str:
-    normalized = text
-    normalized = normalized.replace("▁", " ")
-    for token in ("<unk>", "<s>", "</s>", "<pad>", "<blank>", "<blk>"):
-        normalized = normalized.replace(token, "")
-    normalized = " ".join(normalized.split())
-    return normalized.strip()
-
-
-def prepare_onnx_asr_model_dir(model_path: Path, explicit_tokenizer: Optional[str]) -> Path:
-    """Create a temporary model directory with onnx-asr-friendly file names."""
-    temp_dir = Path(tempfile.mkdtemp(prefix="visperflow-parakeet-onnxasr-"))
-    model_dir = model_path.parent
-
-    # Always provide canonical names for compatibility across onnx-asr releases.
-    for target_name in (
-        "model.onnx",
-        "model.int8.onnx",
-        "encoder-model.onnx",
-        "encoder-model.int8.onnx",
-    ):
-        shutil.copy2(model_path, temp_dir / target_name)
-
-    sidecar = model_path.with_suffix(model_path.suffix + ".data")
-    if sidecar.exists() and sidecar.is_file():
-        shutil.copy2(sidecar, temp_dir / "model.onnx.data")
-        shutil.copy2(sidecar, temp_dir / "encoder-model.onnx.data")
-
-    # Copy known companion artifacts when available.
-    for filename in (
-        "decoder_joint-model.int8.onnx",
-        "decoder_joint-model.onnx",
-        "config.json",
-        "nemo128.onnx",
-        "vocab.txt",
-    ):
-        companion = model_dir / filename
-        if companion.exists() and companion.is_file():
-            shutil.copy2(companion, temp_dir / filename)
-
-    tokenizer = find_tokenizer_path(model_path, explicit_tokenizer)
-    if tokenizer is not None and tokenizer.exists():
-        if tokenizer.suffix.lower() == ".txt":
-            shutil.copy2(tokenizer, temp_dir / "vocab.txt")
-        elif tokenizer.suffix.lower() == ".model":
-            shutil.copy2(tokenizer, temp_dir / "tokenizer.model")
-        elif tokenizer.suffix.lower() == ".json":
-            shutil.copy2(tokenizer, temp_dir / "tokenizer.json")
-
-    return temp_dir
-
-
-def decode_tokens(
-    token_ids: List[int],
-    meta: Dict[str, str],
-    model_path: Path,
-    explicit_tokenizer: Optional[str],
-) -> str:
-    labels = labels_from_metadata(meta)
-    if labels:
-        return decode_with_vocab(token_ids, labels)
-
-    tokenizer_path = find_tokenizer_path(model_path, explicit_tokenizer)
-    if tokenizer_path is None:
-        raise RunnerError(
-            "TOKENIZER_MISSING: Could not decode token IDs because no vocabulary metadata or tokenizer file was found. "
-            "Provide tokenizer.model, tokenizer.json, or vocab.txt next to the ONNX model, "
-            "or let automatic setup finish downloading model artifacts."
-        )
-
-    suffix = tokenizer_path.name.lower()
-    if suffix.endswith(".model"):
-        return decode_with_sentencepiece(token_ids, tokenizer_path)
-    if suffix.endswith(".json"):
-        return decode_with_tokenizer_json(token_ids, tokenizer_path)
-    if suffix.endswith(".txt"):
-        return decode_with_vocab_file(token_ids, tokenizer_path)
-
+    details = str(last_error) if last_error is not None else "Unknown onnx-asr model load failure."
     raise RunnerError(
-        f"TOKENIZER_ERROR: Unsupported tokenizer file extension: {tokenizer_path.suffix}"
+        "MODEL_LOAD_ERROR: Failed to initialize Parakeet onnx-asr model bundle. "
+        f"Details: {details}"
     )
 
 
-def validate_setup(session, model_path: Path, explicit_tokenizer: Optional[str]) -> None:
-    session_inputs = session.get_inputs()
-    audio_input = pick_audio_input(session_inputs)
-    rank = len(audio_input.shape) if audio_input.shape is not None else 2
-    if rank not in (1, 2):
+def canonicalize_bundle(model_path: Path, bundle_dir: Path, explicit_tokenizer: Optional[str]) -> None:
+    encoder_source = find_first_file(
+        bundle_dir,
+        [CANONICAL_ENCODER, "encoder-model.onnx", "model.int8.onnx", "model.onnx"],
+    )
+    if encoder_source is None:
         raise RunnerError(
-            "MODEL_SIGNATURE_ERROR: Unsupported ONNX audio input signature. "
-            f"Input '{audio_input.name}' has rank {rank}; expected rank 1 or 2 raw audio."
+            "MODEL_LOAD_ERROR: Missing encoder artifact after onnx-asr model preparation."
         )
 
-    meta = model_metadata(session)
-    labels = labels_from_metadata(meta)
-    if labels:
-        return
-
-    tokenizer = find_tokenizer_path(model_path, explicit_tokenizer)
-    if tokenizer is None:
+    decoder_source = find_first_file(
+        bundle_dir,
+        [CANONICAL_DECODER, "decoder_joint-model.onnx"],
+    )
+    if decoder_source is None:
         raise RunnerError(
-            "TOKENIZER_MISSING: No labels in model metadata and no tokenizer file found."
+            "MODEL_LOAD_ERROR: Missing decoder artifact after onnx-asr model preparation."
         )
 
-    if tokenizer.suffix.lower() == ".model":
-        _ = load_sentencepiece()
+    config_source = find_first_file(bundle_dir, [CANONICAL_CONFIG])
+    if config_source is None:
+        raise RunnerError("MODEL_LOAD_ERROR: Missing config.json after onnx-asr model preparation.")
+
+    normalizer_source = find_first_file(bundle_dir, [CANONICAL_NORMALIZER])
+    if normalizer_source is None:
+        raise RunnerError("MODEL_LOAD_ERROR: Missing nemo128.onnx after onnx-asr model preparation.")
+
+    vocab_source = find_first_file(bundle_dir, [CANONICAL_VOCAB])
+
+    if explicit_tokenizer:
+        explicit = Path(explicit_tokenizer).expanduser().resolve()
+        ensure_file_exists(explicit, "Tokenizer file")
+        suffix = explicit.suffix.lower()
+        if suffix == ".txt":
+            vocab_source = explicit
+        elif suffix == ".model":
+            copy_if_needed(explicit, bundle_dir / "tokenizer.model")
+        elif suffix == ".json":
+            copy_if_needed(explicit, bundle_dir / "tokenizer.json")
+
+    if vocab_source is None:
+        raise RunnerError(
+            "TOKENIZER_MISSING: Missing vocab.txt after onnx-asr model preparation."
+        )
+
+    canonical_encoder_path = bundle_dir / CANONICAL_ENCODER
+    canonical_decoder_path = bundle_dir / CANONICAL_DECODER
+    canonical_config_path = bundle_dir / CANONICAL_CONFIG
+    canonical_normalizer_path = bundle_dir / CANONICAL_NORMALIZER
+    canonical_vocab_path = bundle_dir / CANONICAL_VOCAB
+
+    copy_if_needed(encoder_source, canonical_encoder_path)
+    copy_if_needed(decoder_source, canonical_decoder_path)
+    copy_if_needed(config_source, canonical_config_path)
+    copy_if_needed(normalizer_source, canonical_normalizer_path)
+    copy_if_needed(vocab_source, canonical_vocab_path)
+
+    # Keep Swift-side validation path stable: model alias points at encoder int8 graph.
+    copy_if_needed(canonical_encoder_path, model_path)
+
+
+def prepare_bundle(model_path: Path, explicit_tokenizer: Optional[str]) -> Path:
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_dir = model_path.parent
+
+    onnx_asr = load_onnx_asr()
+    _ = load_parakeet_model(onnx_asr, bundle_dir)
+    canonicalize_bundle(model_path=model_path, bundle_dir=bundle_dir, explicit_tokenizer=explicit_tokenizer)
+    return bundle_dir
 
 
 class InferenceEngine:
     def __init__(self, model_path: Path, explicit_tokenizer: Optional[str]):
         self.model_path = model_path
         self.explicit_tokenizer = explicit_tokenizer
-        self.temp_model_dir: Optional[Path] = None
-        self.onnx_asr_model = None
-        self.np = None
-        self.session = None
-        self._initialize()
+        self.bundle_dir = prepare_bundle(model_path=model_path, explicit_tokenizer=explicit_tokenizer)
+        self.onnx_asr_model = load_parakeet_model(load_onnx_asr(), self.bundle_dir)
 
     def close(self) -> None:
-        if self.temp_model_dir is not None:
-            shutil.rmtree(self.temp_model_dir, ignore_errors=True)
-            self.temp_model_dir = None
-
-    def _initialize(self) -> None:
-        onnx_asr = load_onnx_asr()
-        self.temp_model_dir = prepare_onnx_asr_model_dir(self.model_path, self.explicit_tokenizer)
-        last_error: Exception | None = None
-        for quant in ("int8", None):
-            try:
-                self.onnx_asr_model = onnx_asr.load_model(
-                    "nemo-parakeet-tdt-0.6b-v3",
-                    path=str(self.temp_model_dir),
-                    quantization=quant,
-                    providers=["CPUExecutionProvider"],
-                )
-                break
-            except Exception as exc:
-                last_error = exc
-        if self.onnx_asr_model is not None:
-            return
-
-        details = str(last_error) if last_error is not None else "Unknown onnx-asr model load failure."
-        raise RunnerError(
-            "MODEL_LOAD_ERROR: Failed to initialize Parakeet onnx-asr model bundle. "
-            f"Details: {details}"
-        )
+        # Keep prepared artifacts on disk for reuse across sessions.
+        return
 
     def transcribe(self, audio_path: Path) -> str:
-        if self.onnx_asr_model is None:
-            raise RunnerError("INFERENCE_ERROR: Inference engine is not initialized.")
-
         result = self.onnx_asr_model.recognize(str(audio_path), sample_rate=16000)
         text = str(result).strip()
         if text:
@@ -519,11 +224,7 @@ class InferenceEngine:
         raise RunnerError("INFERENCE_ERROR: onnx-asr returned empty transcript.")
 
 
-def run_inference(
-    model_path: Path,
-    audio_path: Path,
-    explicit_tokenizer: Optional[str],
-) -> str:
+def run_inference(model_path: Path, audio_path: Path, explicit_tokenizer: Optional[str]) -> str:
     engine = InferenceEngine(model_path, explicit_tokenizer)
     try:
         return engine.transcribe(audio_path)
@@ -534,6 +235,10 @@ def run_inference(
 def check_runtime(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
     engine = InferenceEngine(model_path, explicit_tokenizer)
     engine.close()
+
+
+def prepare_runtime_bundle(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
+    _ = prepare_bundle(model_path=model_path, explicit_tokenizer=explicit_tokenizer)
 
 
 def write_worker_response(request_id: str, ok: bool, payload: Dict[str, object]) -> None:
@@ -590,15 +295,19 @@ def serve_loop(model_path: Path, explicit_tokenizer: Optional[str]) -> int:
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
     model_path = Path(args.model).expanduser().resolve()
-    ensure_file_exists(model_path, "Model file")
 
-    if args.serve:
-        return serve_loop(model_path, args.tokenizer)
+    if args.prepare:
+        prepare_runtime_bundle(model_path, args.tokenizer)
+        print("ok")
+        return 0
 
     if args.check:
         check_runtime(model_path, args.tokenizer)
         print("ok")
         return 0
+
+    if args.serve:
+        return serve_loop(model_path, args.tokenizer)
 
     audio_path = Path(args.audio).expanduser().resolve()
     ensure_file_exists(audio_path, "Audio file")

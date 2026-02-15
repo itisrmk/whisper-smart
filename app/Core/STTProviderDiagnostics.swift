@@ -313,27 +313,26 @@ enum STTProviderResolver {
         checks: [ProviderHealthCheck],
         canUseParakeet: Bool,
         fallbackReason: String?,
-        environment: Environment
+        environment _: Environment
     ) -> ProviderRuntimeDiagnostics {
         let finalChecks = checks
-
+        let level: ProviderHealthLevel
         if canUseParakeet {
-            let level: ProviderHealthLevel = finalChecks.allSatisfy(\.isPassing) ? .healthy : .degraded
-            return ProviderRuntimeDiagnostics(
-                timestamp: Date(),
-                requestedKind: requestedKind,
-                effectiveKind: .parakeet,
-                healthLevel: level,
-                checks: finalChecks,
-                fallbackReason: nil
-            )
+            level = finalChecks.allSatisfy(\.isPassing) ? .healthy : .degraded
+        } else {
+            level = finalChecks.allSatisfy(\.isPassing) ? .degraded : .unavailable
+            if let fallbackReason {
+                logger.warning("Parakeet diagnostics unavailable: \(fallbackReason, privacy: .public)")
+            }
         }
 
-        return fallbackToApple(
+        return ProviderRuntimeDiagnostics(
+            timestamp: Date(),
             requestedKind: requestedKind,
+            effectiveKind: .parakeet,
+            healthLevel: level,
             checks: finalChecks,
-            fallbackReason: fallbackReason ?? "Parakeet local model/runtime is unavailable.",
-            environment: environment
+            fallbackReason: nil
         )
     }
 
