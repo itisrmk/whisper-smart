@@ -42,7 +42,7 @@ open .build/release/Whisper-Smart-mac.dmg
 ```bash
 APP_NAME="Whisper Smart" \
 BUNDLE_ID="com.whispersmart.desktop" \
-VERSION="0.2.5" \
+VERSION="0.2.6" \
 BUILD_NUMBER="20260211" \
 LOGO_PATH="$(pwd)/logo.png" \
 bash scripts/build_release_app.sh

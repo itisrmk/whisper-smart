@@ -2067,7 +2067,16 @@ private struct ModelDownloadRow: View {
                 customSourceEditor
             }
 
-            if let sourceError = downloadState.variant.downloadUnavailableReason {
+            if let unsupportedSourceReason {
+                HStack(alignment: .top, spacing: VFSpacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
+                    Text(unsupportedSourceReason)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
+                }
+            } else if let sourceError = downloadState.variant.downloadUnavailableReason {
                 HStack(alignment: .top, spacing: VFSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
@@ -2093,7 +2102,7 @@ private struct ModelDownloadRow: View {
             }
 
             // Error message with retry hint
-            if case .failed(let message) = downloadState.phase {
+            if case .failed(let message) = downloadState.phase, !isUnsupportedSourceSelected {
                 HStack(alignment: .top, spacing: VFSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
@@ -2122,82 +2131,86 @@ private struct ModelDownloadRow: View {
 
     @ViewBuilder
     private var downloadButton: some View {
-        switch downloadState.phase {
-        case .notReady:
-            downloadActionButton(
-                label: "Download",
-                icon: "arrow.down.circle.fill",
-                isEnabled: downloadState.variant.hasDownloadSource
-            )
-
-        case .failed:
-            HStack(spacing: VFSpacing.sm) {
+        if isUnsupportedSourceSelected {
+            compatibleSourceButton
+        } else {
+            switch downloadState.phase {
+            case .notReady:
                 downloadActionButton(
-                    label: "Retry",
-                    icon: "arrow.clockwise.circle.fill",
+                    label: "Download",
+                    icon: "arrow.down.circle.fill",
                     isEnabled: downloadState.variant.hasDownloadSource
                 )
 
-                if hasAlternateSource {
-                    Button {
-                        switchToAlternateSource()
-                    } label: {
-                        Text("Try mirror")
-                            .font(VFFont.pillLabel)
-                            .foregroundStyle(VFColor.textPrimary)
-                            .padding(.horizontal, VFSpacing.md)
-                            .padding(.vertical, VFSpacing.sm)
-                            .background(
-                                Capsule()
-                                    .fill(VFColor.glass3)
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(VFColor.glassBorder, lineWidth: 0.8)
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isDownloading)
-                    .opacity(isDownloading ? 0.5 : 1.0)
-                }
-            }
-
-        case .downloading:
-            Button {
-                ModelDownloaderService.shared.cancel(
-                    variant: downloadState.variant,
-                    state: downloadState
-                )
-            } label: {
+            case .failed:
                 HStack(spacing: VFSpacing.sm) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Cancel")
-                        .font(VFFont.pillLabel)
-                }
-                .foregroundStyle(VFColor.textSecondary)
-                .padding(.horizontal, VFSpacing.lg)
-                .padding(.vertical, VFSpacing.sm)
-                .background(
-                    Capsule()
-                        .fill(VFColor.glass3)
-                        .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
-                        .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
-                )
-            }
-            .buttonStyle(.plain)
+                    downloadActionButton(
+                        label: "Retry",
+                        icon: "arrow.clockwise.circle.fill",
+                        isEnabled: downloadState.variant.hasDownloadSource
+                    )
 
-        case .ready:
-            HStack(spacing: VFSpacing.sm) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(VFColor.success)
-                Text("Ready")
-                    .font(VFFont.pillLabel)
-                    .foregroundStyle(VFColor.success)
+                    if hasAlternateSource {
+                        Button {
+                            switchToAlternateSource()
+                        } label: {
+                            Text("Try mirror")
+                                .font(VFFont.pillLabel)
+                                .foregroundStyle(VFColor.textPrimary)
+                                .padding(.horizontal, VFSpacing.md)
+                                .padding(.vertical, VFSpacing.sm)
+                                .background(
+                                    Capsule()
+                                        .fill(VFColor.glass3)
+                                        .overlay(
+                                            Capsule()
+                                                .stroke(VFColor.glassBorder, lineWidth: 0.8)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isDownloading)
+                        .opacity(isDownloading ? 0.5 : 1.0)
+                    }
+                }
+
+            case .downloading:
+                Button {
+                    ModelDownloaderService.shared.cancel(
+                        variant: downloadState.variant,
+                        state: downloadState
+                    )
+                } label: {
+                    HStack(spacing: VFSpacing.sm) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Cancel")
+                            .font(VFFont.pillLabel)
+                    }
+                    .foregroundStyle(VFColor.textSecondary)
+                    .padding(.horizontal, VFSpacing.lg)
+                    .padding(.vertical, VFSpacing.sm)
+                    .background(
+                        Capsule()
+                            .fill(VFColor.glass3)
+                            .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
+                            .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
+                    )
+                }
+                .buttonStyle(.plain)
+
+            case .ready:
+                HStack(spacing: VFSpacing.sm) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(VFColor.success)
+                    Text("Ready")
+                        .font(VFFont.pillLabel)
+                        .foregroundStyle(VFColor.success)
+                }
+                .padding(.horizontal, VFSpacing.md)
+                .padding(.vertical, VFSpacing.sm)
             }
-            .padding(.horizontal, VFSpacing.md)
-            .padding(.vertical, VFSpacing.sm)
         }
     }
 
@@ -2233,6 +2246,33 @@ private struct ModelDownloadRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
+    }
+
+    private var compatibleSourceButton: some View {
+        Button {
+            useCompatibleSource()
+        } label: {
+            HStack(spacing: VFSpacing.xs) {
+                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Use compatible source")
+                    .font(VFFont.pillLabel)
+            }
+            .foregroundStyle(VFColor.textOnAccent)
+            .padding(.horizontal, VFSpacing.md)
+            .padding(.vertical, VFSpacing.sm)
+            .background(
+                Capsule()
+                    .fill(VFColor.accentFallback)
+                    .overlay(
+                        Capsule()
+                            .stroke(VFColor.glassBorder, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDownloading)
+        .opacity(isDownloading ? 0.5 : 1.0)
     }
 
     private var sourcePickerMenu: some View {
@@ -2309,6 +2349,18 @@ private struct ModelDownloadRow: View {
         sourceStore.availableSources(for: downloadState.variant.id)
     }
 
+    private var selectedSourceOption: ParakeetModelSourceOption? {
+        sourceOptions.first(where: { $0.id == selectedSourceID })
+    }
+
+    private var unsupportedSourceReason: String? {
+        selectedSourceOption?.runtimeCompatibility.unsupportedReason
+    }
+
+    private var isUnsupportedSourceSelected: Bool {
+        unsupportedSourceReason != nil
+    }
+
     private var hasAlternateSource: Bool {
         sourceOptions.contains(where: { $0.id != selectedSourceID && $0.modelURL != nil })
     }
@@ -2355,6 +2407,23 @@ private struct ModelDownloadRow: View {
             return
         }
         selectSource(alternate.id)
+    }
+
+    private func useCompatibleSource() {
+        if sourceOptions.contains(where: { $0.id == "hf_parakeet_tdt06b_v3_onnx" }) {
+            selectSource("hf_parakeet_tdt06b_v3_onnx")
+            return
+        }
+
+        guard let compatible = sourceOptions.first(where: {
+            $0.id != selectedSourceID &&
+            $0.modelURL != nil &&
+            $0.runtimeCompatibility.unsupportedReason == nil
+        }) else {
+            return
+        }
+
+        selectSource(compatible.id)
     }
 
     private func saveCustomSource() {

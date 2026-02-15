@@ -10,8 +10,8 @@ settings:
   base:
     PRODUCT_BUNDLE_IDENTIFIER: com.visperflow.iOSWhisperSmart
     SWIFT_VERSION: 5.10
-    CURRENT_PROJECT_VERSION: 6
-    MARKETING_VERSION: 0.2.5
+    CURRENT_PROJECT_VERSION: 7
+    MARKETING_VERSION: 0.2.6
     INFOPLIST_KEY_CFBundleDisplayName: WhisperSmart
     INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: WhisperSmart needs speech recognition to convert your voice to text.
     INFOPLIST_KEY_NSMicrophoneUsageDescription: WhisperSmart needs microphone access for live dictation.

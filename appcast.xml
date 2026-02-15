@@ -6,6 +6,24 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.6</title>
+      <description>v0.2.6 - Unsupported-source card UX fix
+
+New in this release:
+- Unsupported Canary source now shows a single warning-only state
+- Removed conflicting Retry/Try mirror + red failed text for unsupported sources
+- Added one-click "Use compatible source" action back to runnable ONNX source
+- Preserved normal runnable download/retry behavior</description>
+      <pubDate>Sat, 14 Feb 2026 21:48:48 -0700</pubDate>
+      <enclosure
+        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.6/Whisper-Smart-0.2.6.dmg"
+        sparkle:shortVersionString="0.2.6"
+        sparkle:version="202602142148"
+        length="4486955"
+        type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.5</title>
       <description>v0.2.5 - Download reliability + compatibility gating fixes
 
