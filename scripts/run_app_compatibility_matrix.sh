@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REPORT_DIR="$REPO_ROOT/docs/reports"
+REPORT_DIR="${COMPAT_REPORT_DIR:-$REPO_ROOT/.build/reports}"
 mkdir -p "$REPORT_DIR"
 
 DATE_STAMP="$(date +%F)"

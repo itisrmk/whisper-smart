@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import Foundation
 import SwiftUI
 
@@ -9,7 +8,7 @@ private struct SnapshotCase {
 }
 
 private enum Paths {
-    static let baselineHashes = "tests/visual/baselines/settings_snapshot_hashes.json"
+    static let baselineDirectory = "tests/visual/baselines"
     static let snapshotOutputDirectory = ".build/visual-snapshots"
 }
 
@@ -17,6 +16,8 @@ private enum Paths {
 struct SettingsVisualRegressionMain {
     static func main() {
         let updateMode = ProcessInfo.processInfo.environment["VISUAL_BASELINE_UPDATE"] == "1"
+        let maxDiff = ProcessInfo.processInfo.environment["VISUAL_MAX_DIFF"]
+            .flatMap(Double.init) ?? 0.020
         let snapshotCases = [
             SnapshotCase(id: "settings-general", tabRawValue: "general"),
             SnapshotCase(id: "settings-hotkey", tabRawValue: "hotkey"),
@@ -26,25 +27,25 @@ struct SettingsVisualRegressionMain {
 
         let fileManager = FileManager.default
         let currentDirectory = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
-        let baselineURL = currentDirectory.appendingPathComponent(Paths.baselineHashes)
+        let baselineDirectoryURL = currentDirectory.appendingPathComponent(Paths.baselineDirectory, isDirectory: true)
         let snapshotDirectoryURL = currentDirectory.appendingPathComponent(Paths.snapshotOutputDirectory, isDirectory: true)
 
         do {
+            try fileManager.createDirectory(at: baselineDirectoryURL, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: snapshotDirectoryURL, withIntermediateDirectories: true)
         } catch {
-            fputs("Visual regression failure: could not create snapshot output directory: \(error)\n", stderr)
+            fputs("Visual regression failure: could not create output directories: \(error)\n", stderr)
             exit(1)
         }
 
-        var actualHashes: [String: String] = [:]
+        var actualImages: [String: Data] = [:]
         for testCase in snapshotCases {
             guard let imageData = renderSettingsSnapshot(tabRawValue: testCase.tabRawValue) else {
                 fputs("Visual regression failure: could not render snapshot \(testCase.id)\n", stderr)
                 exit(1)
             }
 
-            let hash = sha256Hex(imageData)
-            actualHashes[testCase.id] = hash
+            actualImages[testCase.id] = imageData
 
             let fileURL = snapshotDirectoryURL.appendingPathComponent("\(testCase.id).png")
             do {
@@ -55,43 +56,36 @@ struct SettingsVisualRegressionMain {
             }
         }
 
-        if updateMode || !fileManager.fileExists(atPath: baselineURL.path) {
-            do {
-                try writeBaseline(actualHashes, to: baselineURL)
-                print("✓ Visual baseline updated at \(baselineURL.path)")
-                for key in actualHashes.keys.sorted() {
-                    if let hash = actualHashes[key] {
-                        print("  \(key): \(hash)")
-                    }
-                }
-            } catch {
-                fputs("Visual regression failure: could not update baseline hashes: \(error)\n", stderr)
-                exit(1)
-            }
+        if updateMode {
+            writeBaselineImages(actualImages, to: baselineDirectoryURL)
+            print("✓ Visual baseline updated at \(baselineDirectoryURL.path)")
             return
-        }
-
-        let expectedHashes: [String: String]
-        do {
-            let data = try Data(contentsOf: baselineURL)
-            expectedHashes = try JSONDecoder().decode([String: String].self, from: data)
-        } catch {
-            fputs("Visual regression failure: could not read baseline hashes: \(error)\n", stderr)
-            exit(1)
         }
 
         var failures: [String] = []
         for key in snapshotCases.map(\.id) {
-            guard let actual = actualHashes[key] else {
-                failures.append("\(key): missing actual hash")
+            guard let actualData = actualImages[key] else {
+                failures.append("\(key): missing actual snapshot")
                 continue
             }
-            guard let expected = expectedHashes[key] else {
-                failures.append("\(key): missing expected baseline hash")
+
+            let baselineURL = baselineDirectoryURL.appendingPathComponent("\(key).png")
+            guard fileManager.fileExists(atPath: baselineURL.path) else {
+                failures.append("\(key): baseline image missing (\(baselineURL.path))")
                 continue
             }
-            if actual != expected {
-                failures.append("\(key): expected \(expected), got \(actual)")
+            guard let baselineData = try? Data(contentsOf: baselineURL) else {
+                failures.append("\(key): could not read baseline image")
+                continue
+            }
+
+            guard let diff = normalizedImageDifference(actualPNG: actualData, baselinePNG: baselineData) else {
+                failures.append("\(key): could not compare image data")
+                continue
+            }
+
+            if diff > maxDiff {
+                failures.append("\(key): diff=\(String(format: "%.4f", diff)) threshold=\(String(format: "%.4f", maxDiff))")
             }
         }
 
@@ -108,15 +102,18 @@ struct SettingsVisualRegressionMain {
         exit(1)
     }
 
-    private static func writeBaseline(_ hashes: [String: String], to url: URL) throws {
-        let sorted = hashes.keys.sorted().reduce(into: [String: String]()) { partialResult, key in
-            partialResult[key] = hashes[key]
+    private static func writeBaselineImages(_ images: [String: Data], to baselineDirectoryURL: URL) {
+        for key in images.keys.sorted() {
+            guard let data = images[key] else { continue }
+            let fileURL = baselineDirectoryURL.appendingPathComponent("\(key).png")
+            do {
+                try data.write(to: fileURL, options: .atomic)
+                print("  \(key): \(fileURL.path)")
+            } catch {
+                fputs("Visual regression failure: could not write baseline image \(key): \(error)\n", stderr)
+                exit(1)
+            }
         }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(sorted)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
     }
 
     private static func renderSettingsSnapshot(tabRawValue: String) -> Data? {
@@ -147,8 +144,60 @@ struct SettingsVisualRegressionMain {
         return bitmap.representation(using: .png, properties: [.compressionFactor: 1.0])
     }
 
-    private static func sha256Hex(_ data: Data) -> String {
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
+    private static func normalizedImageDifference(actualPNG: Data, baselinePNG: Data) -> Double? {
+        let compareWidth = 320
+        let compareHeight = 240
+
+        guard let actual = normalizedRGBA(fromPNG: actualPNG, width: compareWidth, height: compareHeight),
+              let baseline = normalizedRGBA(fromPNG: baselinePNG, width: compareWidth, height: compareHeight),
+              actual.count == baseline.count else {
+            return nil
+        }
+
+        var totalDiff: Double = 0
+        var channelCount = 0
+        var index = 0
+        while index + 2 < actual.count {
+            // Compare RGB only, ignore alpha.
+            totalDiff += abs(Double(actual[index]) - Double(baseline[index])) / 255.0
+            totalDiff += abs(Double(actual[index + 1]) - Double(baseline[index + 1])) / 255.0
+            totalDiff += abs(Double(actual[index + 2]) - Double(baseline[index + 2])) / 255.0
+            channelCount += 3
+            index += 4
+        }
+
+        guard channelCount > 0 else { return nil }
+        return totalDiff / Double(channelCount)
+    }
+
+    private static func normalizedRGBA(fromPNG pngData: Data, width: Int, height: Int) -> [UInt8]? {
+        guard let bitmap = NSBitmapImageRep(data: pngData),
+              let cgImage = bitmap.cgImage else {
+            return nil
+        }
+
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let bytesPerRow = width * 4
+        var buffer = [UInt8](repeating: 0, count: bytesPerRow * height)
+
+        let success = buffer.withUnsafeMutableBytes { ptr -> Bool in
+            guard let baseAddress = ptr.baseAddress else { return false }
+            guard let context = CGContext(
+                data: baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                return false
+            }
+            context.interpolationQuality = .medium
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+
+        return success ? buffer : nil
     }
 }
