@@ -34,9 +34,9 @@ final class ParakeetRuntimeBootstrapManager {
     private let fileManager = FileManager.default
     // Keep dependencies to the guaranteed core runtime. onnx-asr is optional
     // and the runner already falls back to raw ONNX inference when absent.
-    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece"]
+    private let runtimeDependencies = ["numpy", "onnxruntime"]
     private let commandTimeoutSeconds: TimeInterval = 45 * 60
-    private let dependencyImportProbe = "import numpy, onnxruntime, sentencepiece"
+    private let dependencyImportProbe = "import numpy, onnxruntime"
 
     private var status = ParakeetRuntimeBootstrapStatus(
         phase: .idle,
@@ -197,7 +197,7 @@ private extension ParakeetRuntimeBootstrapManager {
 
                 updateStatus(
                     phase: .bootstrapping,
-                    detail: "Installing dependencies (numpy, onnxruntime, sentencepiece)…",
+                    detail: "Installing dependencies (numpy, onnxruntime)…",
                     runtimeDirectory: runtimeRoot,
                     pythonCommand: venvPythonURL.path
                 )
@@ -382,7 +382,7 @@ private extension ParakeetRuntimeBootstrapManager {
 
         updateStatus(
             phase: .bootstrapping,
-            detail: "Installing dependencies (numpy, onnxruntime, sentencepiece)…",
+            detail: "Installing dependencies (numpy, onnxruntime)…",
             runtimeDirectory: runtimeRoot,
             pythonCommand: bootstrapPythonCommand
         )

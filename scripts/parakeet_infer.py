@@ -373,24 +373,35 @@ def normalize_text(text: str) -> str:
 
 
 def prepare_onnx_asr_model_dir(model_path: Path, explicit_tokenizer: Optional[str]) -> Path:
-    """Create a temporary model directory with canonical onnx-asr file names.
-
-    onnx-asr expects names like model.onnx/model.int8.onnx and vocab.txt in the
-    model directory. Visperflow stores model under a fixed app-specific filename,
-    so we normalize via symlinks/copies in a temp directory.
-    """
+    """Create a temporary model directory with onnx-asr-friendly file names."""
     temp_dir = Path(tempfile.mkdtemp(prefix="visperflow-parakeet-onnxasr-"))
+    model_dir = model_path.parent
 
-    # Always provide canonical model names for robust probing.
-    model_onnx = temp_dir / "model.onnx"
-    model_int8 = temp_dir / "model.int8.onnx"
-
-    shutil.copy2(model_path, model_onnx)
-    shutil.copy2(model_path, model_int8)
+    # Always provide canonical names for compatibility across onnx-asr releases.
+    for target_name in (
+        "model.onnx",
+        "model.int8.onnx",
+        "encoder-model.onnx",
+        "encoder-model.int8.onnx",
+    ):
+        shutil.copy2(model_path, temp_dir / target_name)
 
     sidecar = model_path.with_suffix(model_path.suffix + ".data")
     if sidecar.exists() and sidecar.is_file():
         shutil.copy2(sidecar, temp_dir / "model.onnx.data")
+        shutil.copy2(sidecar, temp_dir / "encoder-model.onnx.data")
+
+    # Copy known companion artifacts when available.
+    for filename in (
+        "decoder_joint-model.int8.onnx",
+        "decoder_joint-model.onnx",
+        "config.json",
+        "nemo128.onnx",
+        "vocab.txt",
+    ):
+        companion = model_dir / filename
+        if companion.exists() and companion.is_file():
+            shutil.copy2(companion, temp_dir / filename)
 
     tokenizer = find_tokenizer_path(model_path, explicit_tokenizer)
     if tokenizer is not None and tokenizer.exists():
@@ -481,10 +492,10 @@ class InferenceEngine:
             try:
                 self.temp_model_dir = prepare_onnx_asr_model_dir(self.model_path, self.explicit_tokenizer)
                 last_error: Exception | None = None
-                for quant in (None, "int8"):
+                for quant in ("int8", None):
                     try:
                         self.onnx_asr_model = onnx_asr.load_model(
-                            "nemo-parakeet-ctc-0.6b",
+                            "nemo-parakeet-tdt-0.6b-v3",
                             path=str(self.temp_model_dir),
                             quantization=quant,
                             providers=["CPUExecutionProvider"],

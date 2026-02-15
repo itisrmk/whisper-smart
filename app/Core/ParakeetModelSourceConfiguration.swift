@@ -25,9 +25,15 @@ struct ParakeetModelSourceOption: Identifiable, Equatable {
     let modelURLString: String
     let modelDataURLString: String?
     let tokenizerURLString: String?
+    let decoderJointURLString: String?
+    let configURLString: String?
+    let nemoNormalizerURLString: String?
     let modelExpectedSizeBytes: Int64?
     let modelDataExpectedSizeBytes: Int64?
     let tokenizerExpectedSizeBytes: Int64?
+    let decoderJointExpectedSizeBytes: Int64?
+    let configExpectedSizeBytes: Int64?
+    let nemoNormalizerExpectedSizeBytes: Int64?
     let modelSHA256: String?
     let tokenizerSHA256: String?
     let isBuiltIn: Bool
@@ -43,6 +49,18 @@ struct ParakeetModelSourceOption: Identifiable, Equatable {
 
     var tokenizerURL: URL? {
         Self.parseHTTPURL(tokenizerURLString)
+    }
+
+    var decoderJointURL: URL? {
+        Self.parseHTTPURL(decoderJointURLString)
+    }
+
+    var configURL: URL? {
+        Self.parseHTTPURL(configURLString)
+    }
+
+    var nemoNormalizerURL: URL? {
+        Self.parseHTTPURL(nemoNormalizerURLString)
     }
 
     var tokenizerFilename: String? {
@@ -72,10 +90,19 @@ struct ParakeetResolvedModelSource: Equatable {
     let modelURL: URL?
     let modelDataURL: URL?
     let tokenizerURL: URL?
+    let decoderJointURL: URL?
+    let configURL: URL?
+    let nemoNormalizerURL: URL?
     let tokenizerFilename: String?
+    let decoderJointFilename: String?
+    let configFilename: String?
+    let nemoNormalizerFilename: String?
     let modelExpectedSizeBytes: Int64?
     let modelDataExpectedSizeBytes: Int64?
     let tokenizerExpectedSizeBytes: Int64?
+    let decoderJointExpectedSizeBytes: Int64?
+    let configExpectedSizeBytes: Int64?
+    let nemoNormalizerExpectedSizeBytes: Int64?
     let modelSHA256: String?
     let tokenizerSHA256: String?
     let error: String?
@@ -189,10 +216,19 @@ final class ParakeetModelSourceConfigurationStore {
                 modelURL: nil,
                 modelDataURL: nil,
                 tokenizerURL: nil,
+                decoderJointURL: nil,
+                configURL: nil,
+                nemoNormalizerURL: nil,
                 tokenizerFilename: nil,
+                decoderJointFilename: nil,
+                configFilename: nil,
+                nemoNormalizerFilename: nil,
                 modelExpectedSizeBytes: nil,
                 modelDataExpectedSizeBytes: nil,
                 tokenizerExpectedSizeBytes: nil,
+                decoderJointExpectedSizeBytes: nil,
+                configExpectedSizeBytes: nil,
+                nemoNormalizerExpectedSizeBytes: nil,
                 modelSHA256: nil,
                 tokenizerSHA256: nil,
                 error: "No default model source is bundled for variant '\(variantID)'.",
@@ -221,6 +257,27 @@ final class ParakeetModelSourceConfigurationStore {
         }
 
         if error == nil,
+           let decoderRaw = selectedSource.decoderJointURLString?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !decoderRaw.isEmpty,
+           selectedSource.decoderJointURL == nil {
+            error = "Selected source '\(selectedSource.displayName)' has an invalid decoder URL."
+        }
+
+        if error == nil,
+           let configRaw = selectedSource.configURLString?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !configRaw.isEmpty,
+           selectedSource.configURL == nil {
+            error = "Selected source '\(selectedSource.displayName)' has an invalid config URL."
+        }
+
+        if error == nil,
+           let nemoRaw = selectedSource.nemoNormalizerURLString?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !nemoRaw.isEmpty,
+           selectedSource.nemoNormalizerURL == nil {
+            error = "Selected source '\(selectedSource.displayName)' has an invalid nemo normalizer URL."
+        }
+
+        if error == nil,
            let unsupportedReason = selectedSource.runtimeCompatibility.unsupportedReason {
             error = unsupportedReason
         }
@@ -240,10 +297,19 @@ final class ParakeetModelSourceConfigurationStore {
             modelURL: selectedSource.modelURL,
             modelDataURL: selectedSource.modelDataURL,
             tokenizerURL: selectedSource.tokenizerURL,
+            decoderJointURL: selectedSource.decoderJointURL,
+            configURL: selectedSource.configURL,
+            nemoNormalizerURL: selectedSource.nemoNormalizerURL,
             tokenizerFilename: selectedSource.tokenizerFilename,
+            decoderJointFilename: selectedSource.decoderJointURL?.lastPathComponent,
+            configFilename: selectedSource.configURL?.lastPathComponent,
+            nemoNormalizerFilename: selectedSource.nemoNormalizerURL?.lastPathComponent,
             modelExpectedSizeBytes: selectedSource.modelExpectedSizeBytes,
             modelDataExpectedSizeBytes: selectedSource.modelDataExpectedSizeBytes,
             tokenizerExpectedSizeBytes: selectedSource.tokenizerExpectedSizeBytes,
+            decoderJointExpectedSizeBytes: selectedSource.decoderJointExpectedSizeBytes,
+            configExpectedSizeBytes: selectedSource.configExpectedSizeBytes,
+            nemoNormalizerExpectedSizeBytes: selectedSource.nemoNormalizerExpectedSizeBytes,
             modelSHA256: selectedSource.modelSHA256,
             tokenizerSHA256: selectedSource.tokenizerSHA256,
             error: error,
@@ -260,13 +326,19 @@ private extension ParakeetModelSourceConfigurationStore {
             return [
                 ParakeetModelSourceOption(
                     id: "hf_parakeet_tdt06b_v3_onnx",
-                    displayName: "Hugging Face · encoder-model.onnx + .data (recommended)",
-                    modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx",
-                    modelDataURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx.data",
+                    displayName: "Hugging Face · int8 encoder+decoder bundle (recommended)",
+                    modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.int8.onnx",
+                    modelDataURLString: nil,
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",
-                    modelExpectedSizeBytes: 41_770_866,
-                    modelDataExpectedSizeBytes: 2_435_420_160,
+                    decoderJointURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/decoder_joint-model.int8.onnx",
+                    configURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/config.json",
+                    nemoNormalizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/nemo128.onnx",
+                    modelExpectedSizeBytes: 652_183_999,
+                    modelDataExpectedSizeBytes: nil,
                     tokenizerExpectedSizeBytes: 100_000,
+                    decoderJointExpectedSizeBytes: 18_202_004,
+                    configExpectedSizeBytes: 97,
+                    nemoNormalizerExpectedSizeBytes: 139_764,
                     modelSHA256: nil,
                     tokenizerSHA256: nil,
                     isBuiltIn: true,
@@ -294,9 +366,15 @@ private extension ParakeetModelSourceConfigurationStore {
             modelURLString: modelURL ?? "",
             modelDataURLString: nil,
             tokenizerURLString: tokenizerURL,
+            decoderJointURLString: nil,
+            configURLString: nil,
+            nemoNormalizerURLString: nil,
             modelExpectedSizeBytes: nil,
             modelDataExpectedSizeBytes: nil,
             tokenizerExpectedSizeBytes: nil,
+            decoderJointExpectedSizeBytes: nil,
+            configExpectedSizeBytes: nil,
+            nemoNormalizerExpectedSizeBytes: nil,
             modelSHA256: nil,
             tokenizerSHA256: nil,
             isBuiltIn: false,

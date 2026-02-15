@@ -534,6 +534,15 @@ private extension ModelDownloaderService {
            let tokenizerURL = variant.tokenizerLocalURL(using: source) {
             try? FileManager.default.removeItem(at: tokenizerURL)
         }
+
+        for artifact in additionalArtifacts(for: source) {
+            let artifactURL = modelURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(artifact.filename)
+            if FileManager.default.fileExists(atPath: artifactURL.path) {
+                try? FileManager.default.removeItem(at: artifactURL)
+            }
+        }
     }
 
     private func finalizeDownloadedArtifacts(context: DownloadContext, modelURL: URL) async -> String? {
@@ -543,6 +552,14 @@ private extension ModelDownloaderService {
         ) {
             cleanupArtifacts(variant: context.variant, source: context.source, modelURL: modelURL)
             return modelDataError
+        }
+
+        if let additionalArtifactsError = await downloadAdditionalArtifactsIfNeeded(
+            variant: context.variant,
+            source: context.source
+        ) {
+            cleanupArtifacts(variant: context.variant, source: context.source, modelURL: modelURL)
+            return additionalArtifactsError
         }
 
         if let tokenizerError = await downloadTokenizerArtifactIfNeeded(
@@ -595,6 +612,50 @@ private extension ModelDownloaderService {
             at: destinationURL,
             expectedSizeBytes: source.modelDataExpectedSizeBytes
         )
+    }
+
+    func downloadAdditionalArtifactsIfNeeded(
+        variant: ModelVariant,
+        source: ParakeetResolvedModelSource
+    ) async -> String? {
+        let artifacts = additionalArtifacts(for: source)
+        guard !artifacts.isEmpty else { return nil }
+
+        guard let modelURL = variant.localURL else {
+            return "Auxiliary artifact path resolution failed. Check Application Support permissions and retry."
+        }
+
+        let modelDirectory = modelURL.deletingLastPathComponent()
+
+        for artifact in artifacts {
+            let destinationURL = modelDirectory.appendingPathComponent(artifact.filename)
+
+            if auxiliaryArtifactValidationError(
+                at: destinationURL,
+                expectedSizeBytes: artifact.expectedSizeBytes,
+                label: artifact.label
+            ) == nil {
+                continue
+            }
+
+            if let downloadError = await downloadAuxiliaryArtifact(
+                from: artifact.remoteURL,
+                to: destinationURL,
+                label: artifact.label
+            ) {
+                return downloadError
+            }
+
+            if let validationError = auxiliaryArtifactValidationError(
+                at: destinationURL,
+                expectedSizeBytes: artifact.expectedSizeBytes,
+                label: artifact.label
+            ) {
+                return validationError
+            }
+        }
+
+        return nil
     }
 
     func downloadTokenizerArtifactIfNeeded(
@@ -691,6 +752,37 @@ private extension ModelDownloaderService {
         return nil
     }
 
+    func auxiliaryArtifactValidationError(
+        at fileURL: URL,
+        expectedSizeBytes: Int64?,
+        label: String
+    ) -> String? {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return "\(label.capitalized) artifact is missing after download. Automatic setup will retry."
+        }
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let fileSize = attrs[.size] as? Int64 else {
+            return "\(label.capitalized) artifact cannot be read. Automatic setup will retry."
+        }
+
+        let minimumBytes: Int64
+        if let expectedSizeBytes, expectedSizeBytes > 0 {
+            minimumBytes = max(64, Int64(Double(expectedSizeBytes) * 0.95))
+        } else {
+            minimumBytes = 64
+        }
+
+        guard fileSize >= minimumBytes else {
+            if let expectedSizeBytes, expectedSizeBytes > 0 {
+                return "\(label.capitalized) artifact is incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSizeBytes / 1_000_000) MB). Automatic setup will retry."
+            }
+            return "\(label.capitalized) artifact is incomplete (\(fileSize) bytes). Automatic setup will retry."
+        }
+
+        return nil
+    }
+
     func validateDownloadedModel(
         variant: ModelVariant,
         at modelURL: URL,
@@ -714,6 +806,19 @@ private extension ModelDownloaderService {
         if let expectedLength = source.modelExpectedSizeBytes,
            fileSize < expectedLength {
             return "Downloaded model size check failed (\(fileSize) < expected \(expectedLength) bytes). Automatic setup will retry."
+        }
+
+        for artifact in additionalArtifacts(for: source) {
+            let destinationURL = modelURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(artifact.filename)
+            if let artifactError = auxiliaryArtifactValidationError(
+                at: destinationURL,
+                expectedSizeBytes: artifact.expectedSizeBytes,
+                label: artifact.label
+            ) {
+                return artifactError
+            }
         }
 
         if source.tokenizerURL != nil {
@@ -744,6 +849,42 @@ private extension ModelDownloaderService {
 
         let tokenizerURL = variant.tokenizerLocalURL(using: source)
         return parakeetONNXPreflightError(modelURL: modelURL, tokenizerURL: tokenizerURL)
+    }
+
+    func additionalArtifacts(for source: ParakeetResolvedModelSource) -> [(remoteURL: URL, filename: String, expectedSizeBytes: Int64?, label: String)] {
+        var artifacts: [(remoteURL: URL, filename: String, expectedSizeBytes: Int64?, label: String)] = []
+
+        if let remoteURL = source.decoderJointURL,
+           let filename = source.decoderJointFilename {
+            artifacts.append((
+                remoteURL: remoteURL,
+                filename: filename,
+                expectedSizeBytes: source.decoderJointExpectedSizeBytes,
+                label: "decoder joint"
+            ))
+        }
+
+        if let remoteURL = source.configURL,
+           let filename = source.configFilename {
+            artifacts.append((
+                remoteURL: remoteURL,
+                filename: filename,
+                expectedSizeBytes: source.configExpectedSizeBytes,
+                label: "config"
+            ))
+        }
+
+        if let remoteURL = source.nemoNormalizerURL,
+           let filename = source.nemoNormalizerFilename {
+            artifacts.append((
+                remoteURL: remoteURL,
+                filename: filename,
+                expectedSizeBytes: source.nemoNormalizerExpectedSizeBytes,
+                label: "nemo normalizer"
+            ))
+        }
+
+        return artifacts
     }
 
 

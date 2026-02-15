@@ -139,6 +139,18 @@ struct ModelVariant: Equatable, Identifiable {
         return nil
     }
 
+    func auxiliaryLocalURL(filename: String?) -> URL? {
+        guard let filename,
+              !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let modelURL = localURL else {
+            return nil
+        }
+
+        return modelURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(filename)
+    }
+
     /// Whether the model file is present on disk and passes basic size validation.
     var isDownloaded: Bool {
         currentValidationSnapshot().isDownloaded
@@ -193,10 +205,29 @@ struct ModelVariant: Equatable, Identifiable {
             return ValidationSnapshot(isDownloaded: false, validationStatus: status)
         }
 
+        if let expectedSize = source?.modelExpectedSizeBytes, expectedSize > 0 {
+            let minimumExpectedSize = max(minimumModelBytes, Int64(Double(expectedSize) * 0.95))
+            if fileSize < minimumExpectedSize {
+                logger.warning(
+                    "Model file smaller than expected (\(fileSize) bytes < \(minimumExpectedSize) for \(self.id))"
+                )
+                return ValidationSnapshot(
+                    isDownloaded: false,
+                    validationStatus: "Model file appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSize / 1_000_000) MB). Automatic setup will retry."
+                )
+            }
+        }
+
         if let sidecarStatus = modelDataValidationStatus(using: source),
            sidecarStatus.isReady == false {
             logger.warning("Model sidecar not ready for \(self.id): \(sidecarStatus.detail)")
             return ValidationSnapshot(isDownloaded: false, validationStatus: sidecarStatus.detail)
+        }
+
+        if let transducerArtifactsStatus = transducerArtifactsValidationStatus(using: source),
+           transducerArtifactsStatus.isReady == false {
+            logger.warning("Transducer side artifacts not ready for \(self.id): \(transducerArtifactsStatus.detail)")
+            return ValidationSnapshot(isDownloaded: false, validationStatus: transducerArtifactsStatus.detail)
         }
 
         if let tokenizerStatus = tokenizerValidationStatus(using: source),
@@ -325,6 +356,48 @@ struct ModelVariant: Equatable, Identifiable {
             "Tokenizer ready (\(tokenizerURL.lastPathComponent), \(fileSize / 1_000) KB)"
         )
     }
+
+    func transducerArtifactsValidationStatus(using source: ParakeetResolvedModelSource?) -> (isReady: Bool, detail: String)? {
+        guard let source else { return nil }
+
+        let requirements: [(filename: String?, expectedBytes: Int64?, label: String)] = [
+            (source.decoderJointFilename, source.decoderJointExpectedSizeBytes, "decoder_joint-model.int8.onnx"),
+            (source.configFilename, source.configExpectedSizeBytes, "config.json"),
+            (source.nemoNormalizerFilename, source.nemoNormalizerExpectedSizeBytes, "nemo128.onnx")
+        ]
+
+        let requiredItems = requirements.filter { $0.filename != nil }
+        guard !requiredItems.isEmpty else { return nil }
+
+        for item in requiredItems {
+            guard let artifactURL = auxiliaryLocalURL(filename: item.filename) else {
+                return (false, "\(item.label) path is unavailable. Automatic setup will retry.")
+            }
+
+            guard FileManager.default.fileExists(atPath: artifactURL.path) else {
+                return (false, "\(item.label) is missing. Automatic setup will retry.")
+            }
+
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: artifactURL.path),
+                  let fileSize = attrs[.size] as? Int64 else {
+                return (false, "\(item.label) cannot be read yet. Automatic setup will retry.")
+            }
+
+            if let expectedBytes = item.expectedBytes, expectedBytes > 0 {
+                let minimumExpectedBytes = max(64, Int64(Double(expectedBytes) * 0.95))
+                if fileSize < minimumExpectedBytes {
+                    return (
+                        false,
+                        "\(item.label) appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedBytes / 1_000_000) MB). Automatic setup will retry."
+                    )
+                }
+            } else if fileSize < 64 {
+                return (false, "\(item.label) appears incomplete (\(fileSize) bytes). Automatic setup will retry.")
+            }
+        }
+
+        return (true, "Transducer artifacts ready")
+    }
 }
 
 // MARK: - Known Model Variants
@@ -334,7 +407,7 @@ extension ModelVariant {
     static let parakeetCTC06B = ModelVariant(
         id: ParakeetModelCatalog.ctc06BVariantID,
         displayName: "Parakeet TDT 0.6B v3 (experimental)",
-        sizeBytes: 41_000_000,
+        sizeBytes: 652_183_999,
         minimumValidBytes: 30_000_000,
         relativePath: "models/parakeet-ctc-0.6b.onnx"
     )

@@ -200,14 +200,19 @@ private func runLegacyCanarySourceMigrationSmoke() throws {
     print("✓ Legacy Canary source migration smoke passed")
 }
 
-private func runParakeetSidecarMetadataSmoke() throws {
+private func runParakeetArtifactMetadataSmoke() throws {
     let source = ModelVariant.parakeetCTC06B.configuredSource
-    try expect(source?.modelDataURL != nil, "Parakeet source should include an ONNX sidecar URL.")
+    try expect(source?.modelDataURL == nil, "Parakeet source should use int8 encoder artifact without external .data sidecar.")
+    try expect(source?.decoderJointURL != nil, "Parakeet source should include decoder_joint artifact URL.")
+    try expect(source?.configURL != nil, "Parakeet source should include config.json artifact URL.")
+    try expect(source?.nemoNormalizerURL != nil, "Parakeet source should include nemo128 artifact URL.")
 
-    let expectedBytes = source?.modelDataExpectedSizeBytes ?? 0
-    try expect(expectedBytes > 2_000_000_000, "Parakeet sidecar expected size should be set to a multi-GB value.")
+    let expectedEncoderBytes = source?.modelExpectedSizeBytes ?? 0
+    let expectedDecoderBytes = source?.decoderJointExpectedSizeBytes ?? 0
+    try expect(expectedEncoderBytes > 500_000_000, "Parakeet int8 encoder expected size should be set.")
+    try expect(expectedDecoderBytes > 10_000_000, "Parakeet int8 decoder expected size should be set.")
 
-    print("✓ Parakeet sidecar metadata smoke passed")
+    print("✓ Parakeet artifact metadata smoke passed")
 }
 
 private func runTokenizerValidationSmoke() throws {
@@ -233,10 +238,19 @@ private func runTokenizerValidationSmoke() throws {
         modelURL: nil,
         modelDataURL: nil,
         tokenizerURL: URL(string: "https://example.com/vocab.txt"),
+        decoderJointURL: nil,
+        configURL: nil,
+        nemoNormalizerURL: nil,
         tokenizerFilename: "vocab.txt",
+        decoderJointFilename: nil,
+        configFilename: nil,
+        nemoNormalizerFilename: nil,
         modelExpectedSizeBytes: nil,
         modelDataExpectedSizeBytes: nil,
         tokenizerExpectedSizeBytes: 100_000,
+        decoderJointExpectedSizeBytes: nil,
+        configExpectedSizeBytes: nil,
+        nemoNormalizerExpectedSizeBytes: nil,
         modelSHA256: nil,
         tokenizerSHA256: nil,
         error: nil,
@@ -258,7 +272,7 @@ struct QASmokeMain {
             try runResolverSmoke()
             try runDownloadCompletionTransitionSmoke()
             try runLegacyCanarySourceMigrationSmoke()
-            try runParakeetSidecarMetadataSmoke()
+            try runParakeetArtifactMetadataSmoke()
             try runTokenizerValidationSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {

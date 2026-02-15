@@ -2056,13 +2056,17 @@ private struct ModelDownloadRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.sm) {
             HStack {
-                VStack(alignment: .leading, spacing: VFSpacing.xxs) {
-                    Text("Model")
-                        .font(VFFont.settingsBody)
-                        .foregroundStyle(VFColor.textPrimary)
-                    Text(downloadState.variant.displayName)
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textSecondary)
+                HStack(spacing: VFSpacing.md) {
+                    modelArtwork
+
+                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                        Text("Model")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+                        Text(downloadState.variant.displayName)
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                    }
                 }
 
                 Spacer()
@@ -2074,9 +2078,19 @@ private struct ModelDownloadRow: View {
 
             DiagnosticLine(label: "Status", value: downloadStatusDetail)
             DiagnosticLine(label: "Source", value: downloadState.variant.configuredSourceDisplayName)
+            DiagnosticLine(label: "Files", value: "encoder-model.int8.onnx + decoder_joint-model.int8.onnx + vocab.txt")
             Text("Parakeet model setup runs automatically in the background.")
                 .font(VFFont.settingsCaption)
                 .foregroundStyle(VFColor.textSecondary)
+
+            if let modelCardURL = URL(string: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx") {
+                Link(destination: modelCardURL) {
+                    Label("View model card", systemImage: "photo")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.accentFallback)
+                }
+                .buttonStyle(.plain)
+            }
 
             // Progress bar
             if case .downloading(let progress) = downloadState.phase {
@@ -2125,6 +2139,36 @@ private struct ModelDownloadRow: View {
             autoSetupTriggered = true
             triggerAutomaticSetup()
         }
+    }
+
+    private var modelArtwork: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            VFColor.accentFallback.opacity(0.35),
+                            VFColor.controlInset.opacity(0.95)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
+                        .stroke(VFColor.glassBorder, lineWidth: 0.8)
+                )
+
+            VStack(spacing: 4) {
+                Image(systemName: "bird.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(VFColor.textPrimary)
+                Text("TDT v3")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(VFColor.textSecondary)
+            }
+        }
+        .frame(width: 54, height: 54)
     }
 
     @ViewBuilder
@@ -2225,6 +2269,15 @@ private struct ModelDownloadRow: View {
         }
 
         let lower = trimmed.lowercased()
+        if lower.contains("decoder joint artifact") || lower.contains("nemo normalizer artifact") || lower.contains("config artifact") {
+            return "Finalizing required model files. Setup will retry automatically if needed."
+        }
+        if lower.contains("incomplete") {
+            return "Model download is incomplete. Setup will continue automatically."
+        }
+        if lower.contains("not connected to internet") || lower.contains("no internet connection") {
+            return "No internet connection detected. Setup will resume when network is available."
+        }
         if lower.contains("http 404") {
             return "Model host returned HTTP 404. Setup will retry automatically."
         }
@@ -2236,8 +2289,11 @@ private struct ModelDownloadRow: View {
         }
 
         let firstLine = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
-        if firstLine.count > 140 || lower.contains("domain=") || lower.contains("code=") {
+        if lower.contains("domain=") || lower.contains("code=") {
             return "Setup is still running. Retry in a few seconds."
+        }
+        if firstLine.count > 160 {
+            return String(firstLine.prefix(160)) + "…"
         }
         return firstLine
     }
