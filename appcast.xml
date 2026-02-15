@@ -6,6 +6,24 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.4</title>
+      <description>v0.2.4 - Canary-Qwen STT option + tokenizer validation fix
+
+New in this release:
+- Removed Qwen TTS preview path from Provider settings
+- Added one-click STT source option for NVIDIA Canary-Qwen-2.5B (experimental)
+- Fixed tokenizer false-fail for valid Parakeet vocab sizes
+- Kept one-click UX and setup messaging improvements</description>
+      <pubDate>Sat, 14 Feb 2026 17:24:25 -0700</pubDate>
+      <enclosure
+        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.4/Whisper-Smart-0.2.4.dmg"
+        sparkle:shortVersionString="0.2.4"
+        sparkle:version="202602141724"
+        length="4473305"
+        type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.3</title>
       <description>v0.2.3 - Parakeet download reliability and calmer setup UX
 

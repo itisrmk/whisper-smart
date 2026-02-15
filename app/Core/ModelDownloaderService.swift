@@ -464,19 +464,12 @@ private extension ModelDownloaderService {
             return downloadError
         }
 
-        if let expectedSize = source.tokenizerExpectedSizeBytes,
-           let attrs = try? FileManager.default.attributesOfItem(atPath: tokenizerDestinationURL.path),
-           let fileSize = attrs[.size] as? Int64,
-           fileSize < expectedSize {
-            return "Tokenizer artifact is smaller than expected (\(fileSize) < \(expectedSize) bytes). Retry the download."
-        }
-
         if let expectedSHA = source.tokenizerSHA256,
            let checksumError = validateSHA256(at: tokenizerDestinationURL, expectedHex: expectedSHA, label: "tokenizer") {
             return checksumError
         }
 
-        return validateTokenizerArtifact(at: tokenizerDestinationURL)
+        return TokenizerArtifactValidator.validate(at: tokenizerDestinationURL, source: source)
     }
 
     func downloadAuxiliaryArtifact(from sourceURL: URL, to destinationURL: URL, label: String) -> String? {
@@ -555,7 +548,7 @@ private extension ModelDownloaderService {
             guard let tokenizerURL = variant.tokenizerLocalURL(using: source) else {
                 return "Tokenizer path resolution failed after download. Retry the download."
             }
-            if let tokenizerValidationError = validateTokenizerArtifact(at: tokenizerURL) {
+            if let tokenizerValidationError = TokenizerArtifactValidator.validate(at: tokenizerURL, source: source) {
                 return tokenizerValidationError
             }
         }
@@ -564,47 +557,16 @@ private extension ModelDownloaderService {
             return nil
         }
 
+        let modelExtension = modelURL.pathExtension.lowercased()
+        guard modelExtension == "onnx" else {
+            logger.info("Skipping ONNX preflight for non-ONNX model artifact: \(modelURL.lastPathComponent, privacy: .public)")
+            return nil
+        }
+
         let tokenizerURL = variant.tokenizerLocalURL(using: source)
         return parakeetONNXPreflightError(modelURL: modelURL, tokenizerURL: tokenizerURL)
     }
 
-    func validateTokenizerArtifact(at tokenizerURL: URL) -> String? {
-        guard FileManager.default.fileExists(atPath: tokenizerURL.path) else {
-            return "Tokenizer artifact is missing after download. Retry the download."
-        }
-
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: tokenizerURL.path),
-              let fileSize = attrs[.size] as? Int64 else {
-            return "Tokenizer artifact cannot be read. Check disk permissions and retry."
-        }
-
-        guard fileSize >= 128 else {
-            return "Tokenizer artifact appears incomplete (\(fileSize) bytes). Retry the download."
-        }
-
-        let extensionValue = tokenizerURL.pathExtension.lowercased()
-        switch extensionValue {
-        case "txt":
-            guard let text = try? String(contentsOf: tokenizerURL),
-                  text.split(whereSeparator: \.isNewline).count >= 10 else {
-                return "Tokenizer vocab.txt is invalid or empty. Retry the download."
-            }
-        case "json":
-            guard let data = try? Data(contentsOf: tokenizerURL),
-                  let object = try? JSONSerialization.jsonObject(with: data),
-                  let dictionary = object as? [String: Any],
-                  dictionary.isEmpty == false else {
-                return "Tokenizer JSON is invalid. Retry the download."
-            }
-        case "model":
-            // Binary SentencePiece file; size validation above is the primary preflight check.
-            break
-        default:
-            return "Tokenizer file extension '.\(extensionValue)' is unsupported. Use .model, .json, or .txt."
-        }
-
-        return nil
-    }
 
     func parakeetONNXPreflightError(modelURL: URL, tokenizerURL: URL?) -> String? {
         let pythonCommand: String

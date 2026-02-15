@@ -56,6 +56,7 @@ struct ParakeetModelSourceOption: Identifiable, Equatable {
 struct ParakeetResolvedModelSource: Equatable {
     let selectedSourceID: String
     let selectedSourceName: String
+    let isBuiltInSource: Bool
     let modelURL: URL?
     let modelDataURL: URL?
     let tokenizerURL: URL?
@@ -82,6 +83,7 @@ struct ParakeetResolvedModelSource: Equatable {
 
 final class ParakeetModelSourceConfigurationStore {
     static let shared = ParakeetModelSourceConfigurationStore()
+    static let supportedModelExtensions: Set<String> = ["onnx", "safetensors", "nemo"]
 
     private let defaults = UserDefaults.standard
 
@@ -142,8 +144,8 @@ final class ParakeetModelSourceConfigurationStore {
             return "Custom model source must be a valid http(s) URL."
         }
 
-        guard modelURL.pathExtension.lowercased() == "onnx" else {
-            return "Custom model source must point to an .onnx file."
+        guard Self.supportedModelExtensions.contains(modelURL.pathExtension.lowercased()) else {
+            return "Custom model source must point to .onnx, .safetensors, or .nemo."
         }
 
         if !trimmedTokenizer.isEmpty {
@@ -175,6 +177,7 @@ final class ParakeetModelSourceConfigurationStore {
             return ParakeetResolvedModelSource(
                 selectedSourceID: "none",
                 selectedSourceName: "Unavailable",
+                isBuiltInSource: false,
                 modelURL: nil,
                 modelDataURL: nil,
                 tokenizerURL: nil,
@@ -195,8 +198,9 @@ final class ParakeetModelSourceConfigurationStore {
 
         if selectedSource.modelURL == nil {
             error = "Selected source '\(selectedSource.displayName)' has an invalid model URL."
-        } else if selectedSource.modelURL?.pathExtension.lowercased() != "onnx" {
-            error = "Selected source '\(selectedSource.displayName)' must point to an .onnx model URL."
+        } else if let modelExtension = selectedSource.modelURL?.pathExtension.lowercased(),
+                  Self.supportedModelExtensions.contains(modelExtension) == false {
+            error = "Selected source '\(selectedSource.displayName)' must point to .onnx, .safetensors, or .nemo."
         }
 
         if error == nil,
@@ -217,6 +221,7 @@ final class ParakeetModelSourceConfigurationStore {
         return ParakeetResolvedModelSource(
             selectedSourceID: selectedSource.id,
             selectedSourceName: selectedSource.displayName,
+            isBuiltInSource: selectedSource.isBuiltIn,
             modelURL: selectedSource.modelURL,
             modelDataURL: selectedSource.modelDataURL,
             tokenizerURL: selectedSource.tokenizerURL,
@@ -256,6 +261,18 @@ private extension ParakeetModelSourceConfigurationStore {
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",
                     modelExpectedSizeBytes: 40_000_000,
                     tokenizerExpectedSizeBytes: 100_000,
+                    modelSHA256: nil,
+                    tokenizerSHA256: nil,
+                    isBuiltIn: true
+                ),
+                ParakeetModelSourceOption(
+                    id: "hf_canary_qwen_2_5b_safetensors",
+                    displayName: "Hugging Face · NVIDIA Canary-Qwen-2.5B (experimental)",
+                    modelURLString: "https://huggingface.co/nvidia/canary-qwen-2.5b/resolve/main/model.safetensors",
+                    modelDataURLString: nil,
+                    tokenizerURLString: nil,
+                    modelExpectedSizeBytes: 5_119_120_624,
+                    tokenizerExpectedSizeBytes: nil,
                     modelSHA256: nil,
                     tokenizerSHA256: nil,
                     isBuiltIn: true

@@ -157,12 +157,52 @@ private func runResolverSmoke() throws {
     print("  fallback health=\(fallback.healthLevel.rawValue), ready health=\(ready.healthLevel.rawValue)")
 }
 
+
+private func runTokenizerValidationSmoke() throws {
+    let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("qa-smoke-tokenizer-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let tokenizerURL = tempDir.appendingPathComponent("vocab.txt")
+    var payload = "<blank>\n"
+    payload += String(repeating: "token\n", count: 9)
+
+    let targetSize = Int(TokenizerArtifactValidator.knownParakeetVocabSizeBytes)
+    if payload.utf8.count < targetSize {
+        payload += String(repeating: "a", count: targetSize - payload.utf8.count)
+    }
+    try payload.write(to: tokenizerURL, atomically: true, encoding: .utf8)
+
+    let source = ParakeetResolvedModelSource(
+        selectedSourceID: "hf_parakeet_tdt06b_v3_onnx",
+        selectedSourceName: "Hugging Face",
+        isBuiltInSource: true,
+        modelURL: nil,
+        modelDataURL: nil,
+        tokenizerURL: URL(string: "https://example.com/vocab.txt"),
+        tokenizerFilename: "vocab.txt",
+        modelExpectedSizeBytes: nil,
+        tokenizerExpectedSizeBytes: 100_000,
+        modelSHA256: nil,
+        tokenizerSHA256: nil,
+        error: nil,
+        availableSources: []
+    )
+
+    let validationError = TokenizerArtifactValidator.validate(at: tokenizerURL, source: source)
+    try expect(validationError == nil, "Tokenizer validator should accept current known Parakeet vocab size (~93,939 bytes)")
+
+    print("✓ Tokenizer validator smoke passed")
+}
+
 @main
 struct QASmokeMain {
     static func main() {
         do {
             try runStateMachineSmoke()
             try runResolverSmoke()
+            try runTokenizerValidationSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {
             fputs("Smoke test failure: \(error)\n", stderr)

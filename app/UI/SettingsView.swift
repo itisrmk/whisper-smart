@@ -1369,7 +1369,7 @@ private struct ProviderSettingsTab: View {
         var subtitle: String {
             switch self {
             case .light: return "Whisper Tiny/Base · fastest local"
-            case .balanced: return "Parakeet TDT 0.6B v3 · local ONNX (experimental)"
+            case .balanced: return "Parakeet / Canary-Qwen · local experimental"
             case .best: return "Whisper Large-v3 Turbo · highest local accuracy"
             case .cloud: return "OpenAI Whisper API · remote transcription"
             }
@@ -1388,7 +1388,6 @@ private struct ProviderSettingsTab: View {
     @StateObject private var downloadState = ModelDownloadState(variant: .parakeetCTC06B)
     @StateObject private var whisperInstaller = WhisperModelInstaller.shared
     @StateObject private var whisperRuntimeInstaller = WhisperRuntimeInstaller.shared
-    @StateObject private var ttsPlaceholderDownloader = TTSModelPlaceholderDownloader.shared
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
 
     private enum ProviderMessageSeverity {
@@ -1432,51 +1431,7 @@ private struct ProviderSettingsTab: View {
                 }
             }
 
-            NeuSection(icon: "speaker.wave.3.fill", title: "Text-to-Speech (Preview)") {
-                VStack(alignment: .leading, spacing: VFSpacing.sm) {
-                    Text("One-click TTS model option")
-                        .font(VFFont.settingsBody)
-                        .foregroundStyle(VFColor.textPrimary)
-
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: VFSpacing.xxs) {
-                            Text("\(TTSModelPlaceholderOption.qwen3CustomVoice.displayName)")
-                                .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.textPrimary)
-                            Text("Download preview assets in one click. Synthesis runtime is not integrated yet, so this does not alter STT behavior.")
-                                .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.textSecondary)
-                        }
-                        Spacer()
-
-                        switch ttsPlaceholderDownloader.phase {
-                        case .downloading:
-                            profileActionButton(title: "Downloading…", isPrimary: true, enabled: false) {}
-                        case .ready:
-                            installedChip(label: "Preview Assets Downloaded", color: VFColor.accentFallback)
-                        case .idle, .failed:
-                            profileActionButton(title: "Download", isPrimary: true, enabled: true) {
-                                DictationFeatureFlags.ttsPlaceholderEnabled = true
-                                ttsPlaceholderDownloader.downloadPreviewAsset()
-                            }
-                        }
-                    }
-
-                    switch ttsPlaceholderDownloader.phase {
-                    case .idle:
-                        statusText("Preview only. TTS synthesis is coming soon.", severity: .info)
-                    case .downloading:
-                        statusText("Downloading preview assets…", severity: .info)
-                    case .ready(let localPath):
-                        Text("Preview assets ready at \(localPath). TTS synthesis is not yet enabled in this build.")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
-                            .textSelection(.enabled)
-                    case .failed(let message):
-                        statusText(sanitizedStatusMessage(message, fallback: "Couldn’t download preview assets. Check your connection and try again."), severity: .error)
-                    }
-                }
-            }
+            // TTS preview section removed.
         }
         .onAppear {
             syncDownloadState(for: selectedKind)
@@ -1484,7 +1439,6 @@ private struct ProviderSettingsTab: View {
             openAIAPIKey = DictationProviderPolicy.openAIAPIKey
             whisperRuntimeInstaller.refreshState()
             whisperInstaller.refreshState()
-            ttsPlaceholderDownloader.refresh()
         }
     }
 
@@ -1577,6 +1531,7 @@ private struct ProviderSettingsTab: View {
 
     private func presetCard(_ preset: SmartModelPreset) -> some View {
         let diagnostics = STTProviderResolver.diagnostics(for: preset.provider)
+        let presetStatus = presetStatusMessage(for: preset, diagnostics: diagnostics)
         let isActive = activePreset == preset
 
         return VStack(alignment: .leading, spacing: VFSpacing.sm) {
@@ -1606,11 +1561,8 @@ private struct ProviderSettingsTab: View {
                 setupActionButton(for: preset)
             }
 
-            if diagnostics.usesFallback, let reason = diagnostics.fallbackReason {
-                statusText(
-                    friendlyFallbackMessage(reason),
-                    severity: fallbackSeverity(for: reason)
-                )
+            if let presetStatus {
+                statusText(presetStatus.message, severity: presetStatus.severity)
             }
         }
         .padding(VFSpacing.lg)
@@ -1636,24 +1588,15 @@ private struct ProviderSettingsTab: View {
                 installedChip(label: "Installed")
             }
         case .light:
-            if !whisperRuntimeIsReady {
-                profileActionButton(title: "Install runtime", enabled: true) {
-                    whisperRuntimeInstaller.installRuntime()
-                }
-            } else if !whisperModelInstalled([.tinyEn, .baseEn]) {
+            if !whisperModelInstalled([.tinyEn, .baseEn]) {
                 profileActionButton(title: "Download", enabled: true) {
-                    whisperInstaller.setTier(.baseEn)
-                    whisperInstaller.downloadSelectedModel()
+                    downloadWhisperLightProfile()
                 }
             } else {
                 installedChip(label: "Installed")
             }
         case .best:
-            if !whisperRuntimeIsReady {
-                profileActionButton(title: "Install runtime", enabled: true) {
-                    whisperRuntimeInstaller.installRuntime()
-                }
-            } else if !whisperModelInstalled([.largeV3Turbo]) {
+            if !whisperModelInstalled([.largeV3Turbo]) {
                 profileActionButton(title: "Download", enabled: true) {
                     downloadWhisperLargeProfile()
                 }
@@ -1701,9 +1644,23 @@ private struct ProviderSettingsTab: View {
         ModelDownloaderService.shared.download(variant: .parakeetCTC06B, state: downloadState)
     }
 
+    private func downloadWhisperLightProfile() {
+        whisperInstaller.setTier(whisperModelInstalled([.tinyEn]) ? .tinyEn : .baseEn)
+        selectProvider(.whisper)
+        if !whisperRuntimeIsReady {
+            whisperRuntimeInstaller.installRuntime()
+            return
+        }
+        whisperInstaller.downloadSelectedModel()
+    }
+
     private func downloadWhisperLargeProfile() {
         whisperInstaller.setTier(.largeV3Turbo)
         selectProvider(.whisper)
+        if !whisperRuntimeIsReady {
+            whisperRuntimeInstaller.installRuntime()
+            return
+        }
         whisperInstaller.downloadSelectedModel()
     }
 
@@ -1737,6 +1694,44 @@ private struct ProviderSettingsTab: View {
         }
     }
 
+    private struct PresetStatus {
+        let message: String
+        let severity: ProviderMessageSeverity
+    }
+
+    private func presetStatusMessage(for preset: SmartModelPreset, diagnostics: ProviderRuntimeDiagnostics) -> PresetStatus? {
+        switch preset {
+        case .light:
+            if !whisperRuntimeIsReady {
+                return PresetStatus(message: "Install Whisper runtime to enable Light.", severity: .warning)
+            }
+            if !whisperModelInstalled([.tinyEn, .baseEn]) {
+                return PresetStatus(message: "Download Tiny or Base model to enable Light.", severity: .warning)
+            }
+        case .balanced:
+            if !ModelVariant.parakeetCTC06B.isDownloaded {
+                return PresetStatus(message: "Download Parakeet model to enable Balanced.", severity: .warning)
+            }
+        case .best:
+            if !whisperRuntimeIsReady {
+                return PresetStatus(message: "Install Whisper runtime to enable Best.", severity: .warning)
+            }
+            if !whisperModelInstalled([.largeV3Turbo]) {
+                return PresetStatus(message: "Download Large-v3 Turbo model to enable Best.", severity: .warning)
+            }
+        case .cloud:
+            let hasAPIKey = !DictationProviderPolicy.openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if !hasAPIKey {
+                return PresetStatus(message: "Add API key to enable Cloud.", severity: .warning)
+            }
+        }
+
+        if diagnostics.usesFallback, let reason = diagnostics.fallbackReason {
+            return PresetStatus(message: friendlyFallbackMessage(reason), severity: fallbackSeverity(for: reason))
+        }
+        return nil
+    }
+
     @ViewBuilder
     private func statusText(_ message: String, severity: ProviderMessageSeverity) -> some View {
         Text(message)
@@ -1746,6 +1741,9 @@ private struct ProviderSettingsTab: View {
 
     private func fallbackSeverity(for reason: String) -> ProviderMessageSeverity {
         let normalized = reason.lowercased()
+        if normalized.contains("not ready") || normalized.contains("not configured") || normalized.contains("not found") {
+            return .warning
+        }
         if normalized.contains("failed") || normalized.contains("error") {
             return .error
         }
@@ -1772,7 +1770,7 @@ private struct ProviderSettingsTab: View {
             return "Setup needed: download the model to finish setup."
         }
         if normalized.contains("runtime") && normalized.contains("not integrated") {
-            return "Balanced mode is still experimental in this build; Apple Speech will be used for now."
+            return "Balanced currently uses Apple Speech fallback in this build."
         }
         if normalized.contains("runtime bootstrap failed") {
             return "Setup needed: repair the local runtime, then try again."
@@ -2057,6 +2055,18 @@ private struct ModelDownloadRow: View {
 
             DiagnosticLine(label: "Status", value: downloadStatusDetail)
 
+            HStack {
+                Text("Source")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+                Spacer()
+                sourcePickerMenu
+            }
+
+            if selectedSourceID == ParakeetModelSourceOption.customSourceID {
+                customSourceEditor
+            }
+
             if let sourceError = downloadState.variant.downloadUnavailableReason {
                 HStack(alignment: .top, spacing: VFSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -2066,6 +2076,12 @@ private struct ModelDownloadRow: View {
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
                 }
+            }
+
+            if let sourceConfigurationError {
+                Text(sourceConfigurationError)
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.error)
             }
 
             // Progress bar
@@ -2254,7 +2270,7 @@ private struct ModelDownloadRow: View {
                 .font(VFFont.settingsCaption)
                 .foregroundStyle(VFColor.textSecondary)
 
-            TextField("https://example.com/model.onnx", text: $customModelURL)
+            TextField("https://example.com/model.onnx or model.safetensors", text: $customModelURL)
                 .textFieldStyle(.roundedBorder)
                 .disabled(isDownloading)
 
@@ -2282,7 +2298,7 @@ private struct ModelDownloadRow: View {
                 .disabled(isDownloading)
                 .opacity(isDownloading ? 0.5 : 1.0)
 
-                Text("Model must be .onnx; tokenizer supports .model, .json, or .txt.")
+                Text("Model must be .onnx, .safetensors, or .nemo; tokenizer supports .model, .json, or .txt.")
                     .font(VFFont.settingsCaption)
                     .foregroundStyle(VFColor.textSecondary)
             }
