@@ -32,11 +32,11 @@ final class ParakeetRuntimeBootstrapManager {
     private let queue = DispatchQueue(label: "com.visperflow.parakeet.bootstrap", qos: .userInitiated)
     private let statusLock = NSLock()
     private let fileManager = FileManager.default
-    // Keep dependencies to the guaranteed core runtime. onnx-asr is optional
-    // and the runner already falls back to raw ONNX inference when absent.
-    private let runtimeDependencies = ["numpy", "onnxruntime"]
+    // Parakeet TDT requires onnx-asr compatibility glue; raw ONNX fallback is
+    // not sufficient for this model family.
+    private let runtimeDependencies = ["numpy", "onnxruntime", "onnx-asr[cpu,hub]"]
     private let commandTimeoutSeconds: TimeInterval = 45 * 60
-    private let dependencyImportProbe = "import numpy, onnxruntime"
+    private let dependencyImportProbe = "import numpy, onnxruntime, onnx_asr"
 
     private var status = ParakeetRuntimeBootstrapStatus(
         phase: .idle,
@@ -102,7 +102,7 @@ private extension ParakeetRuntimeBootstrapManager {
         let candidate = trimmed.isEmpty ? "python3" : trimmed
 
         if candidate == "python3" {
-            for fallback in ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"] {
+            for fallback in ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"] {
                 if fileManager.isExecutableFile(atPath: fallback) {
                     return fallback
                 }
@@ -197,7 +197,7 @@ private extension ParakeetRuntimeBootstrapManager {
 
                 updateStatus(
                     phase: .bootstrapping,
-                    detail: "Installing dependencies (numpy, onnxruntime)…",
+                    detail: "Installing dependencies (numpy, onnxruntime, onnx-asr)…",
                     runtimeDirectory: runtimeRoot,
                     pythonCommand: venvPythonURL.path
                 )
@@ -260,6 +260,10 @@ private extension ParakeetRuntimeBootstrapManager {
     }
 
     func commandExists(_ command: String) -> Bool {
+        if command.contains("/") {
+            return fileManager.isExecutableFile(atPath: command)
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
         process.arguments = [command]
@@ -382,7 +386,7 @@ private extension ParakeetRuntimeBootstrapManager {
 
         updateStatus(
             phase: .bootstrapping,
-            detail: "Installing dependencies (numpy, onnxruntime)…",
+            detail: "Installing dependencies (numpy, onnxruntime, onnx-asr)…",
             runtimeDirectory: runtimeRoot,
             pythonCommand: bootstrapPythonCommand
         )

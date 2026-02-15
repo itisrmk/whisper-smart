@@ -109,10 +109,13 @@ final class ParakeetSTTProvider: STTProvider {
                     Self.cacheValidation(for: validationKey)
                     logger.info("Parakeet persistent worker warmup passed")
                 } catch let error as STTError {
+                    handlePotentialRuntimeRepair(from: error.localizedDescription)
                     throw error
                 } catch {
+                    let message = "Parakeet runtime validation failed: \(error.localizedDescription)"
+                    handlePotentialRuntimeRepair(from: message)
                     throw STTError.providerError(
-                        message: "Parakeet runtime validation failed: \(error.localizedDescription)"
+                        message: message
                     )
                 }
             }
@@ -344,6 +347,7 @@ private extension ParakeetSTTProvider {
 
         guard process.terminationStatus == 0 else {
             let details = !stderr.isEmpty ? stderr : stdout
+            handlePotentialRuntimeRepair(from: details)
             throw STTError.providerError(
                 message: mappedRunnerFailure(
                     pythonCommand: pythonCommand,
@@ -441,6 +445,12 @@ private extension ParakeetSTTProvider {
         validationLock.unlock()
     }
 
+    static func invalidateValidationCache(for key: String) {
+        validationLock.lock()
+        validationCache.remove(key)
+        validationLock.unlock()
+    }
+
     var currentSessionActive: Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -489,10 +499,33 @@ private extension ParakeetSTTProvider {
 // MARK: - Error Mapping
 
 private extension ParakeetSTTProvider {
+    func handlePotentialRuntimeRepair(from details: String) {
+        guard shouldTriggerRuntimeRepair(from: details) else { return }
+        updateRuntimeValidated(false)
+        if let modelPath = variant.localURL?.path {
+            Self.invalidateValidationCache(for: modelPath)
+        }
+        persistentRunner.invalidate()
+        triggerAutomaticProvisioning(forceRuntimeRepair: true)
+    }
+
+    func shouldTriggerRuntimeRepair(from details: String) -> Bool {
+        let lowercased = details.lowercased()
+        return lowercased.contains("model_signature_error")
+            || lowercased.contains("unsupported onnx audio input signature")
+            || lowercased.contains("dependency_missing")
+            || lowercased.contains("modulenotfounderror")
+            || lowercased.contains("failed to import onnx_asr")
+            || lowercased.contains("no module named 'onnx_asr'")
+    }
+
     func mappedRunnerFailure(pythonCommand: String, exitCode: Int32, details: String) -> String {
         let lowercased = details.lowercased()
         if (lowercased.contains("no such file") || lowercased.contains("not found")) && lowercased.contains(pythonCommand.lowercased()) {
             return "Local Parakeet runtime '\(pythonCommand)' is unavailable. Runtime setup is automatic; retry shortly."
+        }
+        if lowercased.contains("model_signature_error") || lowercased.contains("unsupported onnx audio input signature") {
+            return "Parakeet runtime is finalizing model compatibility. Automatic repair is running; retry dictation shortly."
         }
         if lowercased.contains("model_load_error") {
             return "MODEL_LOAD_ERROR: Parakeet model setup may be incomplete. Setup will retry automatically; try dictation again shortly."
@@ -501,7 +534,7 @@ private extension ParakeetSTTProvider {
             return "Tokenizer setup is still finalizing automatically. Retry dictation in a few seconds."
         }
         if lowercased.contains("modulenotfounderror") || lowercased.contains("dependency_missing") {
-            return details
+            return "Parakeet runtime dependencies are still installing. Automatic repair is running; retry in a few seconds."
         }
         if details.isEmpty {
             return "Parakeet inference runner exited with status \(exitCode) and no error output."

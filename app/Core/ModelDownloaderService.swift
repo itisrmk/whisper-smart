@@ -998,15 +998,11 @@ private extension ModelDownloaderService {
     func mappedPreflightFailure(details: String, exitCode: Int32) -> String? {
         let lowercased = details.lowercased()
         if lowercased.contains("model_signature_error") || lowercased.contains("unsupported onnx audio input signature") {
-            // Signature mismatch should not block model download; this is a runtime
-            // capability mismatch and may be handled by alternative inference paths.
-            return nil
+            return "Downloaded model is not compatible with the local Parakeet runtime yet. Automatic setup will retry."
         }
 
         if lowercased.contains("model_load_error") {
-            // Some Parakeet exports can fail strict preflight load while still being
-            // consumable by onnx-asr in runtime. Do not hard-fail download here.
-            return nil
+            return "Parakeet model bundle validation failed during preflight. Automatic setup will retry."
         }
         if lowercased.contains("tokenizer_missing") || lowercased.contains("tokenizer_error") {
             return "Tokenizer validation failed during ONNX preflight. Automatic setup will retry."

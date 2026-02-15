@@ -63,12 +63,10 @@ def load_sentencepiece():
 def load_onnx_asr():
     try:
         import onnx_asr  # type: ignore
-    except ModuleNotFoundError:
-        # Optional optimization path; raw ONNX fallback remains supported.
-        return None
-    except Exception:
-        # Treat unexpected onnx-asr import failures as optional-path failures.
-        return None
+    except ModuleNotFoundError as exc:
+        raise_dependency_error("onnx-asr", exc)
+    except Exception as exc:
+        raise RunnerError(f"DEPENDENCY_ERROR: Failed to import onnx_asr: {exc}") from exc
     return onnx_asr
 
 
@@ -488,67 +486,37 @@ class InferenceEngine:
 
     def _initialize(self) -> None:
         onnx_asr = load_onnx_asr()
-        if onnx_asr is not None:
+        self.temp_model_dir = prepare_onnx_asr_model_dir(self.model_path, self.explicit_tokenizer)
+        last_error: Exception | None = None
+        for quant in ("int8", None):
             try:
-                self.temp_model_dir = prepare_onnx_asr_model_dir(self.model_path, self.explicit_tokenizer)
-                last_error: Exception | None = None
-                for quant in ("int8", None):
-                    try:
-                        self.onnx_asr_model = onnx_asr.load_model(
-                            "nemo-parakeet-tdt-0.6b-v3",
-                            path=str(self.temp_model_dir),
-                            quantization=quant,
-                            providers=["CPUExecutionProvider"],
-                        )
-                        break
-                    except Exception as exc:
-                        last_error = exc
-                if self.onnx_asr_model is not None:
-                    return
-                if last_error is not None:
-                    raise last_error
-            except Exception:
-                self.onnx_asr_model = None
+                self.onnx_asr_model = onnx_asr.load_model(
+                    "nemo-parakeet-tdt-0.6b-v3",
+                    path=str(self.temp_model_dir),
+                    quantization=quant,
+                    providers=["CPUExecutionProvider"],
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+        if self.onnx_asr_model is not None:
+            return
 
-        self.np, ort = load_core_dependencies()
-        self.session = load_session(self.model_path, ort)
-        validate_setup(self.session, self.model_path, self.explicit_tokenizer)
+        details = str(last_error) if last_error is not None else "Unknown onnx-asr model load failure."
+        raise RunnerError(
+            "MODEL_LOAD_ERROR: Failed to initialize Parakeet onnx-asr model bundle. "
+            f"Details: {details}"
+        )
 
     def transcribe(self, audio_path: Path) -> str:
-        if self.onnx_asr_model is not None:
-            result = self.onnx_asr_model.recognize(str(audio_path), sample_rate=16000)
-            text = str(result).strip()
-            if text:
-                return text
-            raise RunnerError("INFERENCE_ERROR: onnx-asr returned empty transcript.")
-
-        if self.np is None or self.session is None:
+        if self.onnx_asr_model is None:
             raise RunnerError("INFERENCE_ERROR: Inference engine is not initialized.")
 
-        audio = read_wav_mono_16k(audio_path, self.np)
-        session_inputs = self.session.get_inputs()
-        audio_input = pick_audio_input(session_inputs)
-        length_input = pick_length_input(session_inputs)
-
-        feeds = {audio_input.name: make_audio_tensor(audio, audio_input, self.np)}
-        if length_input is not None:
-            feeds[length_input.name] = make_length_tensor(audio.shape[0], length_input, self.np)
-
-        try:
-            outputs = self.session.run(None, feeds)
-        except Exception as exc:
-            raise RunnerError(
-                "INFERENCE_ERROR: ONNX runtime execution failed. "
-                "Ensure the model is a Parakeet CTC ONNX export expecting raw audio input. "
-                f"Details: {exc}"
-            ) from exc
-
-        if not outputs:
-            raise RunnerError("MODEL_OUTPUT_ERROR: ONNX session produced no output tensors.")
-
-        meta = model_metadata(self.session)
-        token_ids = infer_token_ids(outputs, meta, self.np)
-        return decode_tokens(token_ids, meta, self.model_path, self.explicit_tokenizer)
+        result = self.onnx_asr_model.recognize(str(audio_path), sample_rate=16000)
+        text = str(result).strip()
+        if text:
+            return text
+        raise RunnerError("INFERENCE_ERROR: onnx-asr returned empty transcript.")
 
 
 def run_inference(
