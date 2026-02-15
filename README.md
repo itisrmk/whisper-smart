@@ -12,6 +12,8 @@ In **Settings → Provider**, the app now includes explicit model presets:
 
 If the selected provider is missing runtime/model files, the app degrades gracefully to Apple Speech and shows direct install/download actions in the same settings screen.
 
+Cloud API keys are normalized on paste/save and stored in macOS Keychain when available (with safe fallback handling for constrained environments).
+
 Whisper and Parakeet setup is managed in-app (runtime + model downloads), but host prerequisites still apply: Apple Command Line Tools are required for local builds, `make` is required for Whisper runtime build, and Python 3 with `venv` support is required for Parakeet runtime bootstrap. The app now fails fast with actionable guidance when these are missing.
 
 ## App icon
@@ -37,9 +39,21 @@ Output:
 bash scripts/run_qa_smoke.sh
 bash scripts/typecheck.sh
 bash scripts/swift_test_check.sh
+bash scripts/release_gate.sh
 ```
 
 `swift_test_check.sh` intentionally skips `swift test` when no SwiftPM tests exist under `Tests/` and reports that decision explicitly to avoid false failures.
+
+## Phase Execution Roadmap
+
+- 5-phase execution tracker: `docs/PHASE_EXECUTION_ROADMAP.md`
+- Phase 5 QA + release checklist: `docs/PHASE5_QA_RELEASE_READINESS.md`
+- Provider/performance plan: `docs/PERF_AND_PROVIDER_EXPANSION_PLAN.md`
+
+## GitHub Automation
+
+- CI validation workflow: `.github/workflows/macos-ci.yml`
+- Manual DMG release workflow: `.github/workflows/release-dmg.yml` (runs full release gate + includes rollback reference)
 
 ## Notes
 

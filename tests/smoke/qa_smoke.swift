@@ -305,7 +305,67 @@ private func runOpenAIAPIKeyNormalizationSmoke() throws {
     )
 
     let defaults = UserDefaults.standard
-    let key = "provider.openAI.apiKey"
+    let legacyKey = "provider.openAI.apiKey"
+    let previousLegacyRaw = defaults.string(forKey: legacyKey)
+    let environmentKey = DictationProviderPolicy.normalizedOpenAIAPIKey(
+        ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
+    )
+    let previousEffective = DictationProviderPolicy.openAIAPIKey
+    defer {
+        if let previousLegacyRaw {
+            defaults.set(previousLegacyRaw, forKey: legacyKey)
+        } else {
+            defaults.removeObject(forKey: legacyKey)
+        }
+
+        if !previousEffective.isEmpty, previousEffective != environmentKey {
+            DictationProviderPolicy.openAIAPIKey = previousEffective
+        } else {
+            DictationProviderPolicy.openAIAPIKey = ""
+        }
+    }
+
+    DictationProviderPolicy.openAIAPIKey = " Bearer sk-live-\nxyz "
+    try expect(
+        DictationProviderPolicy.openAIAPIKey == "sk-live-xyz",
+        "OpenAI API key should persist in normalized form."
+    )
+
+    DictationProviderPolicy.openAIAPIKey = " \n "
+    let effectiveAfterClear = DictationProviderPolicy.openAIAPIKey
+    if environmentKey.isEmpty {
+        try expect(
+            effectiveAfterClear.isEmpty,
+            "Empty OpenAI API key should clear persisted storage."
+        )
+    } else {
+        try expect(
+            effectiveAfterClear == environmentKey,
+            "When env key is present, empty persisted key should fall back to environment value."
+        )
+    }
+
+    try expect(
+        DictationProviderPolicy.validateOpenAIAPIKey("sk-proj-abcdefghijklmnopqrstuvwxyz123456") == .valid,
+        "Expected modern sk-proj key format to validate."
+    )
+    try expect(
+        DictationProviderPolicy.validateOpenAIAPIKey("sk-short") == .suspiciousPrefix,
+        "Expected short sk- key to be flagged as suspicious."
+    )
+    switch DictationProviderPolicy.validateOpenAIAPIKey("abc!!") {
+    case .malformed:
+        break
+    default:
+        throw SmokeFailure.assertion("Expected invalid character key to be malformed.")
+    }
+
+    print("✓ OpenAI API key normalization smoke passed")
+}
+
+private func runGlobalWritingStyleFallbackSmoke() throws {
+    let defaults = UserDefaults.standard
+    let key = "workflow.defaultWritingStyle"
     let previousRaw = defaults.string(forKey: key)
     defer {
         if let previousRaw {
@@ -315,19 +375,67 @@ private func runOpenAIAPIKeyNormalizationSmoke() throws {
         }
     }
 
-    DictationProviderPolicy.openAIAPIKey = " Bearer sk-live-\nxyz "
-    try expect(
-        defaults.string(forKey: key) == "sk-live-xyz",
-        "OpenAI API key should be stored in normalized form."
+    DictationWorkflowSettings.defaultWritingStyle = .concise
+
+    let input = "Please note that this is kind of a sample"
+    let output = AppStyleProfileProcessor().process(
+        input,
+        context: TranscriptPostProcessingContext(isFinal: true, timestamp: Date())
     )
 
-    DictationProviderPolicy.openAIAPIKey = " \n "
     try expect(
-        defaults.object(forKey: key) == nil,
-        "Empty OpenAI API key should clear persisted storage."
+        output.lowercased() == "this is a sample",
+        "Global writing style fallback should apply concise cleanup when no per-app override exists."
     )
 
-    print("✓ OpenAI API key normalization smoke passed")
+    print("✓ Global writing style fallback smoke passed")
+}
+
+private func runDomainPresetFallbackSmoke() throws {
+    let defaults = UserDefaults.standard
+    let writingStyleKey = "workflow.defaultWritingStyle"
+    let domainPresetKey = "workflow.defaultDomainPreset"
+    let previousWritingStyle = defaults.string(forKey: writingStyleKey)
+    let previousDomainPreset = defaults.string(forKey: domainPresetKey)
+    defer {
+        if let previousWritingStyle {
+            defaults.set(previousWritingStyle, forKey: writingStyleKey)
+        } else {
+            defaults.removeObject(forKey: writingStyleKey)
+        }
+        if let previousDomainPreset {
+            defaults.set(previousDomainPreset, forKey: domainPresetKey)
+        } else {
+            defaults.removeObject(forKey: domainPresetKey)
+        }
+    }
+
+    DictationWorkflowSettings.defaultWritingStyle = .neutral
+    DictationWorkflowSettings.defaultDomainPreset = .notes
+
+    let conciseInput = "Please note that this is kind of a summary"
+    let conciseOutput = AppStyleProfileProcessor().process(
+        conciseInput,
+        context: TranscriptPostProcessingContext(isFinal: true, timestamp: Date())
+    )
+    try expect(
+        conciseOutput.lowercased() == "this is a summary",
+        "Notes domain preset should map to concise fallback style."
+    )
+
+    DictationWorkflowSettings.defaultDomainPreset = .coding
+    let codingInput = "open paren close paren"
+    let codingOutput = AppStyleProfileProcessor().process(
+        codingInput,
+        context: TranscriptPostProcessingContext(isFinal: true, timestamp: Date())
+    )
+    let codingCompacted = codingOutput.replacingOccurrences(of: " ", with: "")
+    try expect(
+        codingCompacted.contains("()"),
+        "Coding domain preset should apply developer symbol transforms."
+    )
+
+    print("✓ Domain preset fallback smoke passed")
 }
 
 @main
@@ -342,6 +450,8 @@ struct QASmokeMain {
             try runParakeetArtifactMetadataSmoke()
             try runTokenizerValidationSmoke()
             try runOpenAIAPIKeyNormalizationSmoke()
+            try runGlobalWritingStyleFallbackSmoke()
+            try runDomainPresetFallbackSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {
             fputs("Smoke test failure: \(error)\n", stderr)

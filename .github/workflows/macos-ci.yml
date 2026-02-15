@@ -1,0 +1,28 @@
+name: macOS CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  validate:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift Version
+        run: swift --version
+
+      - name: Typecheck
+        run: bash scripts/typecheck.sh
+
+      - name: QA Smoke
+        run: bash scripts/run_qa_smoke.sh
+
+      - name: Build Release
+        run: swift build -c release

@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var recordStartAt: Date?
     private var transcribeStartAt: Date?
+    private var recordingDurationMsForLog: Int?
     private var latestTranscriptForLog: String = ""
     private var activeAppNameForLog: String = "Unknown"
     private var activeProviderNameForLog: String = ""
@@ -462,6 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .recording:
             recordStartAt = now
             transcribeStartAt = nil
+            recordingDurationMsForLog = nil
             latestTranscriptForLog = ""
             activeAppNameForLog = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
             // Snapshot provider name at session start so transcript logs reflect
@@ -470,31 +472,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activityBadgeLabel = "REC"
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
         case .transcribing:
+            if let recordStartAt {
+                recordingDurationMsForLog = Int(now.timeIntervalSince(recordStartAt) * 1_000)
+            }
             transcribeStartAt = now
             activityBadgeLabel = "STT"
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
         case .success:
-            let latencyMs: Int?
+            let transcribeLatencyMs: Int?
             if let transcribeStartAt {
                 let ms = Int(now.timeIntervalSince(transcribeStartAt) * 1_000)
-                latencyMs = ms
+                transcribeLatencyMs = ms
                 activityBadgeLabel = "\(ms)ms"
             } else {
-                latencyMs = nil
+                transcribeLatencyMs = nil
                 activityBadgeLabel = "Done"
+            }
+            let endToEndMs: Int?
+            if let recordStartAt {
+                endToEndMs = Int(now.timeIntervalSince(recordStartAt) * 1_000)
+            } else {
+                endToEndMs = nil
             }
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
 
             TranscriptLogStore.shared.append(
                 provider: activeProviderNameForLog.isEmpty ? sttProvider.displayName : activeProviderNameForLog,
                 appName: activeAppNameForLog,
-                durationMs: latencyMs,
+                durationMs: transcribeLatencyMs,
                 text: latestTranscriptForLog,
+                status: "inserted"
+            )
+            DictationSessionMetricsStore.shared.append(
+                provider: activeProviderNameForLog.isEmpty ? sttProvider.displayName : activeProviderNameForLog,
+                appName: activeAppNameForLog,
+                recordingDurationMs: recordingDurationMsForLog,
+                transcribingDurationMs: transcribeLatencyMs,
+                endToEndDurationMs: endToEndMs,
                 status: "inserted"
             )
 
             recordStartAt = nil
             transcribeStartAt = nil
+            recordingDurationMsForLog = nil
             latestTranscriptForLog = ""
             activeProviderNameForLog = ""
         case .idle:
@@ -502,10 +522,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
             recordStartAt = nil
             transcribeStartAt = nil
+            recordingDurationMsForLog = nil
             activeProviderNameForLog = ""
         case .error:
             activityBadgeLabel = "Issue"
             bubbleState.updateBadges(activity: activityBadgeLabel, health: healthBadgeLabel)
+            let endToEndMs: Int?
+            if let recordStartAt {
+                endToEndMs = Int(now.timeIntervalSince(recordStartAt) * 1_000)
+            } else {
+                endToEndMs = nil
+            }
+            let transcribeLatencyMs: Int?
+            if let transcribeStartAt {
+                transcribeLatencyMs = Int(now.timeIntervalSince(transcribeStartAt) * 1_000)
+            } else {
+                transcribeLatencyMs = nil
+            }
             if !latestTranscriptForLog.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 TranscriptLogStore.shared.append(
                     provider: activeProviderNameForLog.isEmpty ? sttProvider.displayName : activeProviderNameForLog,
@@ -515,8 +548,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     status: "saved_error"
                 )
             }
+            DictationSessionMetricsStore.shared.append(
+                provider: activeProviderNameForLog.isEmpty ? sttProvider.displayName : activeProviderNameForLog,
+                appName: activeAppNameForLog,
+                recordingDurationMs: recordingDurationMsForLog,
+                transcribingDurationMs: transcribeLatencyMs,
+                endToEndDurationMs: endToEndMs,
+                status: "error"
+            )
             recordStartAt = nil
             transcribeStartAt = nil
+            recordingDurationMsForLog = nil
             latestTranscriptForLog = ""
             activeProviderNameForLog = ""
         }

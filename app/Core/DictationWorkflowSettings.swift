@@ -20,9 +20,66 @@ enum DictationWorkflowSettings {
         }
     }
 
+    enum WritingStyle: String, CaseIterable, Identifiable {
+        case neutral
+        case formal
+        case casual
+        case concise
+        case developer
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .neutral: return "Neutral"
+            case .formal: return "Formal"
+            case .casual: return "Casual"
+            case .concise: return "Concise"
+            case .developer: return "Developer"
+            }
+        }
+    }
+
+    enum DomainPreset: String, CaseIterable, Identifiable {
+        case general
+        case email
+        case support
+        case coding
+        case notes
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .general: return "General"
+            case .email: return "Email"
+            case .support: return "Support"
+            case .coding: return "Coding"
+            case .notes: return "Notes"
+            }
+        }
+
+        var helperText: String {
+            switch self {
+            case .general:
+                return "Use your selected writing style without extra domain rules."
+            case .email:
+                return "Biases output toward formal and complete email-ready phrasing."
+            case .support:
+                return "Biases output for clear, polite customer support responses."
+            case .coding:
+                return "Biases output for developer symbols and code-oriented phrasing."
+            case .notes:
+                return "Biases output for concise note-taking style."
+            }
+        }
+    }
+
     private enum Key {
         static let silenceTimeoutSeconds = "workflow.silenceTimeoutSeconds"
         static let insertionMode = "workflow.insertionMode"
+        static let defaultWritingStyle = "workflow.defaultWritingStyle"
+        static let defaultDomainPreset = "workflow.defaultDomainPreset"
         static let perAppDefaultsJSON = "workflow.perAppDefaultsJSON"
         static let snippetsJSON = "workflow.snippetsJSON"
         static let correctionDictionaryJSON = "workflow.correctionDictionaryJSON"
@@ -54,6 +111,45 @@ enum DictationWorkflowSettings {
         }
         set {
             defaults.set(newValue.rawValue, forKey: Key.insertionMode)
+        }
+    }
+
+    static var defaultWritingStyle: WritingStyle {
+        get {
+            guard let raw = defaults.string(forKey: Key.defaultWritingStyle),
+                  let style = WritingStyle(rawValue: raw) else {
+                return .neutral
+            }
+            return style
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Key.defaultWritingStyle)
+        }
+    }
+
+    static var defaultDomainPreset: DomainPreset {
+        get {
+            guard let raw = defaults.string(forKey: Key.defaultDomainPreset),
+                  let preset = DomainPreset(rawValue: raw) else {
+                return .general
+            }
+            return preset
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Key.defaultDomainPreset)
+        }
+    }
+
+    static var effectiveDefaultWritingStyle: WritingStyle {
+        switch defaultDomainPreset {
+        case .general:
+            return defaultWritingStyle
+        case .email, .support:
+            return .formal
+        case .coding:
+            return .developer
+        case .notes:
+            return .concise
         }
     }
 
@@ -163,10 +259,27 @@ enum DictationProviderPolicy {
 
     private enum Key {
         static let cloudFallbackEnabled = "provider.cloudFallbackEnabled"
-        static let openAIAPIKey = "provider.openAI.apiKey"
+        static let openAIAPIKeyLegacy = "provider.openAI.apiKey"
         static let whisperCLIPath = "provider.whisper.cliPath"
         static let whisperModelPath = "provider.whisper.modelPath"
         static let whisperModelTier = "provider.whisper.modelTier"
+    }
+
+    private enum SecureAccount {
+        static let openAIAPIKey = "provider.openAI.apiKey"
+    }
+
+    enum OpenAIAPIKeyValidation: Equatable {
+        case empty
+        case valid
+        case suspiciousPrefix
+        case malformed(reason: String)
+    }
+
+    enum OpenAIAPIKeyPersistenceResult: Equatable {
+        case cleared
+        case savedSecurely
+        case savedUserDefaultsFallback
     }
 
     static var cloudFallbackEnabled: Bool {
@@ -176,20 +289,47 @@ enum DictationProviderPolicy {
 
     static var openAIAPIKey: String {
         get {
-            let stored = normalizedOpenAIAPIKey(defaults.string(forKey: Key.openAIAPIKey) ?? "")
+            let stored = normalizedOpenAIAPIKey(
+                SecureCredentialStore.readString(account: SecureAccount.openAIAPIKey) ?? ""
+            )
             if !stored.isEmpty {
                 return stored
             }
+
+            // One-time migration path from legacy UserDefaults storage.
+            let legacy = normalizedOpenAIAPIKey(defaults.string(forKey: Key.openAIAPIKeyLegacy) ?? "")
+            if !legacy.isEmpty {
+                let persisted = SecureCredentialStore.writeString(legacy, account: SecureAccount.openAIAPIKey)
+                if persisted {
+                    defaults.removeObject(forKey: Key.openAIAPIKeyLegacy)
+                }
+                return legacy
+            }
+
             return normalizedOpenAIAPIKey(ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
         }
         set {
-            let normalized = normalizedOpenAIAPIKey(newValue)
-            if normalized.isEmpty {
-                defaults.removeObject(forKey: Key.openAIAPIKey)
-            } else {
-                defaults.set(normalized, forKey: Key.openAIAPIKey)
-            }
+            _ = persistOpenAIAPIKey(newValue)
         }
+    }
+
+    @discardableResult
+    static func persistOpenAIAPIKey(_ raw: String) -> OpenAIAPIKeyPersistenceResult {
+        let normalized = normalizedOpenAIAPIKey(raw)
+        if normalized.isEmpty {
+            _ = SecureCredentialStore.delete(account: SecureAccount.openAIAPIKey)
+            defaults.removeObject(forKey: Key.openAIAPIKeyLegacy)
+            return .cleared
+        }
+
+        if SecureCredentialStore.writeString(normalized, account: SecureAccount.openAIAPIKey) {
+            defaults.removeObject(forKey: Key.openAIAPIKeyLegacy)
+            return .savedSecurely
+        }
+
+        // Fallback for environments where Keychain APIs are unavailable.
+        defaults.set(normalized, forKey: Key.openAIAPIKeyLegacy)
+        return .savedUserDefaultsFallback
     }
 
     static func normalizedOpenAIAPIKey(_ raw: String) -> String {
@@ -214,6 +354,31 @@ enum DictationProviderPolicy {
         // OpenAI keys do not contain spaces/newlines; remove paste artifacts.
         key = key.components(separatedBy: .whitespacesAndNewlines).joined()
         return key
+    }
+
+    static func validateOpenAIAPIKey(_ raw: String) -> OpenAIAPIKeyValidation {
+        let key = normalizedOpenAIAPIKey(raw)
+        guard !key.isEmpty else {
+            return .empty
+        }
+
+        guard key.range(of: #"^[A-Za-z0-9\-_]+$"#, options: .regularExpression) != nil else {
+            return .malformed(reason: "Contains invalid characters.")
+        }
+
+        // Current OpenAI key families include `sk-` variants (e.g. sk-proj-*).
+        if key.hasPrefix("sk-") {
+            if key.count < 20 {
+                return .suspiciousPrefix
+            }
+            return .valid
+        }
+
+        if key.count >= 20 {
+            return .suspiciousPrefix
+        }
+
+        return .malformed(reason: "Expected an OpenAI key starting with sk-.")
     }
 
     static var whisperCLIPath: String {

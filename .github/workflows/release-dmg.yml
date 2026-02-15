@@ -1,0 +1,89 @@
+name: Release DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number without v prefix (e.g. 0.2.18)"
+        required: true
+        type: string
+      notes:
+        description: "Release notes"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Release Gate
+        run: bash scripts/release_gate.sh
+
+      - name: Resolve Previous Tag
+        id: previous_tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          CURRENT_TAG="v${VERSION}"
+          PREVIOUS_TAG="$(git tag --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n 1 || true)"
+          echo "value=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Compose Release Notes
+        id: release_notes
+        env:
+          VERSION: ${{ inputs.version }}
+          INPUT_NOTES: ${{ inputs.notes }}
+          PREVIOUS_TAG: ${{ steps.previous_tag.outputs.value }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE="$(mktemp)"
+          if [[ -n "${INPUT_NOTES}" ]]; then
+            printf "%s\n\n" "${INPUT_NOTES}" >> "$NOTES_FILE"
+          else
+            printf "Automated DMG release for v%s.\n\n" "${VERSION}" >> "$NOTES_FILE"
+          fi
+          printf "Release artifact: \`.build/release/Whisper-Smart-mac.dmg\`\n\n" >> "$NOTES_FILE"
+          if [[ -n "${PREVIOUS_TAG}" ]]; then
+            printf "Rollback reference: https://github.com/%s/releases/tag/%s\n" "${REPOSITORY}" "${PREVIOUS_TAG}" >> "$NOTES_FILE"
+          else
+            printf "Rollback reference: none (first tagged release).\n" >> "$NOTES_FILE"
+          fi
+          echo "path=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and Push Tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists locally."
+          else
+            git tag "${TAG}"
+          fi
+          if git ls-remote --tags origin "${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists on origin."
+          else
+            git push origin "${TAG}"
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: v${{ inputs.version }}
+          body_path: ${{ steps.release_notes.outputs.path }}
+          files: .build/release/Whisper-Smart-mac.dmg

@@ -221,31 +221,48 @@ struct AppStyleProfileProcessor: TranscriptPostProcessor {
 
         let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
         let profiles = AdvancedJSONParser.objectMap(from: DictationWorkflowSettings.perAppDefaultsJSON)
-        guard let profile = profiles[bundleID] else { return text }
+        let profile = profiles[bundleID]
 
         var output = text
-        let style = profile["style"]?.lowercased() ?? ""
+        let style = normalizedStyle(
+            profileStyle: profile?["style"]?.lowercased(),
+            fallback: DictationWorkflowSettings.effectiveDefaultWritingStyle.rawValue
+        )
 
-        switch style {
-        case "formal":
-            output = formalize(output)
-        case "concise":
-            output = makeConcise(output)
-        case "developer":
-            output = DeveloperDictationProcessor().process(output, context: context)
-        default:
-            break
-        }
+        output = applyStyle(style, to: output, context: context)
 
-        if let prefix = profile["prefix"], !prefix.isEmpty, !output.hasPrefix(prefix) {
+        if let prefix = profile?["prefix"], !prefix.isEmpty, !output.hasPrefix(prefix) {
             output = prefix + output
         }
 
-        if let suffix = profile["suffix"], !suffix.isEmpty, !output.hasSuffix(suffix) {
+        if let suffix = profile?["suffix"], !suffix.isEmpty, !output.hasSuffix(suffix) {
             output = output + suffix
         }
 
         return output
+    }
+
+    private func normalizedStyle(profileStyle: String?, fallback: String) -> String {
+        let selected = profileStyle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !selected.isEmpty {
+            return selected
+        }
+        return fallback
+    }
+
+    private func applyStyle(_ style: String, to text: String, context: TranscriptPostProcessingContext) -> String {
+        switch style {
+        case "formal":
+            return formalize(text)
+        case "concise":
+            return makeConcise(text)
+        case "developer":
+            return DeveloperDictationProcessor(forceEnabled: true).process(text, context: context)
+        case "casual", "neutral":
+            return text
+        default:
+            return text
+        }
     }
 
     private func formalize(_ text: String) -> String {
@@ -274,8 +291,14 @@ struct AppStyleProfileProcessor: TranscriptPostProcessor {
 }
 
 struct DeveloperDictationProcessor: TranscriptPostProcessor {
+    private let forceEnabled: Bool
+
+    init(forceEnabled: Bool = false) {
+        self.forceEnabled = forceEnabled
+    }
+
     func process(_ text: String, context: TranscriptPostProcessingContext) -> String {
-        guard DictationWorkflowSettings.developerModeEnabled else { return text }
+        guard forceEnabled || DictationWorkflowSettings.developerModeEnabled else { return text }
         guard context.isFinal else { return text }
 
         var output = text

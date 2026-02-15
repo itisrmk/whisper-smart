@@ -2,70 +2,6 @@ import SwiftUI
 import Carbon.HIToolbox
 import AppKit
 
-private final class FlippedDocumentView: NSView {
-    override var isFlipped: Bool { true }
-}
-
-private struct NoScrollerScrollView<Content: View>: NSViewRepresentable {
-    let content: Content
-
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(content: content)
-    }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.scrollerStyle = .overlay
-        scrollView.autohidesScrollers = true
-        scrollView.hasVerticalScroller = false
-        scrollView.hasHorizontalScroller = false
-        scrollView.verticalScroller?.isHidden = true
-        scrollView.horizontalScroller?.isHidden = true
-        scrollView.automaticallyAdjustsContentInsets = false
-        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-
-        let documentView = FlippedDocumentView()
-        documentView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = documentView
-
-        let hostingView = context.coordinator.hostingView
-        hostingView.translatesAutoresizingMaskIntoConstraints = false
-        documentView.addSubview(hostingView)
-
-        NSLayoutConstraint.activate([
-            hostingView.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
-            hostingView.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
-            hostingView.topAnchor.constraint(equalTo: documentView.topAnchor),
-            hostingView.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
-            hostingView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-        ])
-
-        return scrollView
-    }
-
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.hostingView.rootView = content
-        scrollView.hasVerticalScroller = false
-        scrollView.hasHorizontalScroller = false
-        scrollView.verticalScroller?.isHidden = true
-        scrollView.horizontalScroller?.isHidden = true
-    }
-
-    final class Coordinator {
-        let hostingView: NSHostingView<Content>
-
-        init(content: Content) {
-            hostingView = NSHostingView(rootView: content)
-        }
-    }
-}
-
 /// Root settings view hosted in its own `NSWindow`.
 /// Dark neumorphic design with soft raised cards, inset controls,
 /// and an iOS-like rounded aesthetic.
@@ -80,11 +16,12 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: VFSpacing.md) {
                 SettingsPaneHeader(selectedTab: selectedTab)
 
-                NoScrollerScrollView {
+                ScrollView(.vertical, showsIndicators: false) {
                     selectedTabContent
                         .frame(maxWidth: .infinity, alignment: .top)
                         .padding(.bottom, VFSpacing.xxl)
                 }
+                .scrollIndicators(.hidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .padding(VFSpacing.md)
@@ -307,14 +244,14 @@ private struct SidebarNavItem: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(
-                            isSelected ? VFColor.accentFallback.opacity(0.55) : VFColor.glassBorder.opacity(hovering ? 0.5 : 0),
+                            isSelected ? VFColor.glassBorder.opacity(0.95) : VFColor.glassBorder.opacity(hovering ? 0.5 : 0),
                             lineWidth: isSelected ? 1 : 0.8
                         )
                 )
         )
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 999, style: .continuous)
-                .fill(VFColor.accentFallback.opacity(isSelected ? 0.95 : 0))
+                .fill(VFColor.textPrimary.opacity(isSelected ? 0.36 : 0))
                 .frame(width: 2)
                 .padding(.vertical, 8)
         }
@@ -804,6 +741,8 @@ private struct GeneralSettingsTab: View {
 
     @State private var silenceTimeoutSeconds = DictationWorkflowSettings.silenceTimeoutSeconds
     @State private var insertionMode = DictationWorkflowSettings.insertionMode
+    @State private var defaultWritingStyle = DictationWorkflowSettings.defaultWritingStyle
+    @State private var defaultDomainPreset = DictationWorkflowSettings.defaultDomainPreset
     @State private var perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
     @State private var snippetsJSON = DictationWorkflowSettings.snippetsJSON
     @State private var correctionDictionaryJSON = DictationWorkflowSettings.correctionDictionaryJSON
@@ -832,7 +771,7 @@ private struct GeneralSettingsTab: View {
         var value: String = ""
     }
 
-    private let profileStyles = ["formal", "casual", "concise", "developer"]
+    private let profileStyles = ["neutral", "formal", "casual", "concise", "developer"]
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
@@ -1005,6 +944,59 @@ private struct GeneralSettingsTab: View {
 
                     NeuDivider()
 
+                    HStack {
+                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                            Text("Default writing style")
+                                .font(VFFont.settingsBody)
+                                .foregroundStyle(VFColor.textPrimary)
+                            Text("Used when no per-app profile matches the active app")
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+                        }
+                        Spacer()
+                        Menu {
+                            ForEach(DictationWorkflowSettings.WritingStyle.allCases) { style in
+                                Button(style.displayName) {
+                                    defaultWritingStyle = style
+                                    DictationWorkflowSettings.defaultWritingStyle = style
+                                }
+                            }
+                        } label: {
+                            Text(defaultWritingStyle.displayName)
+                                .glassSelectPill()
+                        }
+                        .menuStyle(.borderlessButton)
+                    }
+
+                    NeuDivider()
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                            Text("Dictation domain preset")
+                                .font(VFFont.settingsBody)
+                                .foregroundStyle(VFColor.textPrimary)
+                            Text(defaultDomainPreset.helperText)
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        Menu {
+                            ForEach(DictationWorkflowSettings.DomainPreset.allCases) { preset in
+                                Button(preset.displayName) {
+                                    defaultDomainPreset = preset
+                                    DictationWorkflowSettings.defaultDomainPreset = preset
+                                }
+                            }
+                        } label: {
+                            Text(defaultDomainPreset.displayName)
+                                .glassSelectPill()
+                        }
+                        .menuStyle(.borderlessButton)
+                    }
+
+                    NeuDivider()
+
                     VStack(alignment: .leading, spacing: VFSpacing.sm) {
                         Text("Custom AI instructions (cloud)")
                             .font(VFFont.settingsBody)
@@ -1096,6 +1088,8 @@ private struct GeneralSettingsTab: View {
             permSnap = PermissionDiagnostics.snapshot()
             silenceTimeoutSeconds = DictationWorkflowSettings.silenceTimeoutSeconds
             insertionMode = DictationWorkflowSettings.insertionMode
+            defaultWritingStyle = DictationWorkflowSettings.defaultWritingStyle
+            defaultDomainPreset = DictationWorkflowSettings.defaultDomainPreset
             perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
             snippetsJSON = DictationWorkflowSettings.snippetsJSON
             correctionDictionaryJSON = DictationWorkflowSettings.correctionDictionaryJSON
@@ -2458,22 +2452,28 @@ private struct ProviderSettingsTab: View {
     private func persistOpenAIAPIKey(_ explicitKey: String? = nil) {
         let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(explicitKey ?? openAIAPIKey)
         openAIAPIKey = normalized
-        DictationProviderPolicy.openAIAPIKey = normalized
+        let persistenceResult = DictationProviderPolicy.persistOpenAIAPIKey(normalized)
         DictationProviderPolicy.cloudFallbackEnabled = true
         NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
 
-        if normalized.isEmpty {
+        switch DictationProviderPolicy.validateOpenAIAPIKey(normalized) {
+        case .empty:
             openAIAPIKeyStatusSeverity = .warning
             openAIAPIKeyStatusMessage = "No key detected. Paste your OpenAI key and save again."
-            return
+        case .valid:
+            openAIAPIKeyStatusSeverity = .info
+            openAIAPIKeyStatusMessage = "API key saved securely."
+        case .suspiciousPrefix:
+            openAIAPIKeyStatusSeverity = .warning
+            openAIAPIKeyStatusMessage = "API key saved, but format looks unusual. Check key length/prefix."
+        case .malformed(let reason):
+            openAIAPIKeyStatusSeverity = .warning
+            openAIAPIKeyStatusMessage = "API key saved, but may be invalid. \(reason)"
         }
 
-        if normalized.lowercased().hasPrefix("sk-") {
-            openAIAPIKeyStatusSeverity = .info
-            openAIAPIKeyStatusMessage = "API key saved."
-        } else {
+        if persistenceResult == .savedUserDefaultsFallback {
             openAIAPIKeyStatusSeverity = .warning
-            openAIAPIKeyStatusMessage = "API key saved, but format looks unusual. Expected prefix: sk-"
+            openAIAPIKeyStatusMessage = "API key saved, but secure Keychain storage was unavailable. Using local fallback storage."
         }
     }
 
@@ -2998,6 +2998,7 @@ private struct ModelDownloadRow: View {
 
 private struct TranscriptHistoryTab: View {
     @ObservedObject private var store = TranscriptLogStore.shared
+    @ObservedObject private var metricsStore = DictationSessionMetricsStore.shared
     @State private var query: String = ""
 
     private var filteredEntries: [TranscriptLogEntry] {
@@ -3008,6 +3009,10 @@ private struct TranscriptHistoryTab: View {
             $0.provider.lowercased().contains(q) ||
             $0.appName.lowercased().contains(q)
         }
+    }
+
+    private var metricsSummary: DictationSessionMetricsSummary {
+        metricsStore.summary(last: 200)
     }
 
     var body: some View {
@@ -3033,6 +3038,9 @@ private struct TranscriptHistoryTab: View {
                             metricChip(title: "Entries", value: "\(store.entries.count)")
                             metricChip(title: "Success", value: "\(successRatePercent)%")
                             metricChip(title: "Avg STT", value: averageLatencyLabel)
+                            metricChip(title: "Avg E2E", value: averageEndToEndLabel)
+                            metricChip(title: "P95 E2E", value: p95EndToEndLabel)
+                            metricChip(title: "Latency SLO", value: sloLabel, tint: sloTint)
                             if !topProviderLabel.isEmpty {
                                 metricChip(title: "Top provider", value: topProviderLabel)
                             }
@@ -3126,14 +3134,14 @@ private struct TranscriptHistoryTab: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private func metricChip(title: String, value: String) -> some View {
+    private func metricChip(title: String, value: String, tint: Color = VFColor.textPrimary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 9, weight: .semibold, design: .rounded))
                 .foregroundStyle(VFColor.textTertiary)
             Text(value)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(VFColor.textPrimary)
+                .foregroundStyle(tint)
                 .lineLimit(1)
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -3166,6 +3174,35 @@ private struct TranscriptHistoryTab: View {
         guard !durations.isEmpty else { return "—" }
         let avg = durations.reduce(0, +) / durations.count
         return "\(avg)ms"
+    }
+
+    private var averageEndToEndLabel: String {
+        guard let avg = metricsSummary.averageEndToEndMs else { return "—" }
+        return "\(avg)ms"
+    }
+
+    private var p95EndToEndLabel: String {
+        guard let p95 = metricsSummary.p95EndToEndMs else { return "—" }
+        return "\(p95)ms"
+    }
+
+    private var sloLabel: String {
+        guard let p95Pass = metricsSummary.p95MeetsSLO,
+              let avgPass = metricsSummary.averageMeetsSLO else {
+            return "N/A"
+        }
+        return (p95Pass && avgPass) ? "On target" : "Needs tuning"
+    }
+
+    private var sloTint: Color {
+        switch (metricsSummary.averageMeetsSLO, metricsSummary.p95MeetsSLO) {
+        case (.some(true), .some(true)):
+            return VFColor.success
+        case (.some(false), _), (_, .some(false)):
+            return VFColor.error
+        default:
+            return VFColor.textSecondary
+        }
     }
 
     private var topProviderLabel: String {
