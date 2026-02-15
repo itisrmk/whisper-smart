@@ -6,6 +6,16 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.19</title>
+      <description>Whisper Smart v0.2.19
+- Fixed Sparkle auto-update flow so background checks are not forced on every launch.
+- Added automated appcast generation/publish in release pipeline.
+- Corrected in-app feed URL and maintained compatibility for older clients.</description>
+      <pubDate>Sun, 15 Feb 2026 23:23:30 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.19/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.19" sparkle:version="202602151622" length="4702261" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.18</title>
       <description>Whisper Smart v0.2.18
 - Completed all 5 roadmap phases across UX stability, performance telemetry, cloud hardening, dictation quality, and release operations.
