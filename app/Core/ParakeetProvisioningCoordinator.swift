@@ -10,7 +10,7 @@ actor ParakeetProvisioningCoordinator {
     private let sourceStore = ParakeetModelSourceConfigurationStore.shared
     private let runtimeBootstrap = ParakeetRuntimeBootstrapManager.shared
     private let telemetry = ParakeetTelemetryStore.shared
-    private let backgroundState = ModelDownloadState(variant: .parakeetCTC06B)
+    private let backgroundState = ModelDownloadState.sharedParakeet
 
     private var modelRetryTask: Task<Void, Never>?
     private var runtimeRetryTask: Task<Void, Never>?

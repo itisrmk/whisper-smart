@@ -1385,7 +1385,7 @@ private struct ProviderSettingsTab: View {
     }
 
     @State private var selectedKind: STTProviderKind = STTProviderKind.loadSelection()
-    @StateObject private var downloadState = ModelDownloadState(variant: .parakeetCTC06B)
+    @StateObject private var downloadState = ModelDownloadState.sharedParakeet
     @StateObject private var whisperInstaller = WhisperModelInstaller.shared
     @StateObject private var whisperRuntimeInstaller = WhisperRuntimeInstaller.shared
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey

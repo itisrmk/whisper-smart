@@ -17,6 +17,7 @@ private let logger = Logger(subsystem: "com.visperflow", category: "ModelDownloa
 ///                       └────────────┘
 /// ```
 final class ModelDownloadState: ObservableObject {
+    static let sharedParakeet = ModelDownloadState(variant: .parakeetCTC06B)
 
     enum Phase: Equatable {
         /// No model file present; download hasn't been attempted.

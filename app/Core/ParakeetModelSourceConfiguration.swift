@@ -26,6 +26,7 @@ struct ParakeetModelSourceOption: Identifiable, Equatable {
     let modelDataURLString: String?
     let tokenizerURLString: String?
     let modelExpectedSizeBytes: Int64?
+    let modelDataExpectedSizeBytes: Int64?
     let tokenizerExpectedSizeBytes: Int64?
     let modelSHA256: String?
     let tokenizerSHA256: String?
@@ -73,6 +74,7 @@ struct ParakeetResolvedModelSource: Equatable {
     let tokenizerURL: URL?
     let tokenizerFilename: String?
     let modelExpectedSizeBytes: Int64?
+    let modelDataExpectedSizeBytes: Int64?
     let tokenizerExpectedSizeBytes: Int64?
     let modelSHA256: String?
     let tokenizerSHA256: String?
@@ -189,6 +191,7 @@ final class ParakeetModelSourceConfigurationStore {
                 tokenizerURL: nil,
                 tokenizerFilename: nil,
                 modelExpectedSizeBytes: nil,
+                modelDataExpectedSizeBytes: nil,
                 tokenizerExpectedSizeBytes: nil,
                 modelSHA256: nil,
                 tokenizerSHA256: nil,
@@ -239,6 +242,7 @@ final class ParakeetModelSourceConfigurationStore {
             tokenizerURL: selectedSource.tokenizerURL,
             tokenizerFilename: selectedSource.tokenizerFilename,
             modelExpectedSizeBytes: selectedSource.modelExpectedSizeBytes,
+            modelDataExpectedSizeBytes: selectedSource.modelDataExpectedSizeBytes,
             tokenizerExpectedSizeBytes: selectedSource.tokenizerExpectedSizeBytes,
             modelSHA256: selectedSource.modelSHA256,
             tokenizerSHA256: selectedSource.tokenizerSHA256,
@@ -261,6 +265,7 @@ private extension ParakeetModelSourceConfigurationStore {
                     modelDataURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx.data",
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",
                     modelExpectedSizeBytes: 41_770_866,
+                    modelDataExpectedSizeBytes: 2_435_420_160,
                     tokenizerExpectedSizeBytes: 100_000,
                     modelSHA256: nil,
                     tokenizerSHA256: nil,
@@ -290,6 +295,7 @@ private extension ParakeetModelSourceConfigurationStore {
             modelDataURLString: nil,
             tokenizerURLString: tokenizerURL,
             modelExpectedSizeBytes: nil,
+            modelDataExpectedSizeBytes: nil,
             tokenizerExpectedSizeBytes: nil,
             modelSHA256: nil,
             tokenizerSHA256: nil,

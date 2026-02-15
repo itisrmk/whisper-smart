@@ -200,6 +200,16 @@ private func runLegacyCanarySourceMigrationSmoke() throws {
     print("✓ Legacy Canary source migration smoke passed")
 }
 
+private func runParakeetSidecarMetadataSmoke() throws {
+    let source = ModelVariant.parakeetCTC06B.configuredSource
+    try expect(source?.modelDataURL != nil, "Parakeet source should include an ONNX sidecar URL.")
+
+    let expectedBytes = source?.modelDataExpectedSizeBytes ?? 0
+    try expect(expectedBytes > 2_000_000_000, "Parakeet sidecar expected size should be set to a multi-GB value.")
+
+    print("✓ Parakeet sidecar metadata smoke passed")
+}
+
 private func runTokenizerValidationSmoke() throws {
     let tempDir = FileManager.default.temporaryDirectory
         .appendingPathComponent("qa-smoke-tokenizer-\(UUID().uuidString)", isDirectory: true)
@@ -225,6 +235,7 @@ private func runTokenizerValidationSmoke() throws {
         tokenizerURL: URL(string: "https://example.com/vocab.txt"),
         tokenizerFilename: "vocab.txt",
         modelExpectedSizeBytes: nil,
+        modelDataExpectedSizeBytes: nil,
         tokenizerExpectedSizeBytes: 100_000,
         modelSHA256: nil,
         tokenizerSHA256: nil,
@@ -247,6 +258,7 @@ struct QASmokeMain {
             try runResolverSmoke()
             try runDownloadCompletionTransitionSmoke()
             try runLegacyCanarySourceMigrationSmoke()
+            try runParakeetSidecarMetadataSmoke()
             try runTokenizerValidationSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {

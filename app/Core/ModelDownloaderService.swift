@@ -21,6 +21,7 @@ final class ModelDownloaderService: NSObject {
         var expectedContentLength: Int64?
         var downloadedModelURL: URL?
         var attemptedSourceIDs: Set<String>
+        var transferProgress: Double = 0
 
         init(
             variant: ModelVariant,
@@ -42,7 +43,8 @@ final class ModelDownloaderService: NSObject {
     private let stateQueue = DispatchQueue(label: "com.visperflow.modeldownloader.state")
     private let maxRetryAttempts = 2
     private let maxTransferProgressBeforeFinalize = 0.99
-    private let auxiliaryArtifactTimeoutSeconds: TimeInterval = 120
+    private let auxiliaryArtifactTimeoutSeconds: TimeInterval = 12 * 60 * 60
+    private let auxiliaryRequestTimeoutSeconds: TimeInterval = 60
     private let preflightTimeoutSeconds: TimeInterval = 45
     private let backgroundSessionIdentifier = "com.visperflow.modeldownloader.background.v1"
     private var activeDownloadsByVariantID: [String: DownloadContext] = [:]
@@ -99,8 +101,14 @@ final class ModelDownloaderService: NSObject {
         }
 
         stateQueue.async {
-            guard self.activeDownloadsByVariantID[variant.id] == nil else {
-                logger.info("Download already active for \(variant.id)")
+            if let active = self.activeDownloadsByVariantID[variant.id] {
+                active.state = state
+                let progress = active.transferProgress
+                logger.info("Download already active for \(variant.id); rebinding observer state")
+                DispatchQueue.main.async {
+                    state.transitionToDownloading()
+                    state.updateProgress(progress)
+                }
                 return
             }
 
@@ -193,7 +201,9 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
             guard expectedBytes > 0 else { return }
             stateToUpdate = state
             let rawProgress = min(max(Double(totalBytesWritten) / Double(expectedBytes), 0), 1)
-            progress = min(rawProgress, self.maxTransferProgressBeforeFinalize)
+            let clampedProgress = min(rawProgress, self.maxTransferProgressBeforeFinalize)
+            context.transferProgress = clampedProgress
+            progress = clampedProgress
         }
 
         guard let state = stateToUpdate, let progress else { return }
@@ -328,15 +338,17 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
 
         if let finalizeContext, let finalizeModelURL {
             let variantID = finalizeContext.variant.id
-            Task { @MainActor [weak self] in
+            Task(priority: .utility) { [weak self] in
                 guard let self else { return }
                 let error = await self.finalizeDownloadedArtifacts(context: finalizeContext, modelURL: finalizeModelURL)
-                if let error {
-                    finalizeContext.state?.transitionToFailed(message: error)
-                    self.postModelDownloadEvent(variantID: variantID, isReady: false, message: error)
-                } else {
-                    finalizeContext.state?.transitionToReady()
-                    self.postModelDownloadEvent(variantID: variantID, isReady: true, message: nil)
+                await MainActor.run {
+                    if let error {
+                        finalizeContext.state?.transitionToFailed(message: error)
+                        self.postModelDownloadEvent(variantID: variantID, isReady: false, message: error)
+                    } else {
+                        finalizeContext.state?.transitionToReady()
+                        self.postModelDownloadEvent(variantID: variantID, isReady: true, message: nil)
+                    }
                 }
             }
         }
@@ -567,6 +579,10 @@ private extension ModelDownloaderService {
 
         let destinationURL = modelURL.appendingPathExtension("data")
 
+        if modelDataArtifactValidationError(at: destinationURL, expectedSizeBytes: source.modelDataExpectedSizeBytes) == nil {
+            return nil
+        }
+
         if let downloadError = await downloadAuxiliaryArtifact(
             from: modelDataURL,
             to: destinationURL,
@@ -575,13 +591,10 @@ private extension ModelDownloaderService {
             return downloadError
         }
 
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: destinationURL.path),
-              let fileSize = attrs[.size] as? Int64,
-              fileSize >= 1_000_000 else {
-            return "Model data artifact is missing or incomplete. Automatic setup will retry."
-        }
-
-        return nil
+        return modelDataArtifactValidationError(
+            at: destinationURL,
+            expectedSizeBytes: source.modelDataExpectedSizeBytes
+        )
     }
 
     func downloadTokenizerArtifactIfNeeded(
@@ -617,7 +630,8 @@ private extension ModelDownloaderService {
 
         for attempt in 0...maxRetryAttempts {
             let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = 30
+            configuration.waitsForConnectivity = true
+            configuration.timeoutIntervalForRequest = auxiliaryRequestTimeoutSeconds
             configuration.timeoutIntervalForResource = auxiliaryArtifactTimeoutSeconds
             let session = URLSession(configuration: configuration)
             defer {
@@ -648,6 +662,33 @@ private extension ModelDownloaderService {
         }
 
         return lastError
+    }
+
+    func modelDataArtifactValidationError(at fileURL: URL, expectedSizeBytes: Int64?) -> String? {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return "Model data artifact is missing after download. Automatic setup will retry."
+        }
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let fileSize = attrs[.size] as? Int64 else {
+            return "Model data artifact cannot be read. Automatic setup will retry."
+        }
+
+        let minimumBytes: Int64
+        if let expectedSizeBytes, expectedSizeBytes > 0 {
+            minimumBytes = max(200_000_000, Int64(Double(expectedSizeBytes) * 0.95))
+        } else {
+            minimumBytes = 200_000_000
+        }
+
+        guard fileSize >= minimumBytes else {
+            if let expectedSizeBytes, expectedSizeBytes > 0 {
+                return "Model data artifact is incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSizeBytes / 1_000_000) MB). Automatic setup will retry."
+            }
+            return "Model data artifact is incomplete (\(fileSize / 1_000_000) MB). Automatic setup will retry."
+        }
+
+        return nil
     }
 
     func validateDownloadedModel(
@@ -691,6 +732,13 @@ private extension ModelDownloaderService {
         let modelExtension = modelURL.pathExtension.lowercased()
         guard modelExtension == "onnx" else {
             logger.info("Skipping ONNX preflight for non-ONNX model artifact: \(modelURL.lastPathComponent, privacy: .public)")
+            return nil
+        }
+
+        // Keep model finalize non-blocking. Runtime bootstrap can still be in-flight
+        // during first install; preflight runs later during provider warmup.
+        if runtimeBootstrapManager.statusSnapshot().phase != .ready {
+            logger.info("Skipping ONNX preflight during finalize because runtime is not ready yet")
             return nil
         }
 

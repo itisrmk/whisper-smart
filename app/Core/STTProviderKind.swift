@@ -269,7 +269,20 @@ struct ModelVariant: Equatable, Identifiable {
             return (false, "ONNX sidecar data file cannot be read yet. Automatic setup will retry.")
         }
 
-        guard fileSize >= 200_000_000 else {
+        let minimumSidecarBytes: Int64
+        if let expected = source.modelDataExpectedSizeBytes, expected > 0 {
+            minimumSidecarBytes = max(200_000_000, Int64(Double(expected) * 0.95))
+        } else {
+            minimumSidecarBytes = 200_000_000
+        }
+
+        guard fileSize >= minimumSidecarBytes else {
+            if let expected = source.modelDataExpectedSizeBytes, expected > 0 {
+                return (
+                    false,
+                    "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expected / 1_000_000) MB). Automatic setup will retry."
+                )
+            }
             return (false, "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB). Automatic setup will retry.")
         }
 
