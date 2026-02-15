@@ -15,6 +15,7 @@ final class SettingsWindowController {
         if let wc = windowController {
             if let window = wc.window {
                 applyForcedDarkAppearance(to: window)
+                enforceScrollChromePolicy(for: window)
             }
             wc.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -42,6 +43,7 @@ final class SettingsWindowController {
         hostingController.view.wantsLayer = true
         hostingController.view.layer?.backgroundColor = VFColor.glass0NS.cgColor
         window.center()
+        enforceScrollChromePolicy(for: window)
 
         let wc = NSWindowController(window: window)
         wc.showWindow(nil)
@@ -59,5 +61,46 @@ final class SettingsWindowController {
         window.contentViewController?.view.appearance = darkAppearance
         window.contentViewController?.view.wantsLayer = true
         window.contentViewController?.view.layer?.backgroundColor = VFColor.glass0NS.cgColor
+    }
+
+    /// Forces an overlay/no-chrome scroll style for every NSScrollView in the
+    /// settings window. This avoids persistent scrollbar gutters on some macOS
+    /// setups where SwiftUI `scrollIndicators(.hidden)` isn't strictly honored.
+    private func enforceScrollChromePolicy(for window: NSWindow) {
+        let applyPolicy = { [weak window] in
+            guard let root = window?.contentViewController?.view ?? window?.contentView else { return }
+            Self.configureScrollViews(in: root)
+        }
+
+        applyPolicy()
+        DispatchQueue.main.async { applyPolicy() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10, execute: applyPolicy)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: applyPolicy)
+    }
+
+    private static func configureScrollViews(in view: NSView) {
+        if let button = view as? NSButton {
+            button.focusRingType = .none
+        }
+
+        if let scrollView = view as? NSScrollView {
+            scrollView.scrollerStyle = .overlay
+            scrollView.autohidesScrollers = true
+            scrollView.hasVerticalScroller = false
+            scrollView.hasHorizontalScroller = false
+            scrollView.verticalScroller?.isHidden = true
+            scrollView.horizontalScroller?.isHidden = true
+            scrollView.verticalScroller?.alphaValue = 0
+            scrollView.horizontalScroller?.alphaValue = 0
+        }
+
+        if let scroller = view as? NSScroller {
+            scroller.isHidden = true
+            scroller.alphaValue = 0
+        }
+
+        for subview in view.subviews {
+            configureScrollViews(in: subview)
+        }
     }
 }

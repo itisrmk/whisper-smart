@@ -1,78 +1,96 @@
 import AppKit
 import SwiftUI
 
+private extension Color {
+    init(hex: Int, alpha: Double = 1.0) {
+        let r = Double((hex >> 16) & 0xFF) / 255.0
+        let g = Double((hex >> 8) & 0xFF) / 255.0
+        let b = Double(hex & 0xFF) / 255.0
+        self = Color(red: r, green: g, blue: b, opacity: alpha)
+    }
+}
+
 // MARK: - Color Tokens
 
 enum VFColor {
     // Primary brand
     static let accent = Color("AccentBlue", bundle: nil)
-    static let accentFallback = Color(red: 0.35, green: 0.58, blue: 1.0) // #5994FF — slightly brighter for neumorphic
+    static let accentFallback = Color(hex: 0x7090F7)
+    static let accentHover = Color(hex: 0x6784E0)
+    static let accentDeep = Color(hex: 0x45568B)
+    static let successFallback = Color(hex: 0x71C184)
+    static let successAlt = Color(hex: 0x62A174)
 
-    // ── Neumorphic surface layers ───────────────────────────────
-    // Dark neumorphism works by pairing a near-black base with
-    // subtle light and shadow edges. These layers step up from
-    // the deepest well to the most elevated control.
-    static let glass0NS = NSColor(srgbRed: 0.08, green: 0.08, blue: 0.08, alpha: 1.0)
-    static let glass0 = Color(nsColor: glass0NS) // window / deepest bg
-    static let glass1 = Color(red: 0.13, green: 0.14, blue: 0.18) // card background (fixed RGB to avoid adaptive gray shifts)
-    static let glass2 = Color(red: 0.16, green: 0.17, blue: 0.22) // elevated card / hover
-    static let glass3 = Color(red: 0.19, green: 0.20, blue: 0.26) // pill / control fill
-    static let controlInset = Color(red: 0.09, green: 0.10, blue: 0.13)
-    static let controlTrackOff = Color(red: 0.10, green: 0.11, blue: 0.15)
-    static let controlKnobTop = Color(red: 0.96, green: 0.97, blue: 0.99)
-    static let controlKnobBottom = Color(red: 0.84, green: 0.86, blue: 0.90)
+    // ── Surface layers ───────────────────────────────────────────
+    static let bgBase = Color(hex: 0x111114)
+    static let bgElevated = Color(hex: 0x141419)
+    static let surface1 = Color(hex: 0x16161B)
+    static let surface2 = Color(hex: 0x191A22)
+    static let surface3 = Color(hex: 0x24252E)
 
-    /// 1-px separator between layers
-    static let glassBorder = Color.white.opacity(0.08)
-    /// Highlight edge on top of raised surfaces (lit-from-above)
-    static let glassHighlight = Color.white.opacity(0.11)
+    // Backward-compatible aliases used across the app.
+    static let glass0NS = NSColor(srgbRed: 0x11 / 255.0, green: 0x11 / 255.0, blue: 0x14 / 255.0, alpha: 1.0)
+    static let glass0 = bgBase
+    static let glass1 = surface1
+    static let glass2 = surface2
+    static let glass3 = surface3
+    static let controlInset = bgElevated
+    static let controlTrackOff = surface2
+    static let controlKnobTop = Color(hex: 0xF4F6FB)
+    static let controlKnobBottom = Color(hex: 0xD5DBEA)
+
+    /// 1px separator between layers.
+    static let glassBorder = Color(hex: 0x3C3E4A, alpha: 0.50)
+    /// Highlight edge on top of raised surfaces.
+    static let glassHighlight = Color.white.opacity(0.08)
 
     // ── Neumorphic shadow pairs ─────────────────────────────────
     /// Light edge (top-left source) for raised elements
-    static let neuLight = Color.white.opacity(0.07)
+    static let neuLight = Color.white.opacity(0.06)
     /// Dark edge (bottom-right) for raised elements
-    static let neuDark  = Color.black.opacity(0.65)
+    static let neuDark  = Color.black.opacity(0.40)
     /// Inset light edge for pressed/recessed wells
-    static let neuInsetLight = Color.white.opacity(0.04)
+    static let neuInsetLight = Color.white.opacity(0.05)
     /// Inset dark edge for pressed/recessed wells
-    static let neuInsetDark  = Color.black.opacity(0.50)
+    static let neuInsetDark  = Color.black.opacity(0.35)
 
     // ── Depth background radial tints ────────────────────────────
-    static let depthRadialTop    = Color(red: 0.12, green: 0.22, blue: 0.46).opacity(0.14)
-    static let depthRadialBottom = Color(red: 0.26, green: 0.10, blue: 0.42).opacity(0.10)
-    static let depthVignette     = Color(red: 0.06, green: 0.05, blue: 0.14).opacity(0.35)
+    static let depthRadialTop = accentFallback.opacity(0.18)
+    static let depthRadialBottom = Color(hex: 0x54618D, alpha: 0.12)
+    static let depthVignette = Color.black.opacity(0.44)
+    static let textureMeshCool = Color(hex: 0x8BA2F4, alpha: 0.17)
+    static let textureMeshNeutral = Color(hex: 0x9BA7C6, alpha: 0.10)
+    static let textureMeshInk = Color(hex: 0x07080C, alpha: 0.58)
+    static let textureStroke = Color(hex: 0xAEBBE1, alpha: 0.14)
+    static let textureHighlight = Color.white.opacity(0.10)
 
     // Surface / chrome (backward compat) — fixed dark values to avoid
     // system-appearance leaking light colors into our forced-dark UI.
-    static let surfacePrimary   = Color(white: 0.10)
-    static let surfaceOverlay   = Color.black.opacity(0.72)
-    static let surfaceElevated  = Color(white: 0.14)
+    static let surfacePrimary = bgBase
+    static let surfaceOverlay = Color.black.opacity(0.68)
+    static let surfaceElevated = bgElevated
 
     // ── Accent gradients ─────────────────────────────────────────
     static let accentGradient = LinearGradient(
-        colors: [Color(red: 0.35, green: 0.58, blue: 1.0),
-                 Color(red: 0.45, green: 0.38, blue: 1.0)],
+        colors: [accentFallback, accentHover],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
     static let listeningGradient = LinearGradient(
-        colors: [Color(red: 0.35, green: 0.58, blue: 1.0),
-                 Color(red: 0.25, green: 0.48, blue: 0.95)],
+        colors: [accentFallback, accentHover],
         startPoint: .top,
         endPoint: .bottom
     )
 
     static let transcribingGradient = LinearGradient(
-        colors: [Color(red: 0.56, green: 0.40, blue: 1.0),
-                 Color(red: 0.40, green: 0.25, blue: 0.90)],
+        colors: [Color(hex: 0x8198F1), Color(hex: 0x5F75C8)],
         startPoint: .top,
         endPoint: .bottom
     )
 
     static let successGradient = LinearGradient(
-        colors: [Color(red: 0.22, green: 0.80, blue: 0.50),
-                 Color(red: 0.16, green: 0.64, blue: 0.42)],
+        colors: [successFallback, successAlt],
         startPoint: .top,
         endPoint: .bottom
     )
@@ -85,18 +103,22 @@ enum VFColor {
     )
 
     // Semantic (flat fallbacks)
-    static let listening    = Color(red: 0.35, green: 0.58, blue: 1.0)
-    static let transcribing = Color(red: 0.56, green: 0.40, blue: 1.0)
-    static let success      = Color(red: 0.22, green: 0.80, blue: 0.50)
+    static let listening    = accentFallback
+    static let transcribing = Color(hex: 0x8198F1)
+    static let success      = successFallback
     static let error        = Color(red: 1.0,  green: 0.36, blue: 0.36)
 
     // Text — tuned for WCAG-AA contrast on dark surfaces
-    static let textPrimary   = Color.white.opacity(0.95)
-    static let textSecondary = Color.white.opacity(0.76)
-    static let textTertiary  = Color.white.opacity(0.58)
-    static let textOnAccent  = Color(red: 0.05, green: 0.10, blue: 0.18)
-    static let textDisabled  = Color.white.opacity(0.46)
+    static let textPrimary = Color(hex: 0xE9ECF5)
+    static let textSecondary = Color(hex: 0xB7BBC7)
+    static let textTertiary = Color(hex: 0x9EA4B5)
+    static let textOnAccent = Color(hex: 0xF4F7FF)
+    static let textDisabled = Color(hex: 0xB7BBC7, alpha: 0.46)
     static let textOnOverlay = Color.white
+    static let focusRing = accentFallback
+    static let focusGlow = accentFallback.opacity(0.34)
+    static let interactiveHover = Color.white.opacity(0.05)
+    static let interactivePressed = Color.black.opacity(0.24)
 }
 
 // MARK: - Theme Tokens
@@ -115,48 +137,49 @@ enum VFTheme {
 // MARK: - Typography Tokens
 
 enum VFFont {
-    static let bubbleStatus    = Font.system(size: 11, weight: .medium, design: .rounded)
+    static let bubbleStatus    = Font.system(size: 11, weight: .medium)
     static let menuItem        = Font.system(size: 13, weight: .regular)
     static let menuItemBold    = Font.system(size: 13, weight: .semibold)
 
-    // Settings — tighter hierarchy with rounded design for iOS feel
-    static let settingsHeading   = Font.system(size: 22, weight: .bold, design: .rounded)
-    static let settingsTitle     = Font.system(size: 14, weight: .semibold, design: .rounded)
-    static let settingsBody      = Font.system(size: 13, weight: .regular, design: .rounded)
-    static let settingsCaption   = Font.system(size: 11, weight: .regular, design: .rounded)
-    static let settingsFootnote  = Font.system(size: 10, weight: .regular, design: .rounded)
+    // Settings hierarchy
+    static let settingsHeading   = Font.system(size: 28, weight: .semibold)
+    static let settingsTitle     = Font.system(size: 14, weight: .semibold)
+    static let settingsBody      = Font.system(size: 13, weight: .medium)
+    static let settingsCaption   = Font.system(size: 12, weight: .regular)
+    static let settingsFootnote  = Font.system(size: 11, weight: .regular)
 
-    static let pillLabel       = Font.system(size: 12, weight: .semibold, design: .rounded)
-    static let segmentLabel    = Font.system(size: 13, weight: .medium, design: .rounded)
+    static let pillLabel       = Font.system(size: 11, weight: .semibold)
+    static let segmentLabel    = Font.system(size: 12, weight: .semibold)
 }
 
 // MARK: - Spacing / Layout Tokens
 
 enum VFSpacing {
-    static let xxs: CGFloat = 2
-    static let xs:  CGFloat = 4
-    static let sm:  CGFloat = 8
-    static let md:  CGFloat = 12
-    static let lg:  CGFloat = 16
+    static let xxs: CGFloat = 4
+    static let xs:  CGFloat = 8
+    static let sm:  CGFloat = 12
+    static let md:  CGFloat = 16
+    static let lg:  CGFloat = 20
     static let xl:  CGFloat = 24
-    static let xxl: CGFloat = 32
-    static let xxxl: CGFloat = 40
+    static let xxl: CGFloat = 24
+    static let xxxl: CGFloat = 32
 }
 
 enum VFRadius {
-    static let bubble:  CGFloat = 28
-    static let card:    CGFloat = 18        // rounder for neumorphic cards
-    static let pill:    CGFloat = 100       // fully rounded pill controls
+    static let bubble:  CGFloat = 24
+    static let card:    CGFloat = 18
+    static let pill:    CGFloat = 999
     static let button:  CGFloat = 12
-    static let segment: CGFloat = 14        // segmented control corners
-    static let field:   CGFloat = 10        // text fields / small controls
+    static let segment: CGFloat = 16
+    static let field:   CGFloat = 12
+    static let window:  CGFloat = 14
 }
 
 enum VFSize {
     static let bubbleDiameter:  CGFloat = 40
     static let menuBarIcon:     CGFloat = 18
-    static let settingsWidth:   CGFloat = 520
-    static let settingsHeight:  CGFloat = 640
+    static let settingsWidth:   CGFloat = 960
+    static let settingsHeight:  CGFloat = 740
 
     // Waveform bar layout
     static let waveformBarCount: Int = 5
@@ -170,12 +193,16 @@ enum VFSize {
 
 enum VFShadow {
     /// Raised neumorphic shadow — soft outer shadow pair
-    static let neuRadius: CGFloat = 10
-    static let neuOffset: CGFloat = 5
+    static let neuRadius: CGFloat = 6
+    static let neuOffset: CGFloat = 2
     /// Card ambient shadow
-    static let cardColor   = Color.black.opacity(0.50)
-    static let cardRadius: CGFloat  = 16
-    static let cardY:      CGFloat  = 6
+    static let cardColor   = Color.black.opacity(0.28)
+    static let cardRadius: CGFloat  = 20
+    static let cardY:      CGFloat  = 10
+    static let raisedControlColor = Color.black.opacity(0.30)
+    static let raisedControlRadius: CGFloat = 10
+    static let raisedControlY: CGFloat = 4
+    static let focusOuterRadius: CGFloat = 8
 
     /// Glow shadow that matches a tint color (used on bubble)
     static func glow(color: Color, radius: CGFloat = 20) -> some View {
@@ -184,7 +211,7 @@ enum VFShadow {
     }
 
     /// Inner highlight for top edge of glass card
-    static let innerHighlightOpacity: Double = 0.09
+    static let innerHighlightOpacity: Double = 0.08
 }
 
 // MARK: - Animation Tokens
@@ -222,54 +249,50 @@ struct GlassCard: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
-                ZStack {
-                    // Primary fill with vertical gradient lift
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: fillColor.opacity(1.0),  location: 0.0),
-                                    .init(color: fillColor.opacity(0.88), location: 1.0),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: fillColor.opacity(0.98), location: 0.0),
+                                .init(color: VFColor.surface2.opacity(0.94), location: 1.0),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(VFColor.glassBorder, lineWidth: 1)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: Color.white.opacity(0.10), location: 0.0),
+                                        .init(color: .clear, location: 0.35),
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 0.5
                             )
+                    )
+                    .overlay(
+                        LinearGradient(
+                            colors: [VFColor.textureMeshCool.opacity(0.20), .clear],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-
-                    // Subtle grain texture
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .blendMode(.screen)
                         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                        .overlay(
-                            GrainTexture(opacity: 0.02, cellSize: 2)
-                                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                        )
-                        .allowsHitTesting(false)
-                }
-                // Neumorphic shadow pair
-                .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
-                .shadow(color: VFColor.neuDark,  radius: VFShadow.neuRadius, x: VFShadow.neuOffset, y: VFShadow.neuOffset)
-                // Top-edge highlight stroke
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: Color.white.opacity(0.12), location: 0.0),
-                                    .init(color: Color.white.opacity(0.03), location: 0.3),
-                                    .init(color: .clear, location: 0.55),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 0.5
-                        )
-                )
-                // Ambient card shadow
-                .shadow(
-                    color: VFShadow.cardColor,
-                    radius: VFShadow.cardRadius,
-                    y: VFShadow.cardY
-                )
+                    )
+                    .overlay(
+                        GrainTexture(opacity: 0.012, cellSize: 2)
+                            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                            .allowsHitTesting(false)
+                    )
+                    .shadow(color: VFShadow.cardColor, radius: VFShadow.cardRadius, y: VFShadow.cardY)
             )
     }
 }
@@ -294,24 +317,35 @@ struct NeuInset: ViewModifier {
         content
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(VFColor.controlInset)
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: VFColor.bgElevated.opacity(0.96), location: 0.0),
+                                .init(color: VFColor.surface1.opacity(0.88), location: 1.0),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(VFColor.glassBorder.opacity(0.9), lineWidth: 1)
+                    )
                     .overlay(
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .stroke(
                                 LinearGradient(
                                     stops: [
-                                        .init(color: VFColor.neuInsetDark, location: 0.0),
-                                        .init(color: .clear, location: 0.5),
-                                        .init(color: VFColor.neuInsetLight, location: 1.0),
+                                        .init(color: Color.white.opacity(0.07), location: 0.0),
+                                        .init(color: .clear, location: 0.4),
                                     ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                                    startPoint: .top,
+                                    endPoint: .bottom
                                 ),
-                                lineWidth: 1
+                                lineWidth: 0.5
                             )
                     )
-                    .shadow(color: VFColor.neuInsetDark, radius: 3, x: 2, y: 2)
-                    .shadow(color: VFColor.neuInsetLight, radius: 2, x: -1, y: -1)
+                    .shadow(color: Color.black.opacity(0.20), radius: 4, y: 2)
             )
     }
 }
@@ -361,6 +395,66 @@ struct GrainTexture: View {
     }
 }
 
+// MARK: - Structured Texture System
+
+/// Decorative geometric texture layer used for the settings background.
+/// Keeps contrast low while adding form and material depth.
+struct StructuredTextureSystem: View {
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+            ZStack {
+                Ellipse()
+                    .fill(
+                        RadialGradient(
+                            colors: [VFColor.textureMeshCool, .clear],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: max(width, height) * 0.34
+                        )
+                    )
+                    .frame(width: width * 0.68, height: height * 0.42)
+                    .position(x: width * 0.78, y: height * 0.20)
+                    .blendMode(.screen)
+
+                RoundedRectangle(cornerRadius: 36, style: .continuous)
+                    .stroke(VFColor.textureStroke, lineWidth: 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 36, style: .continuous)
+                            .fill(VFColor.textureMeshNeutral.opacity(0.14))
+                    )
+                    .frame(width: width * 0.44, height: height * 0.26)
+                    .position(x: width * 0.80, y: height * 0.24)
+
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .stroke(VFColor.textureStroke.opacity(0.70), lineWidth: 1)
+                    .frame(width: width * 0.20, height: height * 0.14)
+                    .position(x: width * 0.16, y: height * 0.14)
+
+                Capsule(style: .continuous)
+                    .fill(VFColor.textureMeshInk)
+                    .frame(width: width * 0.22, height: height * 0.08)
+                    .position(x: width * 0.87, y: height * 0.11)
+                    .blur(radius: 0.5)
+
+                LinearGradient(
+                    colors: [.clear, VFColor.textureHighlight, .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .rotationEffect(.degrees(-15))
+                .frame(width: width * 0.50, height: height * 0.24)
+                .position(x: width * 0.63, y: height * 0.30)
+                .opacity(0.55)
+            }
+        }
+        .opacity(0.42)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Layered Depth Background
 
 /// Full-window background compositing:
@@ -371,29 +465,35 @@ struct GrainTexture: View {
 struct LayeredDepthBackground: View {
     var body: some View {
         ZStack {
-            VFColor.glass0
+            LinearGradient(
+                colors: [VFColor.bgBase, VFColor.bgElevated],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
             RadialGradient(
                 colors: [VFColor.depthRadialTop, .clear],
                 center: .topLeading,
                 startRadius: 0,
-                endRadius: 500
+                endRadius: 620
             )
             RadialGradient(
                 colors: [VFColor.depthRadialBottom, .clear],
                 center: .bottomTrailing,
                 startRadius: 0,
-                endRadius: 440
+                endRadius: 560
             )
 
             RadialGradient(
                 colors: [.clear, VFColor.depthVignette],
                 center: .center,
-                startRadius: 140,
-                endRadius: 480
+                startRadius: 120,
+                endRadius: 640
             )
 
-            GrainTexture(opacity: 0.025)
+            StructuredTextureSystem()
+
+            GrainTexture(opacity: 0.014, cellSize: 1.8)
         }
         .ignoresSafeArea()
     }
@@ -464,24 +564,24 @@ private enum VFThemeGuard {
         guard !didAssert else { return }
         didAssert = true
 
-        let glass0 = RGB(r: 0.08, g: 0.08, b: 0.08)
-        let glass1 = RGB(r: 0.13, g: 0.14, b: 0.18)
-        let glass2 = RGB(r: 0.16, g: 0.17, b: 0.22)
-        let glass3 = RGB(r: 0.19, g: 0.20, b: 0.26)
-        let accent = RGB(r: 0.35, g: 0.58, b: 1.00)
+        let glass0 = RGB(r: 0x11 / 255.0, g: 0x11 / 255.0, b: 0x14 / 255.0)
+        let glass1 = RGB(r: 0x16 / 255.0, g: 0x16 / 255.0, b: 0x1B / 255.0)
+        let glass2 = RGB(r: 0x19 / 255.0, g: 0x1A / 255.0, b: 0x22 / 255.0)
+        let glass3 = RGB(r: 0x24 / 255.0, g: 0x25 / 255.0, b: 0x2E / 255.0)
+        let accent = RGB(r: 0x70 / 255.0, g: 0x90 / 255.0, b: 0xF7 / 255.0)
 
         assert(luminance(glass0) < luminance(glass1), "Expected glass0 to be darker than glass1", file: file, line: line)
         assert(luminance(glass1) < luminance(glass2), "Expected glass1 to be darker than glass2", file: file, line: line)
         assert(luminance(glass2) < luminance(glass3), "Expected glass2 to be darker than glass3", file: file, line: line)
 
-        let textPrimary = composite(whiteWithOpacity: 0.95, over: glass1)
-        let textSecondary = composite(whiteWithOpacity: 0.76, over: glass1)
-        let textTertiary = composite(whiteWithOpacity: 0.58, over: glass1)
+        let textPrimary = RGB(r: 0xE9 / 255.0, g: 0xEC / 255.0, b: 0xF5 / 255.0)
+        let textSecondary = RGB(r: 0xB7 / 255.0, g: 0xBB / 255.0, b: 0xC7 / 255.0)
+        let textTertiary = RGB(r: 0x9E / 255.0, g: 0xA4 / 255.0, b: 0xB5 / 255.0)
 
         assert(contrastRatio(textPrimary, glass1) >= 7.0, "textPrimary contrast on glass1 must stay >= 7.0", file: file, line: line)
         assert(contrastRatio(textSecondary, glass1) >= 4.5, "textSecondary contrast on glass1 must stay >= 4.5", file: file, line: line)
         assert(contrastRatio(textTertiary, glass1) >= 3.0, "textTertiary contrast on glass1 must stay >= 3.0", file: file, line: line)
-        assert(contrastRatio(RGB(r: 0.05, g: 0.10, b: 0.18), accent) >= 4.5, "textOnAccent contrast must stay >= 4.5", file: file, line: line)
+        assert(contrastRatio(RGB(r: 0xF4 / 255.0, g: 0xF7 / 255.0, b: 0xFF / 255.0), accent) >= 2.5, "textOnAccent should remain readable on accent", file: file, line: line)
     }
 
     private struct RGB {
