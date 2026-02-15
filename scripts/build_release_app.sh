@@ -95,7 +95,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundleIconFile</key>
   <string>$ICON_FILE_NAME</string>
   <key>SUFeedURL</key>
-  <string>https://raw.githubusercontent.com/itisrmk/whisper-smart/master/appcast.xml</string>
+  <string>https://raw.githubusercontent.com/itisrmk/whisper-smart/main/appcast.xml</string>
 </dict>
 </plist>
 PLIST

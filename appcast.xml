@@ -1,134 +1,103 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
     <title>Whisper Smart Releases</title>
     <link>https://github.com/itisrmk/whisper-smart/releases</link>
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.18</title>
+      <description>Whisper Smart v0.2.18
+- Completed all 5 roadmap phases across UX stability, performance telemetry, cloud hardening, dictation quality, and release operations.
+- Stabilized visual regression checks across CI render environments.
+- Added configurable cloud endpoint profiles with validation and diagnostics.
+- Hardened release pipeline with checklist gate, signing/notarization path, DMG checksum verification, and rollback notes.</description>
+      <pubDate>Sun, 15 Feb 2026 22:59:42 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.18/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.18" sparkle:version="202602151559" length="4701980" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.6</title>
       <description>v0.2.6 - Unsupported-source card UX fix
-
 New in this release:
 - Unsupported Canary source now shows a single warning-only state
 - Removed conflicting Retry/Try mirror + red failed text for unsupported sources
-- Added one-click "Use compatible source" action back to runnable ONNX source
+- Added one-click &quot;Use compatible source&quot; action back to runnable ONNX source
 - Preserved normal runnable download/retry behavior</description>
       <pubDate>Sat, 14 Feb 2026 21:48:48 -0700</pubDate>
-      <enclosure
-        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.6/Whisper-Smart-0.2.6.dmg"
-        sparkle:shortVersionString="0.2.6"
-        sparkle:version="202602142148"
-        length="4486955"
-        type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.6/Whisper-Smart-0.2.6.dmg" sparkle:shortVersionString="0.2.6" sparkle:version="202602142148" length="4486955" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
       <title>Version 0.2.5</title>
       <description>v0.2.5 - Download reliability + compatibility gating fixes
-
 New in this release:
 - Fixed model downloads getting stuck at 100% by enforcing deterministic completion states
 - Added timeout-bounded finalize/preflight steps to avoid indefinite waits
 - Explicitly blocked unsupported non-ONNX Canary safetensors in ONNX STT runtime path with clear guidance
 - Added smoke coverage for completion transitions and unsupported-source handling</description>
       <pubDate>Sat, 14 Feb 2026 18:57:23 -0700</pubDate>
-      <enclosure
-        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.5/Whisper-Smart-0.2.5.dmg"
-        sparkle:shortVersionString="0.2.5"
-        sparkle:version="202602141857"
-        length="4477116"
-        type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.5/Whisper-Smart-0.2.5.dmg" sparkle:shortVersionString="0.2.5" sparkle:version="202602141857" length="4477116" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
       <title>Version 0.2.4</title>
       <description>v0.2.4 - Canary-Qwen STT option + tokenizer validation fix
-
 New in this release:
 - Removed Qwen TTS preview path from Provider settings
 - Added one-click STT source option for NVIDIA Canary-Qwen-2.5B (experimental)
 - Fixed tokenizer false-fail for valid Parakeet vocab sizes
 - Kept one-click UX and setup messaging improvements</description>
       <pubDate>Sat, 14 Feb 2026 17:24:25 -0700</pubDate>
-      <enclosure
-        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.4/Whisper-Smart-0.2.4.dmg"
-        sparkle:shortVersionString="0.2.4"
-        sparkle:version="202602141724"
-        length="4473305"
-        type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.4/Whisper-Smart-0.2.4.dmg" sparkle:shortVersionString="0.2.4" sparkle:version="202602141724" length="4473305" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
       <title>Version 0.2.3</title>
       <description>v0.2.3 - Parakeet download reliability and calmer setup UX
-
 New in this release:
 - Fixed Parakeet TDT v3 source URLs to avoid HTTP 404
-- Added auto fallback to mirror source on 404 and manual "Try mirror" action
+- Added auto fallback to mirror source on 404 and manual &quot;Try mirror&quot; action
 - Reduced red/error overuse in setup UI; red now reserved for true failures
 - One-click setup flows remain unchanged and verified</description>
       <pubDate>Sat, 14 Feb 2026 16:43:34 -0700</pubDate>
-      <enclosure
-        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.3/Whisper-Smart-0.2.3.dmg"
-        sparkle:shortVersionString="0.2.3"
-        sparkle:version="202602141643"
-        length="4473976"
-        type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.3/Whisper-Smart-0.2.3.dmg" sparkle:shortVersionString="0.2.3" sparkle:version="202602141643" length="4473976" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
       <title>Version 0.2.2</title>
       <description>v0.2.2 - Parakeet source alignment + Qwen TTS preview option
-
 New in this release:
 - Balanced Parakeet mapping aligned to TDT v3 ONNX source path
 - Removed stale recommended messaging in provider UX
 - Added one-click Qwen3-TTS option in Text-to-Speech (Preview)
 - Kept STT flow stable with passing smoke/typecheck gates</description>
       <pubDate>Sat, 14 Feb 2026 16:09:35 -0700</pubDate>
-      <enclosure
-        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.2/Whisper-Smart-0.2.2.dmg"
-        sparkle:shortVersionString="0.2.2"
-        sparkle:version="202602141609"
-        length="4460521"
-        type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.2/Whisper-Smart-0.2.2.dmg" sparkle:shortVersionString="0.2.2" sparkle:version="202602141609" length="4460521" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
       <title>Version 0.2.1</title>
       <description>v0.2.1 - Parakeet hardening + release safety polish
-
 New in this release:
 - Added explicit Parakeet labeling as experimental and not recommended across UI/provider/source labels
 - Hardened QA scripts and smoke coverage to prevent regressions in local setup flows
 - Added swift_test_check.sh to safely handle repos without a SwiftPM test target
 - Improved prerequisite guidance and one-click recovery messaging for managed runtimes</description>
       <pubDate>Sat, 14 Feb 2026 12:57:00 -0700</pubDate>
-      <enclosure
-        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.1/Whisper-Smart-0.2.1.dmg"
-        sparkle:shortVersionString="0.2.1"
-        sparkle:version="202602141257"
-        length="4447538"
-        type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.1/Whisper-Smart-0.2.1.dmg" sparkle:shortVersionString="0.2.1" sparkle:version="202602141257" length="4447538" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
       <title>Version 0.2.0</title>
       <description>v0.2.0 - Smart Whisper model-selection overhaul
-
 New in this release:
 - Added Smart presets (Light/Balanced/Best/Cloud) with clearer setup flows
 - Fixed provider fallback resolution so unavailable Parakeet degrades correctly
 - Added Whisper tiny_en tier for lightweight local use
 - Stabilized keyboard UI test across simulator keyboard-control variance</description>
       <pubDate>Sat, 14 Feb 2026 12:26:42 -0700</pubDate>
-      <enclosure
-        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.0/Whisper-Smart-0.2.0.dmg"
-        sparkle:shortVersionString="0.2.0"
-        sparkle:version="202602141226"
-        length="4423728"
-        type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.0/Whisper-Smart-0.2.0.dmg" sparkle:shortVersionString="0.2.0" sparkle:version="202602141226" length="4423728" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
   </channel>

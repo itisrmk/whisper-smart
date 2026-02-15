@@ -138,6 +138,59 @@ jobs:
           fi
           echo "path=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
 
+      - name: Update Appcast
+        env:
+          VERSION: ${{ inputs.version }}
+          NOTES_FILE: ${{ steps.release_notes.outputs.path }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          APP_PLIST=".build/release/Whisper Smart.app/Contents/Info.plist"
+          DMG_PATH=".build/release/Whisper-Smart-mac.dmg"
+          if [[ ! -f "$APP_PLIST" ]]; then
+            echo "Missing built app plist at $APP_PLIST"
+            exit 1
+          fi
+          if [[ ! -f "$DMG_PATH" ]]; then
+            echo "Missing DMG at $DMG_PATH"
+            exit 1
+          fi
+
+          BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")"
+          SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")"
+          if [[ "$SHORT_VERSION" != "$VERSION" ]]; then
+            echo "App short version ($SHORT_VERSION) does not match requested release version ($VERSION)"
+            exit 1
+          fi
+
+          DMG_LENGTH="$(stat -f%z "$DMG_PATH")"
+          DMG_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION}/Whisper-Smart-mac.dmg"
+          PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+
+          bash scripts/update_appcast.sh \
+            --version "$VERSION" \
+            --build-version "$BUILD_VERSION" \
+            --dmg-url "$DMG_URL" \
+            --dmg-length "$DMG_LENGTH" \
+            --notes-file "$NOTES_FILE" \
+            --pub-date "$PUB_DATE" \
+            --output "appcast.xml"
+
+      - name: Commit + Push Appcast
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- appcast.xml; then
+            echo "No appcast change to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add appcast.xml
+          git commit -m "chore(release): update appcast for v${VERSION}"
+          git push origin HEAD:main
+
       - name: Create and Push Tag
         env:
           VERSION: ${{ inputs.version }}
@@ -161,4 +214,6 @@ jobs:
           tag_name: v${{ inputs.version }}
           name: v${{ inputs.version }}
           body_path: ${{ steps.release_notes.outputs.path }}
-          files: .build/release/Whisper-Smart-mac.dmg
+          files: |
+            .build/release/Whisper-Smart-mac.dmg
+            appcast.xml

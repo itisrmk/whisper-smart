@@ -21,9 +21,12 @@ final class UpdateManager {
             try updater.start()
             updater.automaticallyChecksForUpdates = true
 
-            // Background check shortly after launch.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [updater] in
-                updater.checkForUpdatesInBackground()
+            // Only perform a first-run background check if Sparkle has never
+            // checked before; otherwise rely on Sparkle's built-in interval.
+            if updater.lastUpdateCheckDate == nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [updater] in
+                    updater.checkForUpdatesInBackground()
+                }
             }
         } catch {
             NSLog("[UpdateManager] Failed to start Sparkle updater: \(error.localizedDescription)")
