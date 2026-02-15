@@ -158,6 +158,36 @@ private func runResolverSmoke() throws {
 }
 
 
+private func runDownloadCompletionTransitionSmoke() throws {
+    let state = ModelDownloadState(variant: .parakeetCTC06B)
+    state.transitionToDownloading()
+    state.updateProgress(1)
+    state.transitionToFailed(message: "Synthetic finalization failure")
+
+    if case .downloading = state.phase {
+        throw SmokeFailure.assertion("Download state should leave downloading once completion resolves (ready/failed).")
+    }
+
+    print("✓ Download completion transition smoke passed")
+}
+
+private func runUnsupportedSourceHandlingSmoke() throws {
+    let store = ParakeetModelSourceConfigurationStore.shared
+    _ = store.selectSource(id: "hf_canary_qwen_2_5b_safetensors", for: ParakeetModelCatalog.ctc06BVariantID)
+    defer {
+        _ = store.selectSource(id: "hf_parakeet_tdt06b_v3_onnx", for: ParakeetModelCatalog.ctc06BVariantID)
+    }
+
+    let variant = ModelVariant.parakeetCTC06B
+    try expect(variant.hasDownloadSource == false, "Unsupported Canary safetensors source should not be downloadable")
+    try expect(
+        variant.downloadUnavailableReason?.contains("only runs ONNX models") == true,
+        "Unsupported source should surface explicit ONNX guidance"
+    )
+
+    print("✓ Unsupported source handling smoke passed")
+}
+
 private func runTokenizerValidationSmoke() throws {
     let tempDir = FileManager.default.temporaryDirectory
         .appendingPathComponent("qa-smoke-tokenizer-\(UUID().uuidString)", isDirectory: true)
@@ -187,6 +217,7 @@ private func runTokenizerValidationSmoke() throws {
         modelSHA256: nil,
         tokenizerSHA256: nil,
         error: nil,
+        runtimeCompatibility: .runnable,
         availableSources: []
     )
 
@@ -202,6 +233,8 @@ struct QASmokeMain {
         do {
             try runStateMachineSmoke()
             try runResolverSmoke()
+            try runDownloadCompletionTransitionSmoke()
+            try runUnsupportedSourceHandlingSmoke()
             try runTokenizerValidationSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {

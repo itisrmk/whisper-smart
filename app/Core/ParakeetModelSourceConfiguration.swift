@@ -7,6 +7,16 @@ enum ParakeetModelCatalog {
     static let ctc06BVariantID = "parakeet-ctc-0.6b"
 }
 
+enum ParakeetRuntimeCompatibility: Equatable {
+    case runnable
+    case notRunnable(reason: String)
+
+    var unsupportedReason: String? {
+        if case .notRunnable(let reason) = self { return reason }
+        return nil
+    }
+}
+
 struct ParakeetModelSourceOption: Identifiable, Equatable {
     static let customSourceID = "custom"
 
@@ -20,6 +30,7 @@ struct ParakeetModelSourceOption: Identifiable, Equatable {
     let modelSHA256: String?
     let tokenizerSHA256: String?
     let isBuiltIn: Bool
+    let runtimeCompatibility: ParakeetRuntimeCompatibility
 
     var modelURL: URL? {
         Self.parseHTTPURL(modelURLString)
@@ -66,6 +77,7 @@ struct ParakeetResolvedModelSource: Equatable {
     let modelSHA256: String?
     let tokenizerSHA256: String?
     let error: String?
+    let runtimeCompatibility: ParakeetRuntimeCompatibility
     let availableSources: [ParakeetModelSourceOption]
 
     var isUsable: Bool {
@@ -187,6 +199,7 @@ final class ParakeetModelSourceConfigurationStore {
                 modelSHA256: nil,
                 tokenizerSHA256: nil,
                 error: "No default model source is bundled for variant '\(variantID)'.",
+                runtimeCompatibility: .notRunnable(reason: "This model source is unavailable."),
                 availableSources: []
             )
         }
@@ -201,6 +214,9 @@ final class ParakeetModelSourceConfigurationStore {
         } else if let modelExtension = selectedSource.modelURL?.pathExtension.lowercased(),
                   Self.supportedModelExtensions.contains(modelExtension) == false {
             error = "Selected source '\(selectedSource.displayName)' must point to .onnx, .safetensors, or .nemo."
+        } else if let modelExtension = selectedSource.modelURL?.pathExtension.lowercased(),
+                  modelExtension != "onnx" {
+            error = "This source downloads a \(modelExtension) model, but the current local Parakeet runtime only runs ONNX models. Choose nemo128.onnx or encoder-model.onnx + .data."
         }
 
         if error == nil,
@@ -208,6 +224,11 @@ final class ParakeetModelSourceConfigurationStore {
            !tokenizerRaw.isEmpty,
            selectedSource.tokenizerURL == nil {
             error = "Selected source '\(selectedSource.displayName)' has an invalid tokenizer URL."
+        }
+
+        if error == nil,
+           let unsupportedReason = selectedSource.runtimeCompatibility.unsupportedReason {
+            error = unsupportedReason
         }
 
         if error == nil,
@@ -231,6 +252,7 @@ final class ParakeetModelSourceConfigurationStore {
             modelSHA256: selectedSource.modelSHA256,
             tokenizerSHA256: selectedSource.tokenizerSHA256,
             error: error,
+            runtimeCompatibility: selectedSource.runtimeCompatibility,
             availableSources: options
         )
     }
@@ -251,7 +273,8 @@ private extension ParakeetModelSourceConfigurationStore {
                     tokenizerExpectedSizeBytes: 100_000,
                     modelSHA256: nil,
                     tokenizerSHA256: nil,
-                    isBuiltIn: true
+                    isBuiltIn: true,
+                    runtimeCompatibility: .runnable
                 ),
                 ParakeetModelSourceOption(
                     id: "hf_parakeet_tdt06b_v3_encoder_split",
@@ -263,7 +286,8 @@ private extension ParakeetModelSourceConfigurationStore {
                     tokenizerExpectedSizeBytes: 100_000,
                     modelSHA256: nil,
                     tokenizerSHA256: nil,
-                    isBuiltIn: true
+                    isBuiltIn: true,
+                    runtimeCompatibility: .runnable
                 ),
                 ParakeetModelSourceOption(
                     id: "hf_canary_qwen_2_5b_safetensors",
@@ -275,7 +299,8 @@ private extension ParakeetModelSourceConfigurationStore {
                     tokenizerExpectedSizeBytes: nil,
                     modelSHA256: nil,
                     tokenizerSHA256: nil,
-                    isBuiltIn: true
+                    isBuiltIn: true,
+                    runtimeCompatibility: .notRunnable(reason: "Canary-Qwen safetensors is not currently runnable in Visperflow local STT. Choose a Parakeet ONNX source (nemo128.onnx or encoder-model.onnx + .data).")
                 )
             ]
         default:
@@ -303,7 +328,8 @@ private extension ParakeetModelSourceConfigurationStore {
             tokenizerExpectedSizeBytes: nil,
             modelSHA256: nil,
             tokenizerSHA256: nil,
-            isBuiltIn: false
+            isBuiltIn: false,
+            runtimeCompatibility: .runnable
         )
     }
 

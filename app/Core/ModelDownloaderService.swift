@@ -40,6 +40,9 @@ final class ModelDownloaderService: NSObject {
     private let runtimeBootstrapManager = ParakeetRuntimeBootstrapManager.shared
     private let stateQueue = DispatchQueue(label: "com.visperflow.modeldownloader.state")
     private let maxRetryAttempts = 2
+    private let maxTransferProgressBeforeFinalize = 0.99
+    private let auxiliaryArtifactTimeoutSeconds: TimeInterval = 120
+    private let preflightTimeoutSeconds: TimeInterval = 45
     private var activeDownloadsByVariantID: [String: DownloadContext] = [:]
     private var variantIDByTaskID: [Int: String] = [:]
     private var resumeDataByDownloadKey: [String: Data] = [:]
@@ -175,7 +178,8 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
 
             guard expectedBytes > 0 else { return }
             stateToUpdate = state
-            progress = min(max(Double(totalBytesWritten) / Double(expectedBytes), 0), 1)
+            let rawProgress = min(max(Double(totalBytesWritten) / Double(expectedBytes), 0), 1)
+            progress = min(rawProgress, self.maxTransferProgressBeforeFinalize)
         }
 
         guard let state = stateToUpdate, let progress else { return }
@@ -479,8 +483,16 @@ private extension ModelDownloaderService {
             let semaphore = DispatchSemaphore(value: 0)
             var completionError: String?
 
-            let task = URLSession.shared.downloadTask(with: sourceURL) { tempURL, response, error in
-                defer { semaphore.signal() }
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForRequest = 30
+            configuration.timeoutIntervalForResource = auxiliaryArtifactTimeoutSeconds
+            let session = URLSession(configuration: configuration)
+
+            let task = session.downloadTask(with: sourceURL) { tempURL, response, error in
+                defer {
+                    session.invalidateAndCancel()
+                    semaphore.signal()
+                }
 
                 if let error {
                     completionError = "Failed to download \(label) artifact: \(self.downloadFailureMessage(for: error, response: response))"
@@ -505,7 +517,12 @@ private extension ModelDownloaderService {
             }
 
             task.resume()
-            semaphore.wait()
+            let waitResult = semaphore.wait(timeout: .now() + auxiliaryArtifactTimeoutSeconds + 5)
+
+            if waitResult == .timedOut {
+                task.cancel()
+                completionError = "Failed to download \(label) artifact: request timed out while finalizing model download."
+            }
 
             if completionError == nil {
                 return nil
@@ -597,13 +614,24 @@ private extension ModelDownloaderService {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        let timeoutResult = DispatchGroup()
+        timeoutResult.enter()
+        process.terminationHandler = { _ in
+            timeoutResult.leave()
+        }
+
         do {
             try process.run()
         } catch {
+            process.terminationHandler = nil
+            timeoutResult.leave()
             return "ONNX preflight launch failed: \(error.localizedDescription)"
         }
 
-        process.waitUntilExit()
+        if timeoutResult.wait(timeout: .now() + preflightTimeoutSeconds) == .timedOut {
+            process.terminate()
+            return "ONNX preflight timed out while validating the downloaded model. Retry download or switch to the recommended Parakeet ONNX source."
+        }
 
         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()

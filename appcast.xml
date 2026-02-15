@@ -6,6 +6,24 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.5</title>
+      <description>v0.2.5 - Download reliability + compatibility gating fixes
+
+New in this release:
+- Fixed model downloads getting stuck at 100% by enforcing deterministic completion states
+- Added timeout-bounded finalize/preflight steps to avoid indefinite waits
+- Explicitly blocked unsupported non-ONNX Canary safetensors in ONNX STT runtime path with clear guidance
+- Added smoke coverage for completion transitions and unsupported-source handling</description>
+      <pubDate>Sat, 14 Feb 2026 18:57:23 -0700</pubDate>
+      <enclosure
+        url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.5/Whisper-Smart-0.2.5.dmg"
+        sparkle:shortVersionString="0.2.5"
+        sparkle:version="202602141857"
+        length="4477116"
+        type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.4</title>
       <description>v0.2.4 - Canary-Qwen STT option + tokenizer validation fix
 
