@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var providerObserver: NSObjectProtocol?
     private var parakeetBootstrapObserver: NSObjectProtocol?
     private var parakeetModelSourceObserver: NSObjectProtocol?
+    private var modelDownloadObserver: NSObjectProtocol?
     private var transcriptLogObserver: NSObjectProtocol?
     private var userDefaultsObserver: NSObjectProtocol?
 
@@ -99,9 +100,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeProviderChanges()
         observeParakeetBootstrapChanges()
         observeParakeetModelSourceChanges()
+        observeModelDownloadChanges()
         observeTranscriptLogActions()
         observeOverlaySettingsChanges()
-        scheduleProviderWarmupIfNeeded()
+        scheduleAutomaticParakeetSetup()
 
         // Request all permissions in the correct order, then activate
         // the hotkey monitor once we know the permission landscape.
@@ -183,6 +185,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         accessibilityRetryWork?.cancel()
         accessibilityRetryWork = nil
+        Task {
+            await ParakeetProvisioningCoordinator.shared.cancelRetries()
+        }
         stateMachine.deactivate()
         if let observer = bindingObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -194,6 +199,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = parakeetModelSourceObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = modelDownloadObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = transcriptLogObserver {
@@ -300,7 +308,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshProviderResolution(logReason: "Provider changed in settings")
+            guard let self else { return }
+            self.refreshProviderResolution(logReason: "Provider changed in settings")
+
+            if STTProviderKind.loadSelection() == .parakeet {
+                self.scheduleAutomaticParakeetSetup()
+            } else {
+                Task {
+                    await ParakeetProvisioningCoordinator.shared.cancelRetries()
+                }
+            }
         }
     }
 
@@ -320,7 +337,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshProviderResolution(logReason: "Parakeet model source changed")
+            guard let self else { return }
+            self.refreshProviderResolution(logReason: "Parakeet model source changed")
+            self.scheduleAutomaticParakeetSetup(forceModelRetry: true)
+        }
+    }
+
+    private func observeModelDownloadChanges() {
+        modelDownloadObserver = NotificationCenter.default.addObserver(
+            forName: .modelDownloadDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            guard let variantID = notification.userInfo?["variantID"] as? String,
+                  variantID == ModelVariant.parakeetCTC06B.id else {
+                return
+            }
+            self.refreshProviderResolution(logReason: "Parakeet model download status changed")
+
+            let isReady = (notification.userInfo?["isReady"] as? Bool) ?? false
+            Task {
+                await ParakeetProvisioningCoordinator.shared.handleModelDownloadEvent(
+                    isReady: isReady
+                )
+            }
         }
     }
 
@@ -352,6 +393,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // changed. Doing so can race with an in-flight beginSession() and cause
         // endSession() to run on a different provider instance.
         refreshProviderDiagnostics(logReason: "Parakeet runtime bootstrap status changed")
+        let status = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+        Task {
+            await ParakeetProvisioningCoordinator.shared.handleRuntimeBootstrapStatusChange(status)
+        }
     }
 
     private func refreshProviderDiagnostics(logReason: String) {
@@ -361,17 +406,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         publishProviderDiagnostics(diagnostics)
     }
 
-    private func scheduleProviderWarmupIfNeeded() {
-        let selected = STTProviderKind.loadSelection()
-        guard selected == .parakeet else { return }
+    private func scheduleAutomaticParakeetSetup(forceModelRetry: Bool = false, forceRuntimeRepair: Bool = false) {
+        // Zero-touch setup for first-time installs: select Parakeet by default.
+        if STTProviderKind.hasPersistedSelection() == false {
+            STTProviderKind.parakeet.saveSelection()
+            refreshProviderResolution(logReason: "Auto-selected Parakeet provider on first launch")
+        }
 
-        DispatchQueue.global(qos: .utility).async {
-            do {
-                _ = try ParakeetRuntimeBootstrapManager.shared.ensureRuntimeReady()
-                logger.info("Parakeet warmup complete")
-            } catch {
-                logger.warning("Parakeet warmup failed: \(error.localizedDescription, privacy: .public)")
-            }
+        Task {
+            await ParakeetProvisioningCoordinator.shared.ensureAutomaticSetupForCurrentSelection(
+                forceModelRetry: forceModelRetry,
+                forceRuntimeRepair: forceRuntimeRepair,
+                reason: "app_delegate"
+            )
         }
     }
 

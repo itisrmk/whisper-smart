@@ -336,12 +336,14 @@ final class AudioCaptureService {
                 mElement: kAudioObjectPropertyElementMain
             )
 
-            var deviceUID: CFString = "" as CFString
-            var uidSize = UInt32(MemoryLayout<CFString>.size)
+            var deviceUID: CFString?
+            var uidSize = UInt32(MemoryLayout<CFString?>.size)
 
-            status = AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &deviceUID)
+            status = withUnsafeMutablePointer(to: &deviceUID) { pointer in
+                AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, pointer)
+            }
 
-            if status == noErr && (deviceUID as String) == uid {
+            if status == noErr, let deviceUID, (deviceUID as String) == uid {
                 return deviceID
             }
         }
@@ -356,19 +358,21 @@ final class AudioCaptureService {
             mElement: kAudioObjectPropertyElementMain
         )
 
-        var deviceUID: CFString = "" as CFString
-        var dataSize = UInt32(MemoryLayout<CFString>.size)
+        var deviceUID: CFString?
+        var dataSize = UInt32(MemoryLayout<CFString?>.size)
 
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            0,
-            nil,
-            &dataSize,
-            &deviceUID
-        )
+        let status = withUnsafeMutablePointer(to: &deviceUID) { pointer in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &propertyAddress,
+                0,
+                nil,
+                &dataSize,
+                pointer
+            )
+        }
 
-        guard status == noErr else { return nil }
+        guard status == noErr, let deviceUID else { return nil }
         return deviceUID as String
     }
 
@@ -474,21 +478,24 @@ enum AudioDeviceManager {
         guard status == noErr else { return [] }
 
         // Get default input device UID
-        var defaultDeviceUID = ""
+        var defaultDeviceUIDCF: CFString?
         var defaultAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var defaultUIDSize = UInt32(MemoryLayout<CFString>.size)
-        AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &defaultAddress,
-            0,
-            nil,
-            &defaultUIDSize,
-            &defaultDeviceUID
-        )
+        var defaultUIDSize = UInt32(MemoryLayout<CFString?>.size)
+        _ = withUnsafeMutablePointer(to: &defaultDeviceUIDCF) { pointer in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &defaultAddress,
+                0,
+                nil,
+                &defaultUIDSize,
+                pointer
+            )
+        }
+        let defaultDeviceUID = (defaultDeviceUIDCF as String?) ?? ""
 
         for deviceID in deviceIDs {
             // Check if device has input channels
@@ -528,11 +535,13 @@ enum AudioDeviceManager {
                 mElement: kAudioObjectPropertyElementMain
             )
 
-            var name: CFString = "" as CFString
-            var nameSize = UInt32(MemoryLayout<CFString>.size)
-            status = AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &name)
+            var name: CFString?
+            var nameSize = UInt32(MemoryLayout<CFString?>.size)
+            status = withUnsafeMutablePointer(to: &name) { pointer in
+                AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, pointer)
+            }
 
-            guard status == noErr else { continue }
+            guard status == noErr, let name else { continue }
 
             // Get device UID
             var uidAddress = AudioObjectPropertyAddress(
@@ -541,11 +550,13 @@ enum AudioDeviceManager {
                 mElement: kAudioObjectPropertyElementMain
             )
 
-            var uid: CFString = "" as CFString
-            var uidSize = UInt32(MemoryLayout<CFString>.size)
-            status = AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &uid)
+            var uid: CFString?
+            var uidSize = UInt32(MemoryLayout<CFString?>.size)
+            status = withUnsafeMutablePointer(to: &uid) { pointer in
+                AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, pointer)
+            }
 
-            guard status == noErr else { continue }
+            guard status == noErr, let uid else { continue }
 
             let deviceUID = uid as String
             let deviceName = name as String

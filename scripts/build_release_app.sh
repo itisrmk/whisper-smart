@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="${APP_NAME:-Whisper Smart}"
 BUNDLE_ID="${BUNDLE_ID:-com.whispersmart.desktop}"
-VERSION="${VERSION:-0.2.6}"
+VERSION="${VERSION:-0.2.7}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 LOGO_PATH="${LOGO_PATH:-$REPO_ROOT/logo.png}"
 
@@ -18,7 +18,7 @@ EXECUTABLE_PATH="$MACOS_DIR/$APP_NAME"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-echo "Building release binary for $APP_NAME…"
+echo "Building release binary for ${APP_NAME}..."
 swift build -c release --package-path "$REPO_ROOT"
 
 # Copy the built executable
@@ -33,7 +33,7 @@ install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH"
 
 ICON_FILE_NAME="AppIcon.icns"
 if [ -f "$LOGO_PATH" ]; then
-  echo "Generating app icon from $LOGO_PATH…"
+  echo "Generating app icon from ${LOGO_PATH}..."
   ICONSET_DIR="$BUILD_DIR/AppIcon.iconset"
   rm -rf "$ICONSET_DIR"
   mkdir -p "$ICONSET_DIR"
@@ -92,9 +92,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 if command -v codesign >/dev/null 2>&1; then
-  echo "Applying ad-hoc code signature…"
+  echo "Applying ad-hoc code signature..."
   codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
 fi
 
-echo "✅ App bundle created: $APP_BUNDLE"
+echo "App bundle created: ${APP_BUNDLE}"
 echo "$APP_BUNDLE"

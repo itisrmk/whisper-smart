@@ -95,21 +95,15 @@ struct ParakeetResolvedModelSource: Equatable {
 
 final class ParakeetModelSourceConfigurationStore {
     static let shared = ParakeetModelSourceConfigurationStore()
-    static let supportedModelExtensions: Set<String> = ["onnx", "safetensors", "nemo"]
+    static let supportedModelExtensions: Set<String> = ["onnx"]
 
     private let defaults = UserDefaults.standard
 
     private init() {}
 
     func availableSources(for variantID: String) -> [ParakeetModelSourceOption] {
-        var options = builtInSources(for: variantID)
-
-        if let custom = customSourceOption(for: variantID),
-           options.contains(where: { $0.id == custom.id }) == false {
-            options.append(custom)
-        }
-
-        return options
+        // Keep Parakeet zero-touch by exposing only the vetted built-in source.
+        builtInSources(for: variantID)
     }
 
     func selectedSourceID(for variantID: String) -> String {
@@ -157,7 +151,7 @@ final class ParakeetModelSourceConfigurationStore {
         }
 
         guard Self.supportedModelExtensions.contains(modelURL.pathExtension.lowercased()) else {
-            return "Custom model source must point to .onnx, .safetensors, or .nemo."
+            return "Custom model source must point to .onnx."
         }
 
         if !trimmedTokenizer.isEmpty {
@@ -213,10 +207,7 @@ final class ParakeetModelSourceConfigurationStore {
             error = "Selected source '\(selectedSource.displayName)' has an invalid model URL."
         } else if let modelExtension = selectedSource.modelURL?.pathExtension.lowercased(),
                   Self.supportedModelExtensions.contains(modelExtension) == false {
-            error = "Selected source '\(selectedSource.displayName)' must point to .onnx, .safetensors, or .nemo."
-        } else if let modelExtension = selectedSource.modelURL?.pathExtension.lowercased(),
-                  modelExtension != "onnx" {
-            error = "This source downloads a \(modelExtension) model, but the current local Parakeet runtime only runs ONNX models. Choose nemo128.onnx or encoder-model.onnx + .data."
+            error = "Selected source '\(selectedSource.displayName)' must point to .onnx."
         }
 
         if error == nil,
@@ -265,42 +256,16 @@ private extension ParakeetModelSourceConfigurationStore {
             return [
                 ParakeetModelSourceOption(
                     id: "hf_parakeet_tdt06b_v3_onnx",
-                    displayName: "Hugging Face · nemo128.onnx (recommended)",
-                    modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/nemo128.onnx",
-                    modelDataURLString: nil,
-                    tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",
-                    modelExpectedSizeBytes: 35_000_000,
-                    tokenizerExpectedSizeBytes: 100_000,
-                    modelSHA256: nil,
-                    tokenizerSHA256: nil,
-                    isBuiltIn: true,
-                    runtimeCompatibility: .runnable
-                ),
-                ParakeetModelSourceOption(
-                    id: "hf_parakeet_tdt06b_v3_encoder_split",
-                    displayName: "Hugging Face · encoder-model.onnx + .data (mirror)",
+                    displayName: "Hugging Face · encoder-model.onnx + .data (recommended)",
                     modelURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx",
                     modelDataURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx.data",
                     tokenizerURLString: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt",
-                    modelExpectedSizeBytes: 40_000_000,
+                    modelExpectedSizeBytes: 41_770_866,
                     tokenizerExpectedSizeBytes: 100_000,
                     modelSHA256: nil,
                     tokenizerSHA256: nil,
                     isBuiltIn: true,
                     runtimeCompatibility: .runnable
-                ),
-                ParakeetModelSourceOption(
-                    id: "hf_canary_qwen_2_5b_safetensors",
-                    displayName: "Hugging Face · NVIDIA Canary-Qwen-2.5B (experimental)",
-                    modelURLString: "https://huggingface.co/nvidia/canary-qwen-2.5b/resolve/main/model.safetensors",
-                    modelDataURLString: nil,
-                    tokenizerURLString: nil,
-                    modelExpectedSizeBytes: 5_119_120_624,
-                    tokenizerExpectedSizeBytes: nil,
-                    modelSHA256: nil,
-                    tokenizerSHA256: nil,
-                    isBuiltIn: true,
-                    runtimeCompatibility: .notRunnable(reason: "Canary-Qwen safetensors is not currently runnable in Visperflow local STT. Choose a Parakeet ONNX source (nemo128.onnx or encoder-model.onnx + .data).")
                 )
             ]
         default:

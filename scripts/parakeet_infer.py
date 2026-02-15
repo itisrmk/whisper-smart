@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import shutil
@@ -27,7 +28,7 @@ def raise_dependency_error(module_name: str, exc: Exception) -> None:
     raise RunnerError(
         "DEPENDENCY_MISSING: Python package "
         f"'{module_name}' is required ({exc}). "
-        "Use Visperflow Settings → Provider → Repair Parakeet Runtime."
+        "Runtime setup is automatic and still provisioning."
     )
 
 
@@ -84,8 +85,15 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         action="store_true",
         help="Validate runtime/dependencies/model without running inference.",
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Run as a persistent JSON-line worker for repeated inference requests.",
+    )
     args = parser.parse_args(argv)
-    if not args.check and not args.audio:
+    if args.check and args.serve:
+        parser.error("--check and --serve cannot be used together")
+    if not args.check and not args.serve and not args.audio:
         parser.error("--audio is required unless --check is used")
     return args
 
@@ -411,7 +419,7 @@ def decode_tokens(
         raise RunnerError(
             "TOKENIZER_MISSING: Could not decode token IDs because no vocabulary metadata or tokenizer file was found. "
             "Provide tokenizer.model, tokenizer.json, or vocab.txt next to the ONNX model, "
-            "or re-download model artifacts from Visperflow Settings -> Provider."
+            "or let automatic setup finish downloading model artifacts."
         )
 
     suffix = tokenizer_path.name.lower()
@@ -452,124 +460,161 @@ def validate_setup(session, model_path: Path, explicit_tokenizer: Optional[str])
         _ = load_sentencepiece()
 
 
+class InferenceEngine:
+    def __init__(self, model_path: Path, explicit_tokenizer: Optional[str]):
+        self.model_path = model_path
+        self.explicit_tokenizer = explicit_tokenizer
+        self.temp_model_dir: Optional[Path] = None
+        self.onnx_asr_model = None
+        self.np = None
+        self.session = None
+        self._initialize()
+
+    def close(self) -> None:
+        if self.temp_model_dir is not None:
+            shutil.rmtree(self.temp_model_dir, ignore_errors=True)
+            self.temp_model_dir = None
+
+    def _initialize(self) -> None:
+        onnx_asr = load_onnx_asr()
+        if onnx_asr is not None:
+            try:
+                self.temp_model_dir = prepare_onnx_asr_model_dir(self.model_path, self.explicit_tokenizer)
+                last_error: Exception | None = None
+                for quant in (None, "int8"):
+                    try:
+                        self.onnx_asr_model = onnx_asr.load_model(
+                            "nemo-parakeet-ctc-0.6b",
+                            path=str(self.temp_model_dir),
+                            quantization=quant,
+                            providers=["CPUExecutionProvider"],
+                        )
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                if self.onnx_asr_model is not None:
+                    return
+                if last_error is not None:
+                    raise last_error
+            except Exception:
+                self.onnx_asr_model = None
+
+        self.np, ort = load_core_dependencies()
+        self.session = load_session(self.model_path, ort)
+        validate_setup(self.session, self.model_path, self.explicit_tokenizer)
+
+    def transcribe(self, audio_path: Path) -> str:
+        if self.onnx_asr_model is not None:
+            result = self.onnx_asr_model.recognize(str(audio_path), sample_rate=16000)
+            text = str(result).strip()
+            if text:
+                return text
+            raise RunnerError("INFERENCE_ERROR: onnx-asr returned empty transcript.")
+
+        if self.np is None or self.session is None:
+            raise RunnerError("INFERENCE_ERROR: Inference engine is not initialized.")
+
+        audio = read_wav_mono_16k(audio_path, self.np)
+        session_inputs = self.session.get_inputs()
+        audio_input = pick_audio_input(session_inputs)
+        length_input = pick_length_input(session_inputs)
+
+        feeds = {audio_input.name: make_audio_tensor(audio, audio_input, self.np)}
+        if length_input is not None:
+            feeds[length_input.name] = make_length_tensor(audio.shape[0], length_input, self.np)
+
+        try:
+            outputs = self.session.run(None, feeds)
+        except Exception as exc:
+            raise RunnerError(
+                "INFERENCE_ERROR: ONNX runtime execution failed. "
+                "Ensure the model is a Parakeet CTC ONNX export expecting raw audio input. "
+                f"Details: {exc}"
+            ) from exc
+
+        if not outputs:
+            raise RunnerError("MODEL_OUTPUT_ERROR: ONNX session produced no output tensors.")
+
+        meta = model_metadata(self.session)
+        token_ids = infer_token_ids(outputs, meta, self.np)
+        return decode_tokens(token_ids, meta, self.model_path, self.explicit_tokenizer)
+
+
 def run_inference(
     model_path: Path,
     audio_path: Path,
     explicit_tokenizer: Optional[str],
 ) -> str:
-    # Preferred path: onnx-asr handles Parakeet preprocessing/signature variants.
-    # If unavailable, continue with raw ONNX fallback.
-    temp_model_dir: Path | None = None
+    engine = InferenceEngine(model_path, explicit_tokenizer)
     try:
-        onnx_asr = load_onnx_asr()
-        if onnx_asr is not None:
-            temp_model_dir = prepare_onnx_asr_model_dir(model_path, explicit_tokenizer)
-
-            model = None
-            last_error: Exception | None = None
-            for quant in (None, "int8"):
-                try:
-                    model = onnx_asr.load_model(
-                        "nemo-parakeet-ctc-0.6b",
-                        path=str(temp_model_dir),
-                        quantization=quant,
-                        providers=["CPUExecutionProvider"],
-                    )
-                    break
-                except Exception as exc:
-                    last_error = exc
-
-            if model is None and last_error is not None:
-                raise last_error
-            if model is None:
-                raise RunnerError("INFERENCE_ERROR: Failed to initialize onnx-asr model.")
-
-            result = model.recognize(str(audio_path), sample_rate=16000)
-            text = str(result).strip()
-            if text:
-                return text
-            raise RunnerError("INFERENCE_ERROR: onnx-asr returned empty transcript.")
-    except RunnerError:
-        raise
-    except Exception:
-        # Fallback path for raw-audio compatible exports.
-        pass
+        return engine.transcribe(audio_path)
     finally:
-        if temp_model_dir is not None:
-            shutil.rmtree(temp_model_dir, ignore_errors=True)
-
-    np, ort = load_core_dependencies()
-    session = load_session(model_path, ort)
-
-    audio = read_wav_mono_16k(audio_path, np)
-
-    session_inputs = session.get_inputs()
-    audio_input = pick_audio_input(session_inputs)
-    length_input = pick_length_input(session_inputs)
-
-    feeds = {audio_input.name: make_audio_tensor(audio, audio_input, np)}
-    if length_input is not None:
-        feeds[length_input.name] = make_length_tensor(audio.shape[0], length_input, np)
-
-    try:
-        outputs = session.run(None, feeds)
-    except Exception as exc:
-        raise RunnerError(
-            "INFERENCE_ERROR: ONNX runtime execution failed. "
-            "Ensure the model is a Parakeet CTC ONNX export expecting raw audio input. "
-            f"Details: {exc}"
-        ) from exc
-
-    if not outputs:
-        raise RunnerError("MODEL_OUTPUT_ERROR: ONNX session produced no output tensors.")
-
-    meta = model_metadata(session)
-    token_ids = infer_token_ids(outputs, meta, np)
-    text = decode_tokens(token_ids, meta, model_path, explicit_tokenizer)
-    return text
+        engine.close()
 
 
 def check_runtime(model_path: Path, explicit_tokenizer: Optional[str]) -> None:
-    # Preferred check path via onnx-asr (supports Parakeet preprocessing graph requirements).
-    # If unavailable, continue with raw ONNX validator.
-    temp_model_dir: Path | None = None
-    try:
-        onnx_asr = load_onnx_asr()
-        if onnx_asr is not None:
-            temp_model_dir = prepare_onnx_asr_model_dir(model_path, explicit_tokenizer)
+    engine = InferenceEngine(model_path, explicit_tokenizer)
+    engine.close()
 
-            last_error: Exception | None = None
-            for quant in (None, "int8"):
-                try:
-                    _ = onnx_asr.load_model(
-                        "nemo-parakeet-ctc-0.6b",
-                        path=str(temp_model_dir),
-                        quantization=quant,
-                        providers=["CPUExecutionProvider"],
-                    )
-                    return
-                except Exception as exc:
-                    last_error = exc
-            if last_error is not None:
-                raise last_error
-    except RunnerError:
-        raise
-    except Exception:
-        # Fallback to legacy raw-audio validator.
-        pass
-    finally:
-        if temp_model_dir is not None:
-            shutil.rmtree(temp_model_dir, ignore_errors=True)
 
-    _, ort = load_core_dependencies()
-    session = load_session(model_path, ort)
-    validate_setup(session, model_path, explicit_tokenizer)
+def write_worker_response(request_id: str, ok: bool, payload: Dict[str, object]) -> None:
+    response: Dict[str, object] = {"id": request_id, "ok": ok}
+    response.update(payload)
+    sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def serve_loop(model_path: Path, explicit_tokenizer: Optional[str]) -> int:
+    engine = InferenceEngine(model_path, explicit_tokenizer)
+    atexit.register(engine.close)
+
+    for raw_line in sys.stdin:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        request_id = ""
+        try:
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise RunnerError("REQUEST_ERROR: Worker request payload must be a JSON object.")
+
+            request_id = str(payload.get("id", ""))
+            op = str(payload.get("op", "transcribe")).strip().lower()
+
+            if op == "shutdown":
+                write_worker_response(request_id, True, {"message": "bye"})
+                break
+            if op == "ping":
+                write_worker_response(request_id, True, {"message": "ready"})
+                continue
+            if op != "transcribe":
+                raise RunnerError(f"REQUEST_ERROR: Unsupported worker op '{op}'.")
+
+            audio_raw = payload.get("audio")
+            if not isinstance(audio_raw, str) or not audio_raw.strip():
+                raise RunnerError("REQUEST_ERROR: 'audio' path is required for transcribe requests.")
+
+            audio_path = Path(audio_raw).expanduser().resolve()
+            ensure_file_exists(audio_path, "Audio file")
+            text = engine.transcribe(audio_path)
+            write_worker_response(request_id, True, {"text": text})
+        except RunnerError as exc:
+            write_worker_response(request_id, False, {"error": str(exc)})
+        except Exception as exc:  # pragma: no cover - unexpected worker error
+            write_worker_response(request_id, False, {"error": f"INFERENCE_ERROR: {exc}"})
+
+    engine.close()
+    return 0
 
 
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
     model_path = Path(args.model).expanduser().resolve()
     ensure_file_exists(model_path, "Model file")
+
+    if args.serve:
+        return serve_loop(model_path, args.tokenizer)
 
     if args.check:
         check_runtime(model_path, args.tokenizer)

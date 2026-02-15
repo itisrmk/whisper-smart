@@ -260,7 +260,7 @@ enum STTProviderResolver {
         if !sourceConfigured, fallbackReason == nil {
             canUseParakeet = false
             fallbackReason = variant.downloadUnavailableReason
-                ?? "Model source not configured. Open Settings -> Provider and choose a source."
+                ?? "Model source is not configured."
         }
 
         checks.append(
@@ -273,7 +273,7 @@ enum STTProviderResolver {
         )
         if !modelReady, fallbackReason == nil {
             canUseParakeet = false
-            fallbackReason = "Parakeet model is not ready (\(variant.validationStatus)). Download from '\(variant.configuredSourceDisplayName)' in Settings -> Provider."
+            fallbackReason = "Parakeet model is still being prepared automatically (\(variant.validationStatus))."
         }
 
         let runtimeImplemented = ParakeetSTTProvider.inferenceImplemented
@@ -570,7 +570,7 @@ enum STTProviderResolver {
                     detail: detail
                 ),
                 true,
-                "Parakeet runtime bootstrap failed. Use Repair Parakeet Runtime in Settings → Provider."
+                "Parakeet runtime bootstrap failed. Runtime setup is automatic and retrying in background."
             )
         }
     }

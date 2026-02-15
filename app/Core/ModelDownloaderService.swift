@@ -19,12 +19,13 @@ final class ModelDownloaderService: NSObject {
         var completionError: String?
         var retryCount = 0
         var expectedContentLength: Int64?
+        var downloadedModelURL: URL?
         var attemptedSourceIDs: Set<String>
 
         init(
             variant: ModelVariant,
             source: ParakeetResolvedModelSource,
-            state: ModelDownloadState,
+            state: ModelDownloadState?,
             task: URLSessionDownloadTask,
             resumeDataKey: String
         ) {
@@ -43,13 +44,16 @@ final class ModelDownloaderService: NSObject {
     private let maxTransferProgressBeforeFinalize = 0.99
     private let auxiliaryArtifactTimeoutSeconds: TimeInterval = 120
     private let preflightTimeoutSeconds: TimeInterval = 45
+    private let backgroundSessionIdentifier = "com.visperflow.modeldownloader.background.v1"
     private var activeDownloadsByVariantID: [String: DownloadContext] = [:]
     private var variantIDByTaskID: [Int: String] = [:]
     private var resumeDataByDownloadKey: [String: Data] = [:]
 
     private lazy var session: URLSession = {
-        let configuration = URLSessionConfiguration.default
+        let configuration = URLSessionConfiguration.background(withIdentifier: backgroundSessionIdentifier)
         configuration.waitsForConnectivity = true
+        configuration.sessionSendsLaunchEvents = true
+        configuration.isDiscretionary = false
         configuration.timeoutIntervalForRequest = 60
         configuration.timeoutIntervalForResource = 24 * 60 * 60
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
@@ -57,6 +61,11 @@ final class ModelDownloaderService: NSObject {
 
     private override init() {
         super.init()
+        session.getAllTasks { tasks in
+            if !tasks.isEmpty {
+                logger.info("Reattached to \(tasks.count) background model download task(s)")
+            }
+        }
     }
 
     // MARK: - Public
@@ -104,6 +113,7 @@ final class ModelDownloaderService: NSObject {
                 task = self.session.downloadTask(with: sourceURL)
                 logger.info("Starting model download for \(variant.id) from \(sourceURL.absoluteString, privacy: .public)")
             }
+            task.taskDescription = Self.taskDescription(variantID: variant.id, sourceID: source.selectedSourceID)
 
             let context = DownloadContext(
                 variant: variant,
@@ -153,6 +163,10 @@ final class ModelDownloaderService: NSObject {
 // MARK: - URLSession delegates
 
 extension ModelDownloaderService: URLSessionDownloadDelegate {
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        logger.info("Background model downloader session finished pending events")
+    }
+
     func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
@@ -164,7 +178,7 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
         var progress: Double?
 
         stateQueue.sync {
-            guard let context = context(forTaskID: downloadTask.taskIdentifier),
+            guard let context = ensureContext(forTask: downloadTask),
                   let state = context.state else {
                 return
             }
@@ -190,7 +204,7 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         stateQueue.sync {
-            guard let context = context(forTaskID: downloadTask.taskIdentifier) else { return }
+            guard let context = ensureContext(forTask: downloadTask) else { return }
 
             if let response = downloadTask.response as? HTTPURLResponse,
                !(200...299).contains(response.statusCode) {
@@ -211,42 +225,17 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
                 context.completionError = moveError
                 return
             }
-
-            if let modelDataError = downloadModelDataArtifactIfNeeded(
-                variant: context.variant,
-                source: context.source
-            ) {
-                context.completionError = modelDataError
-                cleanupArtifacts(variant: context.variant, source: context.source, modelURL: destinationURL)
-                return
-            }
-
-            if let tokenizerError = downloadTokenizerArtifactIfNeeded(
-                variant: context.variant,
-                source: context.source
-            ) {
-                context.completionError = tokenizerError
-                cleanupArtifacts(variant: context.variant, source: context.source, modelURL: destinationURL)
-                return
-            }
-
-            if let validationError = validateDownloadedModel(
-                variant: context.variant,
-                at: destinationURL,
-                source: context.source
-            ) {
-                context.completionError = validationError
-                cleanupArtifacts(variant: context.variant, source: context.source, modelURL: destinationURL)
-            }
+            context.downloadedModelURL = destinationURL
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        var completionState: ModelDownloadState?
         var completionAction: (() -> Void)?
+        var finalizeContext: DownloadContext?
+        var finalizeModelURL: URL?
 
         stateQueue.sync {
-            guard let context = context(forTaskID: task.taskIdentifier) else { return }
+            guard let context = ensureContext(forTask: task) else { return }
 
             if context.isUserCancelled {
                 _ = removeContext(forTaskID: task.taskIdentifier)
@@ -272,16 +261,21 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
 
                 variantIDByTaskID.removeValue(forKey: task.taskIdentifier)
                 variantIDByTaskID[nextTask.taskIdentifier] = context.variant.id
+                nextTask.taskDescription = Self.taskDescription(
+                    variantID: context.variant.id,
+                    sourceID: context.source.selectedSourceID
+                )
                 context.task = nextTask
                 nextTask.resume()
 
+                Task {
+                    await ParakeetTelemetryStore.shared.recordModelDownloadTransportRetry(
+                        attempt: context.retryCount
+                    )
+                }
                 logger.info("Retrying model download for \(context.variant.id) attempt=\(context.retryCount + 1)")
                 return
             }
-
-            guard let context = removeContext(forTaskID: task.taskIdentifier) else { return }
-            guard let state = context.state else { return }
-            completionState = state
 
             if let error {
                 if let resumeData = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data,
@@ -290,8 +284,12 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
                 }
 
                 let message = downloadFailureMessage(for: error, response: task.response)
+                let variantID = context.variant.id
+                let state = context.state
+                _ = removeContext(forTaskID: task.taskIdentifier)
                 completionAction = {
-                    state.transitionToFailed(message: message)
+                    state?.transitionToFailed(message: message)
+                    self.postModelDownloadEvent(variantID: variantID, isReady: false, message: message)
                 }
                 return
             }
@@ -301,19 +299,51 @@ extension ModelDownloaderService: URLSessionDownloadDelegate {
                     return
                 }
 
+                let variantID = context.variant.id
+                let state = context.state
+                _ = removeContext(forTaskID: task.taskIdentifier)
                 completionAction = {
-                    state.transitionToFailed(message: completionError)
+                    state?.transitionToFailed(message: completionError)
+                    self.postModelDownloadEvent(variantID: variantID, isReady: false, message: completionError)
                 }
                 return
             }
 
-            completionAction = {
-                state.transitionToReady()
+            guard let modelURL = context.downloadedModelURL else {
+                let variantID = context.variant.id
+                let state = context.state
+                _ = removeContext(forTaskID: task.taskIdentifier)
+                completionAction = {
+                    let message = "Model download finished but no local file was produced."
+                    state?.transitionToFailed(message: message)
+                    self.postModelDownloadEvent(variantID: variantID, isReady: false, message: message)
+                }
+                return
+            }
+
+            _ = removeContext(forTaskID: task.taskIdentifier)
+            finalizeContext = context
+            finalizeModelURL = modelURL
+        }
+
+        if let finalizeContext, let finalizeModelURL {
+            let variantID = finalizeContext.variant.id
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let error = await self.finalizeDownloadedArtifacts(context: finalizeContext, modelURL: finalizeModelURL)
+                if let error {
+                    finalizeContext.state?.transitionToFailed(message: error)
+                    self.postModelDownloadEvent(variantID: variantID, isReady: false, message: error)
+                } else {
+                    finalizeContext.state?.transitionToReady()
+                    self.postModelDownloadEvent(variantID: variantID, isReady: true, message: nil)
+                }
             }
         }
 
-        guard completionState != nil, let completionAction else { return }
-        DispatchQueue.main.async(execute: completionAction)
+        if let completionAction {
+            DispatchQueue.main.async(execute: completionAction)
+        }
     }
 }
 
@@ -323,6 +353,60 @@ private extension ModelDownloaderService {
     static func resumeDataKey(variantID: String, source: ParakeetResolvedModelSource) -> String {
         let modelURL = source.modelURL?.absoluteString ?? "none"
         return "\(variantID)|\(source.selectedSourceID)|\(modelURL)"
+    }
+
+    static func taskDescription(variantID: String, sourceID: String) -> String {
+        "\(variantID)||\(sourceID)"
+    }
+
+    static func parseTaskDescription(_ description: String?) -> (variantID: String, sourceID: String)? {
+        guard let description, !description.isEmpty else { return nil }
+        let components = description.components(separatedBy: "||")
+        guard components.count == 2 else { return nil }
+        let variantID = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceID = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !variantID.isEmpty, !sourceID.isEmpty else { return nil }
+        return (variantID, sourceID)
+    }
+
+    private func ensureContext(forTask task: URLSessionTask) -> DownloadContext? {
+        if let existing = context(forTaskID: task.taskIdentifier) {
+            return existing
+        }
+
+        guard let descriptor = Self.parseTaskDescription(task.taskDescription),
+              descriptor.variantID == ModelVariant.parakeetCTC06B.id,
+              let source = resolvedSource(for: descriptor.variantID, sourceID: descriptor.sourceID),
+              let downloadTask = task as? URLSessionDownloadTask else {
+            return nil
+        }
+
+        let context = DownloadContext(
+            variant: .parakeetCTC06B,
+            source: source,
+            state: nil,
+            task: downloadTask,
+            resumeDataKey: Self.resumeDataKey(variantID: descriptor.variantID, source: source)
+        )
+        context.attemptedSourceIDs = [source.selectedSourceID]
+        activeDownloadsByVariantID[descriptor.variantID] = context
+        variantIDByTaskID[task.taskIdentifier] = descriptor.variantID
+
+        logger.info(
+            "Reconstructed background download context for variant \(descriptor.variantID, privacy: .public) source \(source.selectedSourceID, privacy: .public)"
+        )
+        return context
+    }
+
+    private func resolvedSource(for variantID: String, sourceID: String) -> ParakeetResolvedModelSource? {
+        let store = ParakeetModelSourceConfigurationStore.shared
+        if store.availableSources(for: variantID).contains(where: { $0.id == sourceID }) {
+            _ = store.selectSource(id: sourceID, for: variantID)
+        }
+
+        let resolved = store.resolvedSource(for: variantID)
+        guard resolved.error == nil, resolved.modelURL != nil else { return nil }
+        return resolved
     }
 
     private func context(forTaskID taskID: Int) -> DownloadContext? {
@@ -344,18 +428,41 @@ private extension ModelDownloaderService {
         let alternatives = sourceStore.availableSources(for: context.variant.id)
             .filter { $0.id != context.source.selectedSourceID }
             .filter { context.attemptedSourceIDs.contains($0.id) == false }
+        let originalSourceID = context.source.selectedSourceID
+        var resolvedFallback: ParakeetResolvedModelSource?
+        var fallbackURL: URL?
 
-        guard let fallback = alternatives.first(where: { $0.modelURL != nil }) else {
-            return false
+        for candidate in alternatives {
+            guard let candidateURL = candidate.modelURL,
+                  candidateURL.pathExtension.lowercased() == "onnx",
+                  candidate.runtimeCompatibility.unsupportedReason == nil else {
+                continue
+            }
+
+            _ = sourceStore.selectSource(id: candidate.id, for: context.variant.id)
+            let resolvedCandidate = sourceStore.resolvedSource(for: context.variant.id)
+            guard resolvedCandidate.error == nil,
+                  let resolvedModelURL = resolvedCandidate.modelURL else {
+                continue
+            }
+
+            resolvedFallback = resolvedCandidate
+            fallbackURL = resolvedModelURL
+            break
         }
 
-        _ = sourceStore.selectSource(id: fallback.id, for: context.variant.id)
-        let resolved = sourceStore.resolvedSource(for: context.variant.id)
-        guard let fallbackURL = resolved.modelURL else {
+        guard let resolved = resolvedFallback, let fallbackURL else {
+            if sourceStore.selectedSourceID(for: context.variant.id) != originalSourceID {
+                _ = sourceStore.selectSource(id: originalSourceID, for: context.variant.id)
+            }
             return false
         }
 
         let nextTask = session.downloadTask(with: fallbackURL)
+        nextTask.taskDescription = Self.taskDescription(
+            variantID: context.variant.id,
+            sourceID: resolved.selectedSourceID
+        )
 
         variantIDByTaskID.removeValue(forKey: previousTaskID)
         variantIDByTaskID[nextTask.taskIdentifier] = context.variant.id
@@ -366,7 +473,7 @@ private extension ModelDownloaderService {
         context.retryCount = 0
         context.completionError = nil
         context.expectedContentLength = nil
-        context.attemptedSourceIDs.insert(fallback.id)
+        context.attemptedSourceIDs.insert(resolved.selectedSourceID)
 
         logger.warning(
             "Primary source returned HTTP 404 for \(context.variant.id, privacy: .public). Auto-switching to source \(resolved.selectedSourceName, privacy: .public)."
@@ -417,10 +524,39 @@ private extension ModelDownloaderService {
         }
     }
 
+    private func finalizeDownloadedArtifacts(context: DownloadContext, modelURL: URL) async -> String? {
+        if let modelDataError = await downloadModelDataArtifactIfNeeded(
+            variant: context.variant,
+            source: context.source
+        ) {
+            cleanupArtifacts(variant: context.variant, source: context.source, modelURL: modelURL)
+            return modelDataError
+        }
+
+        if let tokenizerError = await downloadTokenizerArtifactIfNeeded(
+            variant: context.variant,
+            source: context.source
+        ) {
+            cleanupArtifacts(variant: context.variant, source: context.source, modelURL: modelURL)
+            return tokenizerError
+        }
+
+        if let validationError = validateDownloadedModel(
+            variant: context.variant,
+            at: modelURL,
+            source: context.source
+        ) {
+            cleanupArtifacts(variant: context.variant, source: context.source, modelURL: modelURL)
+            return validationError
+        }
+
+        return nil
+    }
+
     func downloadModelDataArtifactIfNeeded(
         variant: ModelVariant,
         source: ParakeetResolvedModelSource
-    ) -> String? {
+    ) async -> String? {
         guard let modelDataURL = source.modelDataURL else {
             return nil
         }
@@ -431,7 +567,7 @@ private extension ModelDownloaderService {
 
         let destinationURL = modelURL.appendingPathExtension("data")
 
-        if let downloadError = downloadAuxiliaryArtifact(
+        if let downloadError = await downloadAuxiliaryArtifact(
             from: modelDataURL,
             to: destinationURL,
             label: "model data"
@@ -442,7 +578,7 @@ private extension ModelDownloaderService {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: destinationURL.path),
               let fileSize = attrs[.size] as? Int64,
               fileSize >= 1_000_000 else {
-            return "Model data artifact is missing or incomplete. Retry the download."
+            return "Model data artifact is missing or incomplete. Automatic setup will retry."
         }
 
         return nil
@@ -451,7 +587,7 @@ private extension ModelDownloaderService {
     func downloadTokenizerArtifactIfNeeded(
         variant: ModelVariant,
         source: ParakeetResolvedModelSource
-    ) -> String? {
+    ) async -> String? {
         guard let tokenizerRemoteURL = source.tokenizerURL else {
             return nil
         }
@@ -460,7 +596,7 @@ private extension ModelDownloaderService {
             return "Tokenizer path resolution failed. Check Application Support permissions and retry."
         }
 
-        if let downloadError = downloadAuxiliaryArtifact(
+        if let downloadError = await downloadAuxiliaryArtifact(
             from: tokenizerRemoteURL,
             to: tokenizerDestinationURL,
             label: "tokenizer"
@@ -476,52 +612,30 @@ private extension ModelDownloaderService {
         return TokenizerArtifactValidator.validate(at: tokenizerDestinationURL, source: source)
     }
 
-    func downloadAuxiliaryArtifact(from sourceURL: URL, to destinationURL: URL, label: String) -> String? {
+    func downloadAuxiliaryArtifact(from sourceURL: URL, to destinationURL: URL, label: String) async -> String? {
         var lastError: String?
 
         for attempt in 0...maxRetryAttempts {
-            let semaphore = DispatchSemaphore(value: 0)
-            var completionError: String?
-
             let configuration = URLSessionConfiguration.ephemeral
             configuration.timeoutIntervalForRequest = 30
             configuration.timeoutIntervalForResource = auxiliaryArtifactTimeoutSeconds
             let session = URLSession(configuration: configuration)
+            defer {
+                session.invalidateAndCancel()
+            }
 
-            let task = session.downloadTask(with: sourceURL) { tempURL, response, error in
-                defer {
-                    session.invalidateAndCancel()
-                    semaphore.signal()
-                }
-
-                if let error {
-                    completionError = "Failed to download \(label) artifact: \(self.downloadFailureMessage(for: error, response: response))"
-                    return
-                }
+            var completionError: String?
+            do {
+                let (tempURL, response) = try await session.download(from: sourceURL)
 
                 if let httpResponse = response as? HTTPURLResponse,
                    (200...299).contains(httpResponse.statusCode) == false {
                     completionError = "Failed to download \(label) artifact: server returned HTTP \(httpResponse.statusCode)."
-                    return
-                }
-
-                guard let tempURL else {
-                    completionError = "Failed to download \(label) artifact: no file data received."
-                    return
-                }
-
-                if let moveError = Self.moveDownloadedFileAtomically(from: tempURL, to: destinationURL) {
+                } else if let moveError = Self.moveDownloadedFileAtomically(from: tempURL, to: destinationURL) {
                     completionError = "Failed to store \(label) artifact: \(moveError)"
-                    return
                 }
-            }
-
-            task.resume()
-            let waitResult = semaphore.wait(timeout: .now() + auxiliaryArtifactTimeoutSeconds + 5)
-
-            if waitResult == .timedOut {
-                task.cancel()
-                completionError = "Failed to download \(label) artifact: request timed out while finalizing model download."
+            } catch {
+                completionError = "Failed to download \(label) artifact: \(downloadFailureMessage(for: error))"
             }
 
             if completionError == nil {
@@ -558,12 +672,12 @@ private extension ModelDownloaderService {
 
         if let expectedLength = source.modelExpectedSizeBytes,
            fileSize < expectedLength {
-            return "Downloaded model size check failed (\(fileSize) < expected \(expectedLength) bytes). Retry the download."
+            return "Downloaded model size check failed (\(fileSize) < expected \(expectedLength) bytes). Automatic setup will retry."
         }
 
         if source.tokenizerURL != nil {
             guard let tokenizerURL = variant.tokenizerLocalURL(using: source) else {
-                return "Tokenizer path resolution failed after download. Retry the download."
+                return "Tokenizer path resolution failed after download. Automatic setup will retry."
             }
             if let tokenizerValidationError = TokenizerArtifactValidator.validate(at: tokenizerURL, source: source) {
                 return tokenizerValidationError
@@ -590,7 +704,7 @@ private extension ModelDownloaderService {
         do {
             pythonCommand = try runtimeBootstrapManager.ensureRuntimeReady()
         } catch {
-            return "Downloaded file saved, but ONNX preflight could not run because runtime bootstrap failed: \(error.localizedDescription)"
+            return "Downloaded file saved, but ONNX preflight is pending while runtime provisioning completes: \(error.localizedDescription)"
         }
 
         let scriptURL: URL
@@ -706,10 +820,10 @@ private extension ModelDownloaderService {
             return nil
         }
         if lowercased.contains("tokenizer_missing") || lowercased.contains("tokenizer_error") {
-            return "Tokenizer validation failed during ONNX preflight. Re-download model artifacts from Settings -> Provider."
+            return "Tokenizer validation failed during ONNX preflight. Automatic setup will retry."
         }
         if lowercased.contains("dependency_missing") || lowercased.contains("modulenotfounderror") {
-            return "Parakeet runtime dependencies are incomplete on this Mac. Try Repair Parakeet Runtime in Settings -> Provider, or switch to Light preset for guaranteed local setup."
+            return "Parakeet runtime dependencies are still installing. Runtime setup is automatic; retry shortly."
         }
         if details.isEmpty {
             return "ONNX preflight failed with exit status \(exitCode) and no diagnostics."
@@ -737,10 +851,36 @@ private extension ModelDownloaderService {
     }
 
     func validateSHA256(at fileURL: URL, expectedHex: String, label: String) -> String? {
-        guard let data = try? Data(contentsOf: fileURL) else {
+        guard let stream = InputStream(url: fileURL) else {
             return "\(label.capitalized) checksum validation failed: file is unreadable."
         }
-        let digest = SHA256.hash(data: data)
+
+        stream.open()
+        defer { stream.close() }
+
+        var hasher = SHA256()
+        let chunkSize = 64 * 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: chunkSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let bytesRead = stream.read(buffer, maxLength: chunkSize)
+            if bytesRead < 0 {
+                return "\(label.capitalized) checksum validation failed: \(stream.streamError?.localizedDescription ?? "stream read failed")."
+            }
+            if bytesRead == 0 {
+                break
+            }
+
+            let chunk = Data(bytes: buffer, count: bytesRead)
+            hasher.update(data: chunk)
+        }
+
+        if let streamError = stream.streamError {
+            return "\(label.capitalized) checksum validation failed: \(streamError.localizedDescription)."
+        }
+
+        let digest = hasher.finalize()
         let actual = digest.compactMap { String(format: "%02x", $0) }.joined()
         if actual.lowercased() != expectedHex.lowercased() {
             return "\(label.capitalized) checksum mismatch. Retry download from the built-in source."
@@ -781,4 +921,29 @@ private extension ModelDownloaderService {
         }
         return "Download failed: \(error.localizedDescription)"
     }
+
+    func postModelDownloadEvent(variantID: String, isReady: Bool, message: String?) {
+        if !isReady {
+            Task {
+                await ParakeetTelemetryStore.shared.recordModelDownloadFailure(message ?? "unknown")
+            }
+        }
+
+        var userInfo: [String: Any] = [
+            "variantID": variantID,
+            "isReady": isReady
+        ]
+        if let message {
+            userInfo["message"] = message
+        }
+        NotificationCenter.default.post(
+            name: .modelDownloadDidChange,
+            object: nil,
+            userInfo: userInfo
+        )
+    }
+}
+
+extension Notification.Name {
+    static let modelDownloadDidChange = Notification.Name("modelDownloadDidChange")
 }

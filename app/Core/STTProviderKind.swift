@@ -53,6 +53,20 @@ struct ModelVariant: Equatable, Identifiable {
     /// Relative path inside the app's Application Support directory.
     let relativePath: String
 
+    private struct ValidationSnapshot {
+        let isDownloaded: Bool
+        let validationStatus: String
+    }
+
+    private struct CachedValidationSnapshot {
+        let timestamp: Date
+        let snapshot: ValidationSnapshot
+    }
+
+    private static let validationCacheLock = NSLock()
+    private static var validationCache: [String: CachedValidationSnapshot] = [:]
+    private static let validationCacheTTL: TimeInterval = 0.75
+
     var configuredSource: ParakeetResolvedModelSource? {
         switch id {
         case ParakeetModelCatalog.ctc06BVariantID:
@@ -89,16 +103,7 @@ struct ModelVariant: Equatable, Identifiable {
     }
 
     var downloadUnavailableReason: String? {
-        guard let source = configuredSource else {
-            return "Model source is unavailable for variant '\(id)'."
-        }
-        if let error = source.error {
-            return "\(error) Open Settings -> Provider to choose a valid source."
-        }
-        if source.modelURL == nil {
-            return "Model source URL is not configured. Open Settings -> Provider and choose a source."
-        }
-        return nil
+        downloadUnavailableReason(using: configuredSource)
     }
 
     /// Resolved path on disk. Returns `nil` if Application Support is unavailable.
@@ -136,67 +141,106 @@ struct ModelVariant: Equatable, Identifiable {
 
     /// Whether the model file is present on disk and passes basic size validation.
     var isDownloaded: Bool {
-        guard let modelURL = localURL else { return false }
-        guard FileManager.default.fileExists(atPath: modelURL.path) else { return false }
+        currentValidationSnapshot().isDownloaded
+    }
+
+    /// Human-readable validation status for UI diagnostics.
+    var validationStatus: String {
+        currentValidationSnapshot().validationStatus
+    }
+
+    private func currentValidationSnapshot() -> ValidationSnapshot {
+        let source = configuredSource
+        let cacheKey = validationCacheKey(using: source)
+        if let snapshot = Self.cachedValidationSnapshot(for: cacheKey) {
+            return snapshot
+        }
+
+        let snapshot = buildValidationSnapshot(using: source)
+        Self.storeValidationSnapshot(snapshot, for: cacheKey)
+        return snapshot
+    }
+
+    private func validationCacheKey(using source: ParakeetResolvedModelSource?) -> String {
+        let sourceID = source?.selectedSourceID ?? "none"
+        let modelURLPath = localURL?.path ?? "unresolved"
+        let tokenizerName = source?.tokenizerFilename ?? "none"
+        return "\(id)|\(sourceID)|\(modelURLPath)|\(tokenizerName)"
+    }
+
+    private func buildValidationSnapshot(using source: ParakeetResolvedModelSource?) -> ValidationSnapshot {
+        if let sourceError = downloadUnavailableReason(using: source) {
+            return ValidationSnapshot(isDownloaded: false, validationStatus: sourceError)
+        }
+
+        guard let modelURL = localURL else {
+            return ValidationSnapshot(isDownloaded: false, validationStatus: "Path unavailable")
+        }
+        guard FileManager.default.fileExists(atPath: modelURL.path) else {
+            return ValidationSnapshot(isDownloaded: false, validationStatus: "Not downloaded")
+        }
 
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
               let fileSize = attrs[.size] as? Int64 else {
             logger.warning("Cannot read attributes for model at \(modelURL.path)")
-            return false
+            return ValidationSnapshot(isDownloaded: false, validationStatus: "Cannot read file")
         }
 
-        let source = configuredSource
         let minimumModelBytes = minimumValidModelBytes(using: source)
         if fileSize < minimumModelBytes {
             logger.warning("Model file too small (\(fileSize) bytes < \(minimumModelBytes) min), treating as incomplete")
-            return false
+            let status = "Incomplete (\(fileSize / 1_000_000) MB / \(minimumModelBytes / 1_000_000) MB minimum expected)"
+            return ValidationSnapshot(isDownloaded: false, validationStatus: status)
         }
 
         if let sidecarStatus = modelDataValidationStatus(using: source),
            sidecarStatus.isReady == false {
             logger.warning("Model sidecar not ready for \(self.id): \(sidecarStatus.detail)")
-            return false
+            return ValidationSnapshot(isDownloaded: false, validationStatus: sidecarStatus.detail)
         }
 
         if let tokenizerStatus = tokenizerValidationStatus(using: source),
            tokenizerStatus.isReady == false {
             logger.warning("Tokenizer not ready for \(self.id): \(tokenizerStatus.detail)")
-            return false
+            return ValidationSnapshot(isDownloaded: false, validationStatus: tokenizerStatus.detail)
         }
 
-        return true
+        return ValidationSnapshot(
+            isDownloaded: true,
+            validationStatus: "Ready (\(fileSize / 1_000_000) MB)"
+        )
     }
 
-    /// Human-readable validation status for UI diagnostics.
-    var validationStatus: String {
-        if let sourceError = downloadUnavailableReason {
-            return sourceError
+    private func downloadUnavailableReason(using source: ParakeetResolvedModelSource?) -> String? {
+        guard let source else {
+            return "Model source is unavailable for variant '\(id)'."
+        }
+        if let error = source.error {
+            return "\(error) The app will retry with the recommended source automatically."
+        }
+        if source.modelURL == nil {
+            return "Model source URL is not configured. Automatic setup will retry with the recommended source."
+        }
+        return nil
+    }
+
+    private static func cachedValidationSnapshot(for key: String) -> ValidationSnapshot? {
+        validationCacheLock.lock()
+        defer { validationCacheLock.unlock() }
+
+        guard let cached = validationCache[key] else { return nil }
+        if Date().timeIntervalSince(cached.timestamp) <= validationCacheTTL {
+            return cached.snapshot
         }
 
-        guard let modelURL = localURL else { return "Path unavailable" }
-        guard FileManager.default.fileExists(atPath: modelURL.path) else { return "Not downloaded" }
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
-              let fileSize = attrs[.size] as? Int64 else {
-            return "Cannot read file"
-        }
+        validationCache.removeValue(forKey: key)
+        return nil
+    }
 
-        let source = configuredSource
-        let minimumModelBytes = minimumValidModelBytes(using: source)
-        if fileSize < minimumModelBytes {
-            return "Incomplete (\(fileSize / 1_000_000) MB / \(minimumModelBytes / 1_000_000) MB minimum expected)"
-        }
-
-        if let sidecarStatus = modelDataValidationStatus(using: source),
-           sidecarStatus.isReady == false {
-            return sidecarStatus.detail
-        }
-
-        if let tokenizerStatus = tokenizerValidationStatus(using: source),
-           tokenizerStatus.isReady == false {
-            return tokenizerStatus.detail
-        }
-
-        return "Ready (\(fileSize / 1_000_000) MB)"
+    private static func storeValidationSnapshot(_ snapshot: ValidationSnapshot, for key: String) {
+        validationCacheLock.lock()
+        validationCache[key] = CachedValidationSnapshot(timestamp: Date(), snapshot: snapshot)
+        validationCacheLock.unlock()
     }
 
     func minimumValidModelBytes(using source: ParakeetResolvedModelSource?) -> Int64 {
@@ -217,16 +261,16 @@ struct ModelVariant: Equatable, Identifiable {
 
         let sidecarURL = modelURL.appendingPathExtension("data")
         guard FileManager.default.fileExists(atPath: sidecarURL.path) else {
-            return (false, "ONNX sidecar data file is missing (model.onnx.data). Re-download model artifacts.")
+            return (false, "ONNX sidecar data file is missing (model.onnx.data). Automatic setup will retry.")
         }
 
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: sidecarURL.path),
               let fileSize = attrs[.size] as? Int64 else {
-            return (false, "ONNX sidecar data file cannot be read. Re-download model artifacts.")
+            return (false, "ONNX sidecar data file cannot be read yet. Automatic setup will retry.")
         }
 
         guard fileSize >= 200_000_000 else {
-            return (false, "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB). Re-download model artifacts.")
+            return (false, "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB). Automatic setup will retry.")
         }
 
         return (true, "ONNX sidecar ready (\(sidecarURL.lastPathComponent), \(fileSize / 1_000_000) MB)")
@@ -237,14 +281,14 @@ struct ModelVariant: Equatable, Identifiable {
         guard let tokenizerURL = tokenizerLocalURL(using: source) else {
             return (
                 false,
-                "Tokenizer path unavailable. Download again to fetch tokenizer artifact."
+                "Tokenizer path unavailable. Automatic setup will retry."
             )
         }
 
         guard FileManager.default.fileExists(atPath: tokenizerURL.path) else {
             return (
                 false,
-                "Tokenizer file is missing. Re-download model from the selected source."
+                "Tokenizer file is missing. Automatic setup will retry."
             )
         }
 
@@ -252,14 +296,14 @@ struct ModelVariant: Equatable, Identifiable {
               let fileSize = attrs[.size] as? Int64 else {
             return (
                 false,
-                "Tokenizer file cannot be read. Re-download model artifacts."
+                "Tokenizer file cannot be read yet. Automatic setup will retry."
             )
         }
 
         if fileSize < 128 {
             return (
                 false,
-                "Tokenizer file appears incomplete (\(fileSize) bytes). Re-download model artifacts."
+                "Tokenizer file appears incomplete (\(fileSize) bytes). Automatic setup will retry."
             )
         }
 
@@ -297,15 +341,20 @@ extension ModelVariant {
 extension STTProviderKind {
     private static let defaultsKey = "selectedSTTProvider"
 
-    /// Load the user's persisted provider choice, defaulting to `.appleSpeech`.
+    /// Load the user's persisted provider choice, defaulting to `.parakeet`.
+    /// Runtime resolver will gracefully fallback while auto-setup completes.
     static func loadSelection() -> STTProviderKind {
         guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
               let kind = STTProviderKind(rawValue: raw) else {
-            logger.info("No saved STT provider, defaulting to Apple Speech")
-            return .appleSpeech
+            logger.info("No saved STT provider, defaulting to Parakeet")
+            return .parakeet
         }
         logger.info("Loaded STT provider selection: \(kind.rawValue)")
         return kind
+    }
+
+    static func hasPersistedSelection() -> Bool {
+        UserDefaults.standard.string(forKey: defaultsKey) != nil
     }
 
     /// Persist the user's provider choice.

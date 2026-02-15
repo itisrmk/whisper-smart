@@ -19,6 +19,7 @@ final class ParakeetSTTProvider: STTProvider {
     private let inferenceQueue = DispatchQueue(label: "com.visperflow.parakeet.inference", qos: .userInitiated)
     private let expectedSampleRate = 16_000
     private let runtimeBootstrapManager = ParakeetRuntimeBootstrapManager.shared
+    private let persistentRunner = ParakeetPersistentRunner.shared
     private let runnerTimeout: TimeInterval = 90
 
     private static let validationLock = NSLock()
@@ -68,8 +69,9 @@ final class ParakeetSTTProvider: STTProvider {
         guard variant.isDownloaded else {
             let status = variant.validationStatus
             logger.error("Parakeet model not ready: \(status), path: \(modelURL.path)")
+            triggerAutomaticProvisioning()
             throw STTError.providerError(
-                message: "Parakeet model not ready (\(status)). Download a complete model in Settings → Provider."
+                message: "Parakeet setup is running automatically (\(status)). Try dictation again in a few seconds."
             )
         }
 
@@ -78,6 +80,7 @@ final class ParakeetSTTProvider: STTProvider {
         do {
             pythonCommand = try runtimePythonCommand()
         } catch {
+            triggerAutomaticProvisioning(forceRuntimeRepair: true)
             throw STTError.providerError(message: error.localizedDescription)
         }
 
@@ -87,14 +90,24 @@ final class ParakeetSTTProvider: STTProvider {
                 updateRuntimeValidated(true)
             } else {
                 do {
-                    _ = try runRunner(
-                        pythonCommand: pythonCommand,
-                        scriptURL: scriptURL,
-                        arguments: checkArguments(modelURL: modelURL)
-                    )
+                    do {
+                        try persistentRunner.warmup(
+                            pythonCommand: pythonCommand,
+                            scriptURL: scriptURL,
+                            modelURL: modelURL,
+                            tokenizerPath: resolvedTokenizerPath()
+                        )
+                    } catch {
+                        logger.warning("Persistent Parakeet worker warmup failed; falling back to one-shot validation: \(error.localizedDescription, privacy: .public)")
+                        _ = try runRunner(
+                            pythonCommand: pythonCommand,
+                            scriptURL: scriptURL,
+                            arguments: checkArguments(modelURL: modelURL)
+                        )
+                    }
                     updateRuntimeValidated(true)
                     Self.cacheValidation(for: validationKey)
-                    logger.info("Parakeet runtime validation passed")
+                    logger.info("Parakeet persistent worker warmup passed")
                 } catch let error as STTError {
                     throw error
                 } catch {
@@ -154,6 +167,7 @@ final class ParakeetSTTProvider: STTProvider {
         do {
             pythonCommand = try runtimePythonCommand()
         } catch {
+            triggerAutomaticProvisioning(forceRuntimeRepair: true)
             updateInferenceInFlight(false)
             onError?(.providerError(message: error.localizedDescription))
             return
@@ -209,6 +223,16 @@ final class ParakeetSTTProvider: STTProvider {
 // MARK: - Inference
 
 private extension ParakeetSTTProvider {
+    func triggerAutomaticProvisioning(forceRuntimeRepair: Bool = false) {
+        Task {
+            await ParakeetProvisioningCoordinator.shared.ensureAutomaticSetupForCurrentSelection(
+                forceModelRetry: true,
+                forceRuntimeRepair: forceRuntimeRepair,
+                reason: "provider_request"
+            )
+        }
+    }
+
     func runInference(
         samples: [Float],
         modelURL: URL,
@@ -220,11 +244,23 @@ private extension ParakeetSTTProvider {
             try? FileManager.default.removeItem(at: tempAudioURL)
         }
 
-        return try runRunner(
-            pythonCommand: pythonCommand,
-            scriptURL: scriptURL,
-            arguments: inferenceArguments(modelURL: modelURL, audioURL: tempAudioURL)
-        )
+        do {
+            return try persistentRunner.transcribe(
+                pythonCommand: pythonCommand,
+                scriptURL: scriptURL,
+                modelURL: modelURL,
+                tokenizerPath: resolvedTokenizerPath(),
+                audioURL: tempAudioURL,
+                timeout: runnerTimeout
+            )
+        } catch {
+            logger.warning("Persistent Parakeet worker failed; falling back to one-shot runner: \(error.localizedDescription, privacy: .public)")
+            return try runRunner(
+                pythonCommand: pythonCommand,
+                scriptURL: scriptURL,
+                arguments: inferenceArguments(modelURL: modelURL, audioURL: tempAudioURL)
+            )
+        }
     }
 
     func writeTemporaryWAV(samples: [Float]) throws -> URL {
@@ -278,7 +314,7 @@ private extension ParakeetSTTProvider {
             try process.run()
         } catch {
             throw STTError.providerError(
-                message: "Failed to launch Python runtime '\(pythonCommand)'. Use Repair Parakeet Runtime in Settings -> Provider. Underlying error: \(error.localizedDescription)"
+                message: "Failed to launch local Parakeet runtime '\(pythonCommand)'. Runtime setup is automatic; retry in a few seconds. Underlying error: \(error.localizedDescription)"
             )
         }
 
@@ -291,7 +327,7 @@ private extension ParakeetSTTProvider {
                 process.interrupt()
             }
             throw STTError.providerError(
-                message: "Parakeet local inference timed out. Try again, or use Repair Parakeet Runtime in Settings → Provider."
+                message: "Parakeet local inference timed out. Runtime setup is automatic; try again."
             )
         }
 
@@ -456,13 +492,13 @@ private extension ParakeetSTTProvider {
     func mappedRunnerFailure(pythonCommand: String, exitCode: Int32, details: String) -> String {
         let lowercased = details.lowercased()
         if (lowercased.contains("no such file") || lowercased.contains("not found")) && lowercased.contains(pythonCommand.lowercased()) {
-            return "Python runtime '\(pythonCommand)' is unavailable. Run Repair Parakeet Runtime in Settings → Provider."
+            return "Local Parakeet runtime '\(pythonCommand)' is unavailable. Runtime setup is automatic; retry shortly."
         }
         if lowercased.contains("model_load_error") {
-            return "MODEL_LOAD_ERROR: Parakeet ONNX preflight failed. The model file is corrupt or incompatible. Re-download the model in Settings → Provider."
+            return "MODEL_LOAD_ERROR: Parakeet model setup may be incomplete. Setup will retry automatically; try dictation again shortly."
         }
         if lowercased.contains("tokenizer_missing") || lowercased.contains("tokenizer_error") {
-            return "Tokenizer validation failed. Re-download model artifacts in Settings -> Provider and verify the selected source."
+            return "Tokenizer setup is still finalizing automatically. Retry dictation in a few seconds."
         }
         if lowercased.contains("modulenotfounderror") || lowercased.contains("dependency_missing") {
             return details

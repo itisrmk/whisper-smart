@@ -171,21 +171,33 @@ private func runDownloadCompletionTransitionSmoke() throws {
     print("✓ Download completion transition smoke passed")
 }
 
-private func runUnsupportedSourceHandlingSmoke() throws {
+private func runLegacyCanarySourceMigrationSmoke() throws {
     let store = ParakeetModelSourceConfigurationStore.shared
-    _ = store.selectSource(id: "hf_canary_qwen_2_5b_safetensors", for: ParakeetModelCatalog.ctc06BVariantID)
+    let defaults = UserDefaults.standard
+    let variantID = ParakeetModelCatalog.ctc06BVariantID
+    let selectedSourceKey = "parakeet.modelSource.\(variantID).selected"
+
+    let previousValue = defaults.string(forKey: selectedSourceKey)
+    defaults.set("hf_canary_qwen_2_5b_safetensors", forKey: selectedSourceKey)
+
     defer {
-        _ = store.selectSource(id: "hf_parakeet_tdt06b_v3_onnx", for: ParakeetModelCatalog.ctc06BVariantID)
+        if let previousValue {
+            defaults.set(previousValue, forKey: selectedSourceKey)
+        } else {
+            defaults.removeObject(forKey: selectedSourceKey)
+        }
+        _ = store.selectSource(id: "hf_parakeet_tdt06b_v3_onnx", for: variantID)
     }
 
     let variant = ModelVariant.parakeetCTC06B
-    try expect(variant.hasDownloadSource == false, "Unsupported Canary safetensors source should not be downloadable")
+    try expect(variant.configuredSource?.selectedSourceID == "hf_parakeet_tdt06b_v3_onnx", "Legacy Canary source id should auto-fallback to the recommended Parakeet source")
+    try expect(variant.hasDownloadSource == true, "Parakeet should remain downloadable when legacy Canary source id is persisted")
     try expect(
-        variant.downloadUnavailableReason?.contains("only runs ONNX models") == true,
-        "Unsupported source should surface explicit ONNX guidance"
+        variant.downloadUnavailableReason == nil,
+        "Legacy Canary source selection should not block download"
     )
 
-    print("✓ Unsupported source handling smoke passed")
+    print("✓ Legacy Canary source migration smoke passed")
 }
 
 private func runTokenizerValidationSmoke() throws {
@@ -234,7 +246,7 @@ struct QASmokeMain {
             try runStateMachineSmoke()
             try runResolverSmoke()
             try runDownloadCompletionTransitionSmoke()
-            try runUnsupportedSourceHandlingSmoke()
+            try runLegacyCanarySourceMigrationSmoke()
             try runTokenizerValidationSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {

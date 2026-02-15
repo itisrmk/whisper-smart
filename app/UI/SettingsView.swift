@@ -1369,7 +1369,7 @@ private struct ProviderSettingsTab: View {
         var subtitle: String {
             switch self {
             case .light: return "Whisper Tiny/Base · fastest local"
-            case .balanced: return "Parakeet / Canary-Qwen · local experimental"
+            case .balanced: return "Parakeet TDT 0.6B v3 · local experimental"
             case .best: return "Whisper Large-v3 Turbo · highest local accuracy"
             case .cloud: return "OpenAI Whisper API · remote transcription"
             }
@@ -1411,7 +1411,7 @@ private struct ProviderSettingsTab: View {
         VStack(spacing: VFSpacing.lg) {
             NeuSection(icon: "waveform.and.mic", title: "Smart Model Selection") {
                 VStack(alignment: .leading, spacing: VFSpacing.lg) {
-                    Text("Choose a one-click STT preset. If host prerequisites (Apple Command Line Tools, make, Python/venv) are missing, setup fails fast with guidance and Whisper Smart falls back to Apple Speech.")
+                    Text("Choose a one-click STT preset. Parakeet runtime setup is automatic; Whisper local runtime still requires host build tools (Apple Command Line Tools + make).")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
 
@@ -1581,8 +1581,11 @@ private struct ProviderSettingsTab: View {
         switch preset {
         case .balanced:
             if !ModelVariant.parakeetCTC06B.isDownloaded {
-                profileActionButton(title: "Download", enabled: ModelVariant.parakeetCTC06B.hasDownloadSource) {
-                    downloadParakeetProfile()
+                switch downloadState.phase {
+                case .downloading(let progress):
+                    installedChip(label: "Preparing \(Int(progress * 100))%", color: VFColor.accentFallback)
+                default:
+                    installedChip(label: "Preparing…", color: VFColor.accentFallback)
                 }
             } else {
                 installedChip(label: "Installed")
@@ -1617,13 +1620,7 @@ private struct ProviderSettingsTab: View {
             selectProvider(.whisper)
             whisperInstaller.refreshState()
         case .balanced:
-            _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
-                id: "hf_parakeet_tdt06b_v3_onnx",
-                for: ModelVariant.parakeetCTC06B.id
-            )
-            selectProvider(.parakeet)
-            syncDownloadState(for: .parakeet)
-            downloadState.reset()
+            downloadParakeetProfile()
         case .best:
             whisperInstaller.setTier(.largeV3Turbo)
             selectProvider(.whisper)
@@ -1710,7 +1707,7 @@ private struct ProviderSettingsTab: View {
             }
         case .balanced:
             if !ModelVariant.parakeetCTC06B.isDownloaded {
-                return PresetStatus(message: "Download Parakeet model to enable Balanced.", severity: .warning)
+                return PresetStatus(message: "Parakeet model is downloading automatically for Balanced.", severity: .warning)
             }
         case .best:
             if !whisperRuntimeIsReady {
@@ -1767,13 +1764,13 @@ private struct ProviderSettingsTab: View {
             return "Setup needed: enable cloud fallback to use Cloud mode."
         }
         if normalized.contains("model") && normalized.contains("not ready") {
-            return "Setup needed: download the model to finish setup."
+            return "Setup needed: model setup is still running automatically."
         }
         if normalized.contains("runtime") && normalized.contains("not integrated") {
             return "Balanced currently uses Apple Speech fallback in this build."
         }
         if normalized.contains("runtime bootstrap failed") {
-            return "Setup needed: repair the local runtime, then try again."
+            return "Setup needed: local runtime is still provisioning. Try again shortly."
         }
         return "Setup needed before this provider can run."
     }
@@ -1845,6 +1842,7 @@ private struct ProviderDiagnosticsView: View {
     let diagnostics: ProviderRuntimeDiagnostics
     let selectedKind: STTProviderKind
     @State private var runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+    @State private var telemetrySnapshot = ParakeetTelemetrySnapshot.empty
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.sm) {
@@ -1924,10 +1922,18 @@ private struct ProviderDiagnosticsView: View {
                     .buttonStyle(.plain)
                     .disabled(runtimeBootstrapStatus.phase == .bootstrapping)
 
-                    Text("One-click repair reinstalls the local Parakeet Python runtime.")
+                    Text("Runtime setup is automatic. Use this only if provisioning previously failed.")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
                 }
+            }
+
+            if isParakeetContext {
+                DiagnosticLine(label: "Runtime retries", value: "\(telemetrySnapshot.runtimeBootstrapRetryCount)")
+                DiagnosticLine(label: "Model retries", value: "\(telemetrySnapshot.modelDownloadRetryCount)")
+                DiagnosticLine(label: "Transport retries", value: "\(telemetrySnapshot.modelDownloadTransportRetryCount)")
+                DiagnosticLine(label: "Top runtime failure", value: topRuntimeFailureLabel)
+                DiagnosticLine(label: "Top model failure", value: topModelFailureLabel)
             }
 
             ForEach(diagnostics.checks) { check in
@@ -1952,9 +1958,13 @@ private struct ProviderDiagnosticsView: View {
         }
         .onAppear {
             runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+            refreshTelemetrySnapshot()
         }
         .onReceive(NotificationCenter.default.publisher(for: .parakeetRuntimeBootstrapDidChange)) { _ in
             runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .parakeetTelemetryDidChange)) { _ in
+            refreshTelemetrySnapshot()
         }
     }
 
@@ -1970,17 +1980,45 @@ private struct ProviderDiagnosticsView: View {
     }
 
     private var shouldShowParakeetRepairAction: Bool {
-        selectedKind == .parakeet || diagnostics.requestedKind == .parakeet || diagnostics.effectiveKind == .parakeet
+        isParakeetContext && runtimeBootstrapStatus.phase == .failed
     }
 
     private var repairButtonLabel: String {
         switch runtimeBootstrapStatus.phase {
         case .idle, .failed:
-            return "Repair Parakeet Runtime"
+            return "Retry Runtime Setup"
         case .bootstrapping:
-            return "Repairing…"
+            return "Provisioning…"
         case .ready:
             return "Reinstall Runtime"
+        }
+    }
+
+    private var isParakeetContext: Bool {
+        selectedKind == .parakeet || diagnostics.requestedKind == .parakeet || diagnostics.effectiveKind == .parakeet
+    }
+
+    private var topRuntimeFailureLabel: String {
+        topFailureLabel(from: telemetrySnapshot.runtimeBootstrapFailureCounts)
+    }
+
+    private var topModelFailureLabel: String {
+        topFailureLabel(from: telemetrySnapshot.modelDownloadFailureCounts)
+    }
+
+    private func topFailureLabel(from bucket: [String: Int]) -> String {
+        guard let top = bucket.max(by: { $0.value < $1.value }) else {
+            return "None"
+        }
+        return "\(top.key) (\(top.value))"
+    }
+
+    private func refreshTelemetrySnapshot() {
+        Task {
+            let snapshot = await ParakeetTelemetryStore.shared.snapshotValue()
+            await MainActor.run {
+                telemetrySnapshot = snapshot
+            }
         }
     }
 
@@ -2013,26 +2051,7 @@ private struct DiagnosticLine: View {
 private struct ModelDownloadRow: View {
     let kind: STTProviderKind
     @ObservedObject var downloadState: ModelDownloadState
-    private let sourceStore = ParakeetModelSourceConfigurationStore.shared
-
-    @State private var selectedSourceID: String
-    @State private var customModelURL: String
-    @State private var customTokenizerURL: String
-    @State private var sourceConfigurationError: String?
-
-    init(kind: STTProviderKind, downloadState: ModelDownloadState) {
-        self.kind = kind
-        _downloadState = ObservedObject(wrappedValue: downloadState)
-
-        let sourceStore = ParakeetModelSourceConfigurationStore.shared
-        let variantID = downloadState.variant.id
-        let draft = sourceStore.customSourceDraft(for: variantID)
-
-        _selectedSourceID = State(initialValue: sourceStore.selectedSourceID(for: variantID))
-        _customModelURL = State(initialValue: draft.modelURL)
-        _customTokenizerURL = State(initialValue: draft.tokenizerURL)
-        _sourceConfigurationError = State(initialValue: nil)
-    }
+    @State private var autoSetupTriggered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.sm) {
@@ -2048,50 +2067,16 @@ private struct ModelDownloadRow: View {
 
                 Spacer()
 
-                downloadButton
+                statusChip
             }
 
             NeuDivider()
 
             DiagnosticLine(label: "Status", value: downloadStatusDetail)
-
-            HStack {
-                Text("Source")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
-                Spacer()
-                sourcePickerMenu
-            }
-
-            if selectedSourceID == ParakeetModelSourceOption.customSourceID {
-                customSourceEditor
-            }
-
-            if let unsupportedSourceReason {
-                HStack(alignment: .top, spacing: VFSpacing.xs) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
-                    Text(unsupportedSourceReason)
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
-                }
-            } else if let sourceError = downloadState.variant.downloadUnavailableReason {
-                HStack(alignment: .top, spacing: VFSpacing.xs) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
-                    Text("Setup needed: \(sourceError)")
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.34))
-                }
-            }
-
-            if let sourceConfigurationError {
-                Text(sourceConfigurationError)
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.error)
-            }
+            DiagnosticLine(label: "Source", value: downloadState.variant.configuredSourceDisplayName)
+            Text("Parakeet model setup runs automatically in the background.")
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textSecondary)
 
             // Progress bar
             if case .downloading(let progress) = downloadState.phase {
@@ -2101,8 +2086,7 @@ private struct ModelDownloadRow: View {
                     .padding(.vertical, VFSpacing.xxs)
             }
 
-            // Error message with retry hint
-            if case .failed(let message) = downloadState.phase, !isUnsupportedSourceSelected {
+            if case .failed(let message) = downloadState.phase {
                 HStack(alignment: .top, spacing: VFSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
@@ -2111,6 +2095,22 @@ private struct ModelDownloadRow: View {
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.error)
                 }
+
+                Button {
+                    triggerAutomaticSetup(forceRuntimeRepair: true)
+                } label: {
+                    Text("Retry setup")
+                        .font(VFFont.pillLabel)
+                        .foregroundStyle(VFColor.textPrimary)
+                        .padding(.horizontal, VFSpacing.md)
+                        .padding(.vertical, VFSpacing.sm)
+                        .background(
+                            Capsule()
+                                .fill(VFColor.glass3)
+                                .overlay(Capsule().stroke(VFColor.glassBorder, lineWidth: 0.8))
+                        )
+                }
+                .buttonStyle(.plain)
             }
 
             // Show validation status when ready
@@ -2121,342 +2121,123 @@ private struct ModelDownloadRow: View {
             }
         }
         .onAppear {
-            refreshSourceStateFromStore()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .parakeetModelSourceDidChange)) { _ in
-            refreshSourceStateFromStore()
-            downloadState.reset()
+            guard autoSetupTriggered == false else { return }
+            autoSetupTriggered = true
+            triggerAutomaticSetup()
         }
     }
 
     @ViewBuilder
-    private var downloadButton: some View {
-        if isUnsupportedSourceSelected {
-            compatibleSourceButton
-        } else {
-            switch downloadState.phase {
-            case .notReady:
-                downloadActionButton(
-                    label: "Download",
-                    icon: "arrow.down.circle.fill",
-                    isEnabled: downloadState.variant.hasDownloadSource
-                )
-
-            case .failed:
-                HStack(spacing: VFSpacing.sm) {
-                    downloadActionButton(
-                        label: "Retry",
-                        icon: "arrow.clockwise.circle.fill",
-                        isEnabled: downloadState.variant.hasDownloadSource
-                    )
-
-                    if hasAlternateSource {
-                        Button {
-                            switchToAlternateSource()
-                        } label: {
-                            Text("Try mirror")
-                                .font(VFFont.pillLabel)
-                                .foregroundStyle(VFColor.textPrimary)
-                                .padding(.horizontal, VFSpacing.md)
-                                .padding(.vertical, VFSpacing.sm)
-                                .background(
-                                    Capsule()
-                                        .fill(VFColor.glass3)
-                                        .overlay(
-                                            Capsule()
-                                                .stroke(VFColor.glassBorder, lineWidth: 0.8)
-                                        )
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isDownloading)
-                        .opacity(isDownloading ? 0.5 : 1.0)
-                    }
-                }
-
-            case .downloading:
-                Button {
-                    ModelDownloaderService.shared.cancel(
-                        variant: downloadState.variant,
-                        state: downloadState
-                    )
-                } label: {
-                    HStack(spacing: VFSpacing.sm) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Cancel")
-                            .font(VFFont.pillLabel)
-                    }
-                    .foregroundStyle(VFColor.textSecondary)
-                    .padding(.horizontal, VFSpacing.lg)
-                    .padding(.vertical, VFSpacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(VFColor.glass3)
-                            .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
-                            .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
-                    )
-                }
-                .buttonStyle(.plain)
-
-            case .ready:
-                HStack(spacing: VFSpacing.sm) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(VFColor.success)
-                    Text("Ready")
-                        .font(VFFont.pillLabel)
-                        .foregroundStyle(VFColor.success)
-                }
-                .padding(.horizontal, VFSpacing.md)
-                .padding(.vertical, VFSpacing.sm)
-            }
-        }
-    }
-
-    private func downloadActionButton(label: String, icon: String, isEnabled: Bool) -> some View {
-        Button {
-            ModelDownloaderService.shared.download(
-                variant: downloadState.variant,
-                state: downloadState
-            )
-        } label: {
-            HStack(spacing: VFSpacing.xs) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
-                Text(label)
-                    .font(VFFont.pillLabel)
-            }
-            .foregroundStyle(isEnabled ? VFColor.textOnAccent : VFColor.textDisabled)
-            .padding(.horizontal, VFSpacing.md)
-            .padding(.vertical, VFSpacing.sm)
-            .background(
-                Capsule()
-                    .fill(isEnabled ? VFColor.accentFallback : VFColor.glass3)
-                    .overlay(
-                        Capsule()
-                            .stroke(isEnabled ? VFColor.glassBorder : VFColor.neuInsetLight, lineWidth: 1)
-                    )
-                    .shadow(
-                        color: isEnabled ? VFColor.accentFallback.opacity(0.20) : VFColor.neuDark.opacity(0.35),
-                        radius: isEnabled ? 6 : 3,
-                        y: isEnabled ? 2 : 1
-                )
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-    }
-
-    private var compatibleSourceButton: some View {
-        Button {
-            useCompatibleSource()
-        } label: {
-            HStack(spacing: VFSpacing.xs) {
-                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                    .font(.system(size: 12, weight: .medium))
-                Text("Use compatible source")
-                    .font(VFFont.pillLabel)
-            }
-            .foregroundStyle(VFColor.textOnAccent)
-            .padding(.horizontal, VFSpacing.md)
-            .padding(.vertical, VFSpacing.sm)
-            .background(
-                Capsule()
-                    .fill(VFColor.accentFallback)
-                    .overlay(
-                        Capsule()
-                            .stroke(VFColor.glassBorder, lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(isDownloading)
-        .opacity(isDownloading ? 0.5 : 1.0)
-    }
-
-    private var sourcePickerMenu: some View {
-        Menu {
-            ForEach(sourceOptions) { source in
-                Button(source.displayName) {
-                    selectSource(source.id)
-                }
-            }
-        } label: {
+    private var statusChip: some View {
+        switch downloadState.phase {
+        case .ready:
             HStack(spacing: VFSpacing.sm) {
-                Text(selectedSourceDisplayName)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(VFColor.success)
+                Text("Ready")
                     .font(VFFont.pillLabel)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(VFColor.success)
             }
-            .foregroundStyle(VFColor.textPrimary)
             .padding(.horizontal, VFSpacing.md)
             .padding(.vertical, VFSpacing.sm)
-            .background(
-                Capsule()
-                    .fill(VFColor.glass3)
-                    .shadow(color: VFColor.neuDark, radius: 3, x: 2, y: 2)
-                    .shadow(color: VFColor.neuLight, radius: 1, x: -1, y: -1)
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .disabled(isDownloading)
-        .opacity(isDownloading ? 0.5 : 1.0)
-    }
-
-    private var customSourceEditor: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.xs) {
-            Text("Custom source")
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textSecondary)
-
-            TextField("https://example.com/model.onnx or model.safetensors", text: $customModelURL)
-                .textFieldStyle(.roundedBorder)
-                .disabled(isDownloading)
-
-            TextField("https://example.com/vocab.txt (optional)", text: $customTokenizerURL)
-                .textFieldStyle(.roundedBorder)
-                .disabled(isDownloading)
-
-            HStack {
-                Button("Save Custom Source") {
-                    saveCustomSource()
-                }
-                .buttonStyle(.plain)
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textPrimary)
-                .padding(.horizontal, VFSpacing.md)
-                .padding(.vertical, VFSpacing.xs)
-                .background(
-                    Capsule()
-                        .fill(VFColor.accentFallback)
-                        .overlay(
-                            Capsule()
-                                .stroke(VFColor.glassBorder, lineWidth: 1)
-                        )
-                )
-                .disabled(isDownloading)
-                .opacity(isDownloading ? 0.5 : 1.0)
-
-                Text("Model must be .onnx, .safetensors, or .nemo; tokenizer supports .model, .json, or .txt.")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
+        case .downloading(let progress):
+            HStack(spacing: VFSpacing.sm) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                    .tint(VFColor.textPrimary)
+                Text("Preparing \(Int(progress * 100))%")
+                    .font(VFFont.pillLabel)
+                    .foregroundStyle(VFColor.textPrimary)
             }
+            .padding(.horizontal, VFSpacing.md)
+            .padding(.vertical, VFSpacing.sm)
+        case .failed:
+            HStack(spacing: VFSpacing.sm) {
+                Image(systemName: "xmark.octagon.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(VFColor.error)
+                Text("Retrying")
+                    .font(VFFont.pillLabel)
+                    .foregroundStyle(VFColor.error)
+            }
+            .padding(.horizontal, VFSpacing.md)
+            .padding(.vertical, VFSpacing.sm)
+        case .notReady:
+            HStack(spacing: VFSpacing.sm) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                    .tint(VFColor.textPrimary)
+                Text("Preparing…")
+                    .font(VFFont.pillLabel)
+                    .foregroundStyle(VFColor.textPrimary)
+            }
+            .padding(.horizontal, VFSpacing.md)
+            .padding(.vertical, VFSpacing.sm)
         }
-    }
-
-    private var sourceOptions: [ParakeetModelSourceOption] {
-        sourceStore.availableSources(for: downloadState.variant.id)
-    }
-
-    private var selectedSourceOption: ParakeetModelSourceOption? {
-        sourceOptions.first(where: { $0.id == selectedSourceID })
-    }
-
-    private var unsupportedSourceReason: String? {
-        selectedSourceOption?.runtimeCompatibility.unsupportedReason
-    }
-
-    private var isUnsupportedSourceSelected: Bool {
-        unsupportedSourceReason != nil
-    }
-
-    private var hasAlternateSource: Bool {
-        sourceOptions.contains(where: { $0.id != selectedSourceID && $0.modelURL != nil })
-    }
-
-    private var selectedSourceDisplayName: String {
-        sourceOptions.first(where: { $0.id == selectedSourceID })?.displayName
-            ?? downloadState.variant.configuredSourceDisplayName
-    }
-
-    private var isDownloading: Bool {
-        if case .downloading = downloadState.phase { return true }
-        return false
     }
 
     private var downloadStatusDetail: String {
         switch downloadState.phase {
         case .notReady:
-            return "Not downloaded"
+            return "Preparing automatically"
         case .downloading(let progress):
+            if progress >= 0.99 {
+                return "Finalizing model artifacts…"
+            }
             return "Downloading (\(Int(progress * 100))%)"
         case .ready:
             return "Ready - \(downloadState.variant.validationStatus)"
         case .failed:
-            return "Download failed"
+            return "Setup failed. Automatic retry available."
         }
     }
 
-    private func refreshSourceStateFromStore() {
-        selectedSourceID = sourceStore.selectedSourceID(for: downloadState.variant.id)
-        let draft = sourceStore.customSourceDraft(for: downloadState.variant.id)
-        customModelURL = draft.modelURL
-        customTokenizerURL = draft.tokenizerURL
-    }
+    private func triggerAutomaticSetup(forceRuntimeRepair: Bool = false) {
+        guard kind == .parakeet else { return }
 
-    private func selectSource(_ sourceID: String) {
-        let error = sourceStore.selectSource(id: sourceID, for: downloadState.variant.id)
-        sourceConfigurationError = error
-        refreshSourceStateFromStore()
-        downloadState.reset()
-    }
-
-    private func switchToAlternateSource() {
-        guard let alternate = sourceOptions.first(where: { $0.id != selectedSourceID && $0.modelURL != nil }) else {
-            return
-        }
-        selectSource(alternate.id)
-    }
-
-    private func useCompatibleSource() {
-        if sourceOptions.contains(where: { $0.id == "hf_parakeet_tdt06b_v3_onnx" }) {
-            selectSource("hf_parakeet_tdt06b_v3_onnx")
-            return
+        let sourceStore = ParakeetModelSourceConfigurationStore.shared
+        if sourceStore.selectedSourceID(for: downloadState.variant.id) != "hf_parakeet_tdt06b_v3_onnx" {
+            _ = sourceStore.selectSource(id: "hf_parakeet_tdt06b_v3_onnx", for: downloadState.variant.id)
+            downloadState.reset()
         }
 
-        guard let compatible = sourceOptions.first(where: {
-            $0.id != selectedSourceID &&
-            $0.modelURL != nil &&
-            $0.runtimeCompatibility.unsupportedReason == nil
-        }) else {
-            return
+        Task {
+            await ParakeetProvisioningCoordinator.shared.ensureAutomaticSetupForCurrentSelection(
+                forceModelRetry: false,
+                forceRuntimeRepair: forceRuntimeRepair,
+                reason: "settings_model_row"
+            )
         }
 
-        selectSource(compatible.id)
-    }
-
-    private func saveCustomSource() {
-        let error = sourceStore.saveCustomSource(
-            modelURLString: customModelURL,
-            tokenizerURLString: customTokenizerURL,
-            for: downloadState.variant.id
+        ModelDownloaderService.shared.download(
+            variant: downloadState.variant,
+            state: downloadState
         )
-        sourceConfigurationError = error
-        refreshSourceStateFromStore()
-        downloadState.reset()
     }
 
     private func sanitizedDownloadError(_ message: String) -> String {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return "Download failed. Please retry."
+            return "Setup is still running. Retry in a few seconds."
         }
 
         let lower = trimmed.lowercased()
         if lower.contains("http 404") {
-            return "Source file was not found (HTTP 404). Try mirror or retry."
+            return "Model host returned HTTP 404. Setup will retry automatically."
         }
         if lower.contains("http") {
-            return "Download failed due to a network/server issue. Please retry."
+            return "Network or host error while downloading model. Setup will retry automatically."
         }
         if lower.contains("timed out") {
-            return "Download timed out. Please retry."
+            return "Download timed out. Setup will retry automatically."
         }
 
         let firstLine = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
         if firstLine.count > 140 || lower.contains("domain=") || lower.contains("code=") {
-            return "Download failed. Please retry."
+            return "Setup is still running. Retry in a few seconds."
         }
         return firstLine
     }

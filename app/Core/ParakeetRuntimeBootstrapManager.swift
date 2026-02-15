@@ -32,13 +32,13 @@ final class ParakeetRuntimeBootstrapManager {
     private let queue = DispatchQueue(label: "com.visperflow.parakeet.bootstrap", qos: .userInitiated)
     private let statusLock = NSLock()
     private let fileManager = FileManager.default
-    // Keep runtime bootstrap on widely available wheels only.
-    // onnx-asr is optional at runtime and must not block one-click setup.
-    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece"]
+    // Include onnx-asr because current Parakeet inference relies on it for
+    // robust model signature support across ONNX exports.
+    private let runtimeDependencies = ["numpy", "onnxruntime", "sentencepiece", "onnx-asr"]
 
     private var status = ParakeetRuntimeBootstrapStatus(
         phase: .idle,
-        detail: "Runtime not bootstrapped yet. It will auto-install on first Parakeet use.",
+        detail: "Runtime not bootstrapped yet. It will auto-install in the background.",
         runtimeDirectory: nil,
         pythonCommand: nil,
         timestamp: Date()
@@ -58,7 +58,7 @@ final class ParakeetRuntimeBootstrapManager {
             do {
                 try runCommand(
                     executablePath: "/usr/bin/env",
-                    arguments: [override, "-c", "import numpy, onnxruntime, sentencepiece"],
+                    arguments: [override, "-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
                     step: "verify VISPERFLOW_PARAKEET_PYTHON override"
                 )
                 updateStatus(
@@ -97,7 +97,17 @@ private extension ParakeetRuntimeBootstrapManager {
             ?? ProcessInfo.processInfo.environment["VISPERFLOW_BOOTSTRAP_PYTHON"]
             ?? "python3"
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "python3" : trimmed
+        let candidate = trimmed.isEmpty ? "python3" : trimmed
+
+        if candidate == "python3" {
+            for fallback in ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"] {
+                if fileManager.isExecutableFile(atPath: fallback) {
+                    return fallback
+                }
+            }
+        }
+
+        return candidate
     }
 
     func pythonOverrideCommand() -> String? {
@@ -113,16 +123,30 @@ private extension ParakeetRuntimeBootstrapManager {
 
         let runtimeRoot = try resolveRuntimeRootDirectory()
         let venvDirectory = runtimeRoot.appendingPathComponent("venv", isDirectory: true)
-        let pythonURL = venvDirectory.appendingPathComponent("bin/python3")
+        let venvPythonURL = venvDirectory.appendingPathComponent("bin/python3")
+        let sitePackagesDirectory = runtimeRoot.appendingPathComponent("python-packages", isDirectory: true)
+        let shimPythonURL = runtimeRoot
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("python3")
 
-        if !forceRepair, isManagedRuntimeReady(pythonURL: pythonURL) {
+        if !forceRepair, isManagedRuntimeReady(pythonURL: venvPythonURL) {
             updateStatus(
                 phase: .ready,
-                detail: "Managed runtime ready at \(pythonURL.path).",
+                detail: "Managed runtime ready at \(venvPythonURL.path).",
                 runtimeDirectory: runtimeRoot,
-                pythonCommand: pythonURL.path
+                pythonCommand: venvPythonURL.path
             )
-            return pythonURL.path
+            return venvPythonURL.path
+        }
+
+        if !forceRepair, isManagedSitePackagesRuntimeReady(shimPythonURL: shimPythonURL) {
+            updateStatus(
+                phase: .ready,
+                detail: "Managed runtime ready at \(shimPythonURL.path).",
+                runtimeDirectory: runtimeRoot,
+                pythonCommand: shimPythonURL.path
+            )
+            return shimPythonURL.path
         }
 
         updateStatus(
@@ -133,63 +157,72 @@ private extension ParakeetRuntimeBootstrapManager {
         )
 
         do {
-            if forceRepair || !fileManager.fileExists(atPath: pythonURL.path) {
+            if supportsVenv(pythonCommand: bootstrapPythonCommand) {
+                if forceRepair || !fileManager.fileExists(atPath: venvPythonURL.path) {
+                    updateStatus(
+                        phase: .bootstrapping,
+                        detail: "Creating virtual environment…",
+                        runtimeDirectory: runtimeRoot,
+                        pythonCommand: nil
+                    )
+                    try runCommand(
+                        executablePath: "/usr/bin/env",
+                        arguments: [bootstrapPythonCommand, "-m", "venv", venvDirectory.path],
+                        step: "create Python virtual environment"
+                    )
+                }
+
                 updateStatus(
                     phase: .bootstrapping,
-                    detail: "Creating virtual environment…",
+                    detail: "Upgrading pip…",
                     runtimeDirectory: runtimeRoot,
-                    pythonCommand: nil
+                    pythonCommand: venvPythonURL.path
                 )
                 try runCommand(
-                    executablePath: "/usr/bin/env",
-                    arguments: [bootstrapPythonCommand, "-m", "venv", venvDirectory.path],
-                    step: "create Python virtual environment"
+                    executablePath: venvPythonURL.path,
+                    arguments: ["-m", "pip", "install", "--upgrade", "pip"],
+                    step: "upgrade pip"
                 )
+
+                updateStatus(
+                    phase: .bootstrapping,
+                    detail: "Installing dependencies (numpy, onnxruntime, sentencepiece, onnx-asr)…",
+                    runtimeDirectory: runtimeRoot,
+                    pythonCommand: venvPythonURL.path
+                )
+                try runCommand(
+                    executablePath: venvPythonURL.path,
+                    arguments: ["-m", "pip", "install", "--upgrade"] + runtimeDependencies,
+                    step: "install Parakeet runtime dependencies"
+                )
+
+                updateStatus(
+                    phase: .bootstrapping,
+                    detail: "Verifying Python runtime imports…",
+                    runtimeDirectory: runtimeRoot,
+                    pythonCommand: venvPythonURL.path
+                )
+                try runCommand(
+                    executablePath: venvPythonURL.path,
+                    arguments: ["-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+                    step: "verify runtime dependencies"
+                )
+
+                updateStatus(
+                    phase: .ready,
+                    detail: "Managed runtime ready at \(venvPythonURL.path).",
+                    runtimeDirectory: runtimeRoot,
+                    pythonCommand: venvPythonURL.path
+                )
+                return venvPythonURL.path
             }
 
-            updateStatus(
-                phase: .bootstrapping,
-                detail: "Upgrading pip…",
-                runtimeDirectory: runtimeRoot,
-                pythonCommand: pythonURL.path
+            bootstrapLogger.warning("Python venv support unavailable; using managed PYTHONPATH runtime mode")
+            return try setupManagedSitePackagesRuntime(
+                runtimeRoot: runtimeRoot,
+                sitePackagesDirectory: sitePackagesDirectory,
+                shimPythonURL: shimPythonURL
             )
-            try runCommand(
-                executablePath: pythonURL.path,
-                arguments: ["-m", "pip", "install", "--upgrade", "pip"],
-                step: "upgrade pip"
-            )
-
-            updateStatus(
-                phase: .bootstrapping,
-                detail: "Installing dependencies (numpy, onnxruntime, sentencepiece)…",
-                runtimeDirectory: runtimeRoot,
-                pythonCommand: pythonURL.path
-            )
-            try runCommand(
-                executablePath: pythonURL.path,
-                arguments: ["-m", "pip", "install", "--upgrade"] + runtimeDependencies,
-                step: "install Parakeet runtime dependencies"
-            )
-
-            updateStatus(
-                phase: .bootstrapping,
-                detail: "Verifying Python runtime imports…",
-                runtimeDirectory: runtimeRoot,
-                pythonCommand: pythonURL.path
-            )
-            try runCommand(
-                executablePath: pythonURL.path,
-                arguments: ["-c", "import numpy, onnxruntime, sentencepiece"],
-                step: "verify runtime dependencies"
-            )
-
-            updateStatus(
-                phase: .ready,
-                detail: "Managed runtime ready at \(pythonURL.path).",
-                runtimeDirectory: runtimeRoot,
-                pythonCommand: pythonURL.path
-            )
-            return pythonURL.path
         } catch {
             let message = "Parakeet runtime bootstrap failed: \(error.localizedDescription)"
             updateStatus(
@@ -199,45 +232,15 @@ private extension ParakeetRuntimeBootstrapManager {
                 pythonCommand: nil
             )
             throw ParakeetRuntimeBootstrapError(
-                message: "\(message) Use Repair Parakeet Runtime in Settings → Provider."
+                message: "\(message) Runtime setup is managed automatically; retry Parakeet after a few seconds."
             )
         }
     }
 
     func validateHostPrerequisites() throws {
-        guard commandExists("xcode-select") else {
-            throw ParakeetRuntimeBootstrapError(
-                message: "Missing Apple Command Line Tools (xcode-select not found). Install with 'xcode-select --install', then retry."
-            )
-        }
-
         guard commandExists(bootstrapPythonCommand) else {
             throw ParakeetRuntimeBootstrapError(
-                message: "Python runtime prerequisite not found ('\(bootstrapPythonCommand)'). Install Python 3 and ensure it is on PATH, or set VISPERFLOW_PARAKEET_BOOTSTRAP_PYTHON."
-            )
-        }
-
-        do {
-            try runCommand(
-                executablePath: "/usr/bin/env",
-                arguments: ["xcode-select", "-p"],
-                step: "verify Apple Command Line Tools"
-            )
-        } catch {
-            throw ParakeetRuntimeBootstrapError(
-                message: "Apple Command Line Tools are required for one-click runtime setup. Run 'xcode-select --install' and open Xcode once to finish setup."
-            )
-        }
-
-        do {
-            try runCommand(
-                executablePath: "/usr/bin/env",
-                arguments: [bootstrapPythonCommand, "-m", "venv", "--help"],
-                step: "verify Python venv support"
-            )
-        } catch {
-            throw ParakeetRuntimeBootstrapError(
-                message: "Python prerequisite is missing venv support. Install a full Python 3 build (with venv), then retry one-click runtime setup."
+                message: "Python runtime prerequisite not found ('\(bootstrapPythonCommand)'). Automatic setup requires Python 3."
             )
         }
     }
@@ -297,7 +300,7 @@ private extension ParakeetRuntimeBootstrapManager {
         do {
             try runCommand(
                 executablePath: pythonURL.path,
-                arguments: ["-c", "import numpy, onnxruntime, sentencepiece"],
+                arguments: ["-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
                 step: "verify managed runtime"
             )
             return true
@@ -305,6 +308,134 @@ private extension ParakeetRuntimeBootstrapManager {
             bootstrapLogger.warning("Managed runtime verification failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    func supportsVenv(pythonCommand: String) -> Bool {
+        do {
+            _ = try runCommand(
+                executablePath: "/usr/bin/env",
+                arguments: [pythonCommand, "-m", "venv", "--help"],
+                step: "detect Python venv support"
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func isManagedSitePackagesRuntimeReady(shimPythonURL: URL) -> Bool {
+        guard fileManager.fileExists(atPath: shimPythonURL.path) else { return false }
+        do {
+            try runCommand(
+                executablePath: shimPythonURL.path,
+                arguments: ["-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+                step: "verify managed PYTHONPATH runtime"
+            )
+            return true
+        } catch {
+            bootstrapLogger.warning("Managed PYTHONPATH runtime verification failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
+    func setupManagedSitePackagesRuntime(
+        runtimeRoot: URL,
+        sitePackagesDirectory: URL,
+        shimPythonURL: URL
+    ) throws -> String {
+        try fileManager.createDirectory(at: sitePackagesDirectory, withIntermediateDirectories: true)
+
+        updateStatus(
+            phase: .bootstrapping,
+            detail: "Preparing managed Python runtime…",
+            runtimeDirectory: runtimeRoot,
+            pythonCommand: bootstrapPythonCommand
+        )
+
+        do {
+            _ = try runCommand(
+                executablePath: "/usr/bin/env",
+                arguments: [bootstrapPythonCommand, "-m", "pip", "--version"],
+                step: "verify pip availability"
+            )
+        } catch {
+            _ = try runCommand(
+                executablePath: "/usr/bin/env",
+                arguments: [bootstrapPythonCommand, "-m", "ensurepip", "--upgrade"],
+                step: "bootstrap pip"
+            )
+        }
+
+        updateStatus(
+            phase: .bootstrapping,
+            detail: "Installing dependencies (numpy, onnxruntime, sentencepiece, onnx-asr)…",
+            runtimeDirectory: runtimeRoot,
+            pythonCommand: bootstrapPythonCommand
+        )
+        _ = try runCommand(
+            executablePath: "/usr/bin/env",
+            arguments: [bootstrapPythonCommand, "-m", "pip", "install", "--upgrade", "--target", sitePackagesDirectory.path] + runtimeDependencies,
+            step: "install managed runtime dependencies"
+        )
+
+        let shimURL = try ensureShimPythonLauncher(
+            runtimeRoot: runtimeRoot,
+            basePythonCommand: bootstrapPythonCommand,
+            sitePackagesDirectory: sitePackagesDirectory,
+            shimPythonURL: shimPythonURL
+        )
+
+        updateStatus(
+            phase: .bootstrapping,
+            detail: "Verifying Python runtime imports…",
+            runtimeDirectory: runtimeRoot,
+            pythonCommand: shimURL.path
+        )
+        _ = try runCommand(
+            executablePath: shimURL.path,
+            arguments: ["-c", "import numpy, onnxruntime, sentencepiece, onnx_asr"],
+            step: "verify managed runtime dependencies"
+        )
+
+        updateStatus(
+            phase: .ready,
+            detail: "Managed runtime ready at \(shimURL.path).",
+            runtimeDirectory: runtimeRoot,
+            pythonCommand: shimURL.path
+        )
+        return shimURL.path
+    }
+
+    func ensureShimPythonLauncher(
+        runtimeRoot: URL,
+        basePythonCommand: String,
+        sitePackagesDirectory: URL,
+        shimPythonURL: URL
+    ) throws -> URL {
+        let shimDirectory = runtimeRoot.appendingPathComponent("bin", isDirectory: true)
+        try fileManager.createDirectory(at: shimDirectory, withIntermediateDirectories: true)
+
+        let escapedSitePackages = shellQuoted(sitePackagesDirectory.path)
+        let escapedPythonCommand = shellQuoted(basePythonCommand)
+        let script = """
+        #!/bin/sh
+        set -e
+        SITE_PACKAGES=\(escapedSitePackages)
+        if [ -n "$PYTHONPATH" ]; then
+          export PYTHONPATH="$SITE_PACKAGES:$PYTHONPATH"
+        else
+          export PYTHONPATH="$SITE_PACKAGES"
+        fi
+        exec /usr/bin/env \(escapedPythonCommand) "$@"
+        """
+
+        try script.write(to: shimPythonURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shimPythonURL.path)
+        return shimPythonURL
+    }
+
+    func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 
     @discardableResult

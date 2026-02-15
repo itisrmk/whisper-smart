@@ -7,16 +7,16 @@ struct TokenizerArtifactValidator {
 
     static func validate(at tokenizerURL: URL, source: ParakeetResolvedModelSource?) -> String? {
         guard FileManager.default.fileExists(atPath: tokenizerURL.path) else {
-            return "Tokenizer artifact is missing after download. Retry the download."
+            return "Tokenizer artifact is missing after download. Automatic setup will retry."
         }
 
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: tokenizerURL.path),
               let fileSize = attrs[.size] as? Int64 else {
-            return "Tokenizer artifact cannot be read. Check disk permissions and retry."
+            return "Tokenizer artifact cannot be read. Automatic setup will retry."
         }
 
         guard fileSize >= 128 else {
-            return "Tokenizer artifact appears incomplete (\(fileSize) bytes). Retry the download."
+            return "Tokenizer artifact appears incomplete (\(fileSize) bytes). Automatic setup will retry."
         }
 
         let extensionValue = tokenizerURL.pathExtension.lowercased()
@@ -24,14 +24,14 @@ struct TokenizerArtifactValidator {
         case "txt":
             guard let text = try? String(contentsOf: tokenizerURL),
                   text.split(whereSeparator: \.isNewline).count >= 10 else {
-                return "Tokenizer vocab.txt is invalid or empty. Retry the download."
+                return "Tokenizer vocab.txt is invalid or empty. Automatic setup will retry."
             }
         case "json":
             guard let data = try? Data(contentsOf: tokenizerURL),
                   let object = try? JSONSerialization.jsonObject(with: data),
                   let dictionary = object as? [String: Any],
                   dictionary.isEmpty == false else {
-                return "Tokenizer JSON is invalid. Retry the download."
+                return "Tokenizer JSON is invalid. Automatic setup will retry."
             }
         case "model":
             break
@@ -43,10 +43,7 @@ struct TokenizerArtifactValidator {
            expectedSize > 0 {
             let tolerantMinimum = max(2_048, Int64(Double(expectedSize) * 0.85))
             if fileSize < tolerantMinimum {
-                if source?.isBuiltInSource == true {
-                    return "Tokenizer download looks incomplete (\(fileSize) bytes; expected around \(expectedSize)). Retry once; if it still fails, switch to the built-in mirror source in Settings → Provider."
-                }
-                return "Tokenizer download looks incomplete (\(fileSize) bytes; expected around \(expectedSize)). Retry the download."
+                return "Tokenizer download looks incomplete (\(fileSize) bytes; expected around \(expectedSize)). Automatic setup will retry."
             }
         }
 
