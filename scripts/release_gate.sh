@@ -17,7 +17,7 @@ echo "==> Release gate: production build"
 swift build -c release
 
 echo "==> Release gate: DMG package"
-bash scripts/package_dmg.sh
+ALLOW_ADHOC_SIGNING="${ALLOW_ADHOC_SIGNING:-1}" bash scripts/package_dmg.sh
 
 DMG_PATH="$REPO_ROOT/.build/release/Whisper-Smart-mac.dmg"
 if [[ ! -f "$DMG_PATH" ]]; then

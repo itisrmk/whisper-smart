@@ -18,7 +18,9 @@ Use this checklist before triggering `.github/workflows/release-dmg.yml`.
 - [ ] Version number selected.
 - [ ] Release notes prepared.
 - [ ] Rollback release tag identified.
-- [ ] If `production` channel: signing + notarization secrets are available.
+- [ ] Signing certificate secrets are available (all channels).
+- [ ] If `production` channel: notarization secrets are available.
+- [ ] Release artifact is Developer ID signed (not ad-hoc) to preserve macOS permission continuity across updates.
 
 ## Approval
 - [ ] `checklist_confirmed=true` set in workflow dispatch.

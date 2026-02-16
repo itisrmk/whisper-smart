@@ -62,4 +62,4 @@ bash scripts/release_gate.sh
 
 ## Notes
 
-For broad public distribution, use Apple Developer ID signing + notarization to avoid Gatekeeper warnings.
+Use a stable Developer ID code signature for every shipped update. Ad-hoc signatures can cause macOS permission grants (Accessibility/Microphone/Speech) to reset across updates.

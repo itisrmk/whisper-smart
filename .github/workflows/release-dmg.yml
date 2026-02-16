@@ -40,6 +40,9 @@ jobs:
           fetch-depth: 0
 
       - name: Release Gate
+        env:
+          VERSION: ${{ inputs.version }}
+          ALLOW_ADHOC_SIGNING: 1
         run: bash scripts/release_gate.sh
 
       - name: Enforce Release Checklist Confirmation
@@ -48,17 +51,29 @@ jobs:
           echo "Checklist confirmation is required before tagging a release."
           exit 1
 
-      - name: Validate Production Notarization Secrets
-        if: ${{ inputs.channel == 'production' }}
+      - name: Validate Signing Certificate Secrets
         env:
           CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for var_name in CERT_P12 CERT_PASSWORD; do
+            value="${!var_name:-}"
+            if [[ -z "$value" ]]; then
+              echo "Missing required signing secret: $var_name"
+              exit 1
+            fi
+          done
+
+      - name: Validate Production Notarization Secrets
+        if: ${{ inputs.channel == 'production' }}
+        env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          for var_name in CERT_P12 CERT_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+          for var_name in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
             value="${!var_name:-}"
             if [[ -z "$value" ]]; then
               echo "Missing required production secret: $var_name"
@@ -66,15 +81,13 @@ jobs:
             fi
           done
 
-      - name: Import Production Signing Certificate
-        if: ${{ inputs.channel == 'production' }}
+      - name: Import Signing Certificate
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
-      - name: Build Production-Signed DMG
-        if: ${{ inputs.channel == 'production' }}
+      - name: Build Signed DMG
         env:
           VERSION: ${{ inputs.version }}
         run: |

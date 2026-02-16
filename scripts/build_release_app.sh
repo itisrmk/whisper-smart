@@ -9,6 +9,8 @@ BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 LOGO_PATH="${LOGO_PATH:-$REPO_ROOT/logo.png}"
 PARAKEET_RUNNER_SOURCE="$REPO_ROOT/scripts/parakeet_infer.py"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-2OzsmMn7xg17Iasd5fvc98QIM5ycXEIYzrQT/X5WET0=}"
+EXPECTED_BUNDLE_ID="com.whispersmart.desktop"
+ALLOW_ADHOC_SIGNING="${ALLOW_ADHOC_SIGNING:-0}"
 
 BUILD_DIR="$REPO_ROOT/.build/release"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
@@ -16,6 +18,14 @@ CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 EXECUTABLE_PATH="$MACOS_DIR/$APP_NAME"
+
+if [[ "$BUNDLE_ID" != "$EXPECTED_BUNDLE_ID" ]]; then
+  echo "Refusing build: bundle id mismatch."
+  echo "Expected: $EXPECTED_BUNDLE_ID"
+  echo "Received: $BUNDLE_ID"
+  echo "Changing bundle id resets macOS permission trust records."
+  exit 1
+fi
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
@@ -104,13 +114,43 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 if command -v codesign >/dev/null 2>&1; then
-  SIGNING_IDENTITY="${CODESIGN_IDENTITY:--}"
-  if [ "$SIGNING_IDENTITY" = "-" ]; then
+  SIGNING_IDENTITY="${CODESIGN_IDENTITY:-}"
+  if [[ -z "$SIGNING_IDENTITY" ]]; then
+    SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | sed -n -E 's/.*"([^"]*Developer ID Application[^"]*)".*/\1/p' | head -n 1 || true)"
+  fi
+
+  if [[ -z "$SIGNING_IDENTITY" ]]; then
+    if [[ "$ALLOW_ADHOC_SIGNING" == "1" ]]; then
+      SIGNING_IDENTITY="-"
+      echo "WARNING: no Developer ID identity found; falling back to ad-hoc signing (ALLOW_ADHOC_SIGNING=1)."
+      echo "WARNING: ad-hoc signed updates can cause permission reset issues across app updates."
+    else
+      echo "No Developer ID signing identity found."
+      echo "Set CODESIGN_IDENTITY to a Developer ID Application certificate, or run with ALLOW_ADHOC_SIGNING=1 for non-release local builds."
+      exit 1
+    fi
+  fi
+
+  if [[ "$SIGNING_IDENTITY" == "-" ]]; then
     echo "Applying ad-hoc code signature..."
     codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
   else
     echo "Applying Developer ID signature: ${SIGNING_IDENTITY}"
     codesign --force --deep --timestamp --options runtime --sign "$SIGNING_IDENTITY" "$APP_BUNDLE" >/dev/null
+  fi
+
+  SIGNATURE_INFO="$(codesign -dv --verbose=4 "$APP_BUNDLE" 2>&1 || true)"
+  SIGNATURE_KIND="$(printf '%s\n' "$SIGNATURE_INFO" | sed -n -E 's/^Signature=(.*)$/\1/p' | head -n 1)"
+  TEAM_ID="$(printf '%s\n' "$SIGNATURE_INFO" | sed -n -E 's/^TeamIdentifier=(.*)$/\1/p' | head -n 1)"
+  if [[ "$ALLOW_ADHOC_SIGNING" != "1" ]]; then
+    if [[ "$SIGNATURE_KIND" == "adhoc" ]]; then
+      echo "Build failed: app is ad-hoc signed."
+      exit 1
+    fi
+    if [[ -z "$TEAM_ID" || "$TEAM_ID" == "not set" ]]; then
+      echo "Build failed: TeamIdentifier missing after signing."
+      exit 1
+    fi
   fi
 fi
 
