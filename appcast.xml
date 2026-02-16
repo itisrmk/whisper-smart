@@ -6,6 +6,17 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.20</title>
+      <description>Whisper Smart v0.2.20
+- Fixed provider-switch crash path by deferring active-session swaps safely.
+- Removed automatic Parakeet provisioning on install/switch; setup is now explicit from Provider tab.
+- Added first-run onboarding with mode selection, permission readiness, and guided setup handoff.
+- Upgraded Settings UX and refreshed visual baselines for the new product flow.</description>
+      <pubDate>Mon, 16 Feb 2026 00:04:51 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.20/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.20" sparkle:version="202602151704" length="4755532" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.19</title>
       <description>Whisper Smart v0.2.19
 - Fixed Sparkle auto-update flow so background checks are not forced on every launch.
