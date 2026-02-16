@@ -7,19 +7,29 @@ import AppKit
 /// and an iOS-like rounded aesthetic.
 struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .general
+    @State private var showOnboarding: Bool
+    @State private var onboardingPreset: OnboardingPreset = .localPrivate
+    @State private var onboardingStep: OnboardingStep = .welcome
 
-    init(initialTabRawValue: String? = nil) {
+    init(initialTabRawValue: String? = nil, forceOnboarding: Bool = false) {
         if let initialTabRawValue,
            let initialTab = SettingsTab(rawValue: initialTabRawValue) {
             _selectedTab = State(initialValue: initialTab)
         } else {
             _selectedTab = State(initialValue: .general)
         }
+        _showOnboarding = State(initialValue: forceOnboarding || ProductOnboardingPreferences.shouldPresentOnLaunch)
     }
 
     var body: some View {
         HStack(spacing: VFSpacing.md) {
-            SettingsSidebar(selectedTab: $selectedTab)
+            SettingsSidebar(
+                selectedTab: $selectedTab,
+                onOpenOnboarding: {
+                    onboardingStep = .welcome
+                    showOnboarding = true
+                }
+            )
                 .frame(width: 220)
 
             VStack(alignment: .leading, spacing: VFSpacing.md) {
@@ -62,8 +72,35 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: VFRadius.window, style: .continuous)
                 .stroke(VFColor.glassBorder.opacity(0.9), lineWidth: 1)
         )
+        .overlay(alignment: .center) {
+            if showOnboarding {
+                ProductOnboardingOverlay(
+                    step: $onboardingStep,
+                    selectedPreset: $onboardingPreset,
+                    onClose: {
+                        ProductOnboardingPreferences.markCompleted()
+                        showOnboarding = false
+                    },
+                    onApplyPreset: { preset in
+                        applyOnboardingPreset(preset)
+                    },
+                    onOpenProvider: {
+                        withAnimation(VFAnimation.springSnappy) {
+                            selectedTab = .provider
+                        }
+                    }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .zIndex(12)
+            }
+        }
         .vfForcedDarkTheme()
         .animation(VFAnimation.fadeMedium, value: selectedTab)
+        .animation(VFAnimation.fadeFast, value: showOnboarding)
+        .onReceive(NotificationCenter.default.publisher(for: .productOnboardingRequested)) { _ in
+            onboardingStep = .welcome
+            showOnboarding = true
+        }
     }
 
     @ViewBuilder
@@ -77,6 +114,25 @@ struct SettingsView: View {
             ProviderSettingsTab()
         case .history:
             TranscriptHistoryTab()
+        }
+    }
+
+    private func applyOnboardingPreset(_ preset: OnboardingPreset) {
+        let providerKind: STTProviderKind
+        switch preset {
+        case .localPrivate:
+            providerKind = .whisper
+        case .balanced:
+            providerKind = .parakeet
+        case .cloudFast:
+            providerKind = .openaiAPI
+        }
+
+        providerKind.saveSelection()
+        NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+
+        withAnimation(VFAnimation.springSnappy) {
+            selectedTab = .provider
         }
     }
 }
@@ -116,8 +172,320 @@ private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+private enum OnboardingStep: Int {
+    case welcome
+    case permissions
+    case finish
+}
+
+private enum OnboardingPreset: String, CaseIterable, Identifiable {
+    case localPrivate
+    case balanced
+    case cloudFast
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .localPrivate: return "Local Private"
+        case .balanced: return "Balanced"
+        case .cloudFast: return "Cloud Fast"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .localPrivate: return "Whisper local, no cloud dependency"
+        case .balanced: return "Parakeet local model + manual install"
+        case .cloudFast: return "OpenAI Whisper API with your key"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .localPrivate: return "internaldrive.fill"
+        case .balanced: return "bird.fill"
+        case .cloudFast: return "cloud.bolt.fill"
+        }
+    }
+}
+
+private struct ProductOnboardingOverlay: View {
+    @Binding var step: OnboardingStep
+    @Binding var selectedPreset: OnboardingPreset
+    let onClose: () -> Void
+    let onApplyPreset: (OnboardingPreset) -> Void
+    let onOpenProvider: () -> Void
+
+    @State private var permissionSnapshot = PermissionDiagnostics.snapshot()
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.black.opacity(0.48))
+                .ignoresSafeArea()
+                .onTapGesture {}
+
+            VStack(alignment: .leading, spacing: VFSpacing.md) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                        Text("Welcome to Whisper Smart")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(VFColor.textPrimary)
+                        Text("Set your default dictation mode and verify permissions in under a minute.")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                    }
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(VFColor.textSecondary)
+                    }
+                    .buttonStyle(GlassIconButtonStyle())
+                }
+
+                HStack(spacing: VFSpacing.xs) {
+                    onboardingStepChip(label: "1", title: "Mode", isActive: step == .welcome)
+                    onboardingStepChip(label: "2", title: "Permissions", isActive: step == .permissions)
+                    onboardingStepChip(label: "3", title: "Finish", isActive: step == .finish)
+                }
+
+                switch step {
+                case .welcome:
+                    welcomeContent
+                case .permissions:
+                    permissionsContent
+                case .finish:
+                    finishContent
+                }
+
+                HStack {
+                    if step != .welcome {
+                        Button("Back") {
+                            withAnimation(VFAnimation.fadeFast) {
+                                step = OnboardingStep(rawValue: max(0, step.rawValue - 1)) ?? .welcome
+                            }
+                        }
+                        .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
+                    }
+
+                    Spacer()
+
+                    switch step {
+                    case .welcome:
+                        Button("Continue") {
+                            withAnimation(VFAnimation.fadeFast) {
+                                step = .permissions
+                            }
+                        }
+                        .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
+                    case .permissions:
+                        Button("Continue") {
+                            withAnimation(VFAnimation.fadeFast) {
+                                step = .finish
+                            }
+                        }
+                        .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
+                    case .finish:
+                        Button("Apply and Open Provider") {
+                            onApplyPreset(selectedPreset)
+                            onOpenProvider()
+                            onClose()
+                        }
+                        .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
+                    }
+                }
+            }
+            .padding(VFSpacing.lg)
+            .frame(width: 700)
+            .background(
+                RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [VFColor.surface1.opacity(0.98), VFColor.surface2.opacity(0.95)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
+                            .stroke(VFColor.glassBorder.opacity(0.95), lineWidth: 1)
+                    )
+                    .shadow(color: VFShadow.raisedControlColor.opacity(0.35), radius: 20, y: 10)
+            )
+            .overlay(
+                GrainTexture(opacity: 0.012, cellSize: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous))
+            )
+        }
+        .onAppear {
+            permissionSnapshot = PermissionDiagnostics.snapshot()
+        }
+    }
+
+    private var welcomeContent: some View {
+        VStack(alignment: .leading, spacing: VFSpacing.md) {
+            Text("Choose your default mode")
+                .font(VFFont.settingsBody)
+                .foregroundStyle(VFColor.textPrimary)
+
+            HStack(spacing: VFSpacing.sm) {
+                ForEach(OnboardingPreset.allCases) { preset in
+                    Button {
+                        selectedPreset = preset
+                    } label: {
+                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                            HStack {
+                                Image(systemName: preset.icon)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(VFColor.textPrimary)
+                                Spacer()
+                                if selectedPreset == preset {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(VFColor.accentFallback)
+                                }
+                            }
+                            Text(preset.title)
+                                .font(VFFont.settingsBody)
+                                .foregroundStyle(VFColor.textPrimary)
+                            Text(preset.subtitle)
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+                                .lineLimit(2)
+                        }
+                        .padding(VFSpacing.md)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(
+                                    selectedPreset == preset
+                                        ? VFColor.surface3.opacity(0.92)
+                                        : VFColor.surface2.opacity(0.70)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(
+                                            selectedPreset == preset
+                                                ? VFColor.accentFallback.opacity(0.75)
+                                                : VFColor.glassBorder.opacity(0.7),
+                                            lineWidth: 0.8
+                                        )
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var permissionsContent: some View {
+        VStack(alignment: .leading, spacing: VFSpacing.md) {
+            Text("Permission readiness")
+                .font(VFFont.settingsBody)
+                .foregroundStyle(VFColor.textPrimary)
+
+            VStack(spacing: VFSpacing.xs) {
+                permissionRow("Accessibility", status: permissionSnapshot.accessibility)
+                permissionRow("Microphone", status: permissionSnapshot.microphone)
+                permissionRow("Speech Recognition", status: permissionSnapshot.speechRecognition)
+            }
+
+            HStack(spacing: VFSpacing.sm) {
+                Button("Request Permissions") {
+                    PermissionDiagnostics.requestAllInOrder { snap in
+                        permissionSnapshot = snap
+                    }
+                }
+                .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
+
+                Button("Open Privacy Settings") {
+                    guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") else { return }
+                    NSWorkspace.shared.open(url)
+                }
+                .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
+            }
+        }
+    }
+
+    private var finishContent: some View {
+        VStack(alignment: .leading, spacing: VFSpacing.md) {
+            Text("You are ready")
+                .font(VFFont.settingsBody)
+                .foregroundStyle(VFColor.textPrimary)
+
+            VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                Text("Selected mode: \(selectedPreset.title)")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textPrimary)
+                Text("Next: open Provider to install local model/runtime or save your cloud API key.")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+                Text("Tip: you can reopen onboarding anytime from the sidebar.")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+            }
+            .padding(VFSpacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(VFColor.surface2.opacity(0.72))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(VFColor.glassBorder.opacity(0.75), lineWidth: 0.8)
+                    )
+            )
+        }
+    }
+
+    private func onboardingStepChip(label: String, title: String, isActive: Bool) -> some View {
+        HStack(spacing: VFSpacing.xs) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(isActive ? VFColor.textPrimary : VFColor.textSecondary)
+            Text(title)
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(isActive ? VFColor.textPrimary : VFColor.textSecondary)
+        }
+        .padding(.horizontal, VFSpacing.sm)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill((isActive ? VFColor.surface3 : VFColor.surface2).opacity(isActive ? 0.95 : 0.7))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke((isActive ? VFColor.accentFallback : VFColor.glassBorder).opacity(0.75), lineWidth: 0.7)
+                )
+        )
+    }
+
+    private func permissionRow(_ title: String, status: PermissionDiagnostics.Status) -> some View {
+        HStack {
+            Text(title)
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textPrimary)
+            Spacer()
+            Text(status.actionHint)
+                .font(VFFont.settingsFootnote)
+                .foregroundStyle(status.isUsable ? VFColor.success : VFColor.textSecondary)
+        }
+        .padding(.horizontal, VFSpacing.sm)
+        .padding(.vertical, VFSpacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(VFColor.surface2.opacity(0.72))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(VFColor.glassBorder.opacity(0.72), lineWidth: 0.7)
+                )
+        )
+    }
+}
+
 private struct SettingsSidebar: View {
     @Binding var selectedTab: SettingsTab
+    let onOpenOnboarding: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.md) {
@@ -170,6 +538,16 @@ private struct SettingsSidebar: View {
             }
 
             Spacer(minLength: VFSpacing.sm)
+
+            Button(action: onOpenOnboarding) {
+                HStack(spacing: VFSpacing.xs) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Onboarding")
+                        .font(VFFont.settingsFootnote)
+                }
+            }
+            .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
 
             HStack(spacing: VFSpacing.xs) {
                 Image(systemName: "applelogo")
@@ -1883,6 +2261,7 @@ private struct HotkeySettingsTab: View {
 
 extension Notification.Name {
     static let hotkeyBindingDidChange = Notification.Name("hotkeyBindingDidChange")
+    static let productOnboardingRequested = Notification.Name("productOnboardingRequested")
 }
 
 // MARK: - Notification for provider changes
@@ -1981,7 +2360,7 @@ private struct ProviderSettingsTab: View {
         VStack(spacing: VFSpacing.lg) {
             NeuSection(icon: "waveform.and.mic", title: "Smart Model Selection") {
                 VStack(alignment: .leading, spacing: VFSpacing.lg) {
-                    Text("Choose a one-click STT preset. Parakeet runtime setup is automatic; Whisper local runtime still requires host build tools (Apple Command Line Tools + make).")
+                    Text("Choose a one-click STT preset. Parakeet setup is user-initiated from this tab; Whisper local runtime still requires host build tools (Apple Command Line Tools + make).")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
 
@@ -2434,7 +2813,7 @@ private struct ProviderSettingsTab: View {
             }
         case .balanced:
             if !ModelVariant.parakeetCTC06B.isDownloaded {
-                return PresetStatus(message: "Parakeet model is downloading automatically for Balanced.", severity: .warning)
+                return PresetStatus(message: "Parakeet is selected, but model/runtime are not installed yet.", severity: .warning)
             }
         case .best:
             if !whisperRuntimeIsReady {
@@ -2510,13 +2889,13 @@ private struct ProviderSettingsTab: View {
             return "Setup needed: enable cloud fallback to use Cloud mode."
         }
         if normalized.contains("model") && normalized.contains("not ready") {
-            return "Setup needed: model setup is still running automatically."
+            return "Setup needed: install the Parakeet model/runtime from Provider settings."
         }
         if normalized.contains("runtime") && normalized.contains("not integrated") {
             return "Balanced currently uses Apple Speech fallback in this build."
         }
         if normalized.contains("runtime bootstrap failed") {
-            return "Setup needed: local runtime is still provisioning. Try again shortly."
+            return "Setup needed: local runtime is not ready. Open Provider and run setup."
         }
         return "Setup needed before this provider can run."
     }
@@ -2725,7 +3104,7 @@ private struct ProviderDiagnosticsView: View {
                     .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
                     .disabled(runtimeBootstrapStatus.phase == .bootstrapping)
 
-                    Text("Runtime setup is automatic. Use this only if provisioning previously failed.")
+                    Text("Runtime setup is in-app. Use this when manual setup or prior provisioning failed.")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
                 }
@@ -2854,7 +3233,6 @@ private struct DiagnosticLine: View {
 private struct ModelDownloadRow: View {
     let kind: STTProviderKind
     @ObservedObject var downloadState: ModelDownloadState
-    @State private var autoSetupTriggered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.sm) {
@@ -2886,7 +3264,7 @@ private struct ModelDownloadRow: View {
             DiagnosticLine(label: "Status", value: downloadStatusDetail)
             DiagnosticLine(label: "Source", value: downloadState.variant.configuredSourceDisplayName)
             DiagnosticLine(label: "Files", value: "encoder-model.int8.onnx + decoder_joint-model.int8.onnx + config.json + nemo128.onnx + vocab.txt")
-            Text("Parakeet model setup runs automatically in the background.")
+            Text("Installation is manual. Click Install when you want to set up Parakeet.")
                 .font(VFFont.settingsCaption)
                 .foregroundStyle(VFColor.textSecondary)
 
@@ -2918,13 +3296,24 @@ private struct ModelDownloadRow: View {
                 }
 
                 Button {
-                    triggerAutomaticSetup(forceRuntimeRepair: true)
+                    triggerSetup(forceRuntimeRepair: true)
                 } label: {
                     Text("Retry setup")
                         .font(VFFont.pillLabel)
                         .foregroundStyle(VFColor.textPrimary)
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
+            }
+
+            if case .notReady = downloadState.phase {
+                Button {
+                    triggerSetup()
+                } label: {
+                    Text("Install Parakeet")
+                        .font(VFFont.pillLabel)
+                        .foregroundStyle(VFColor.textOnAccent)
+                }
+                .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
             }
 
             // Show validation status when ready
@@ -2943,11 +3332,6 @@ private struct ModelDownloadRow: View {
                         .stroke(VFColor.glassBorder.opacity(0.85), lineWidth: 0.8)
                 )
         )
-        .onAppear {
-            guard autoSetupTriggered == false else { return }
-            autoSetupTriggered = true
-            triggerAutomaticSetup()
-        }
     }
 
     private var modelArtwork: some View {
@@ -3029,7 +3413,7 @@ private struct ModelDownloadRow: View {
                 Image(systemName: "xmark.octagon.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(VFColor.error)
-                Text("Retrying")
+                Text("Setup failed")
                     .font(VFFont.pillLabel)
                     .foregroundStyle(VFColor.error)
             }
@@ -3038,11 +3422,10 @@ private struct ModelDownloadRow: View {
             .background(statusChipBackground(color: VFColor.error))
         case .notReady:
             HStack(spacing: VFSpacing.sm) {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .controlSize(.small)
-                    .tint(VFColor.textPrimary)
-                Text("Preparing…")
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(VFColor.textPrimary)
+                Text("Not installed")
                     .font(VFFont.pillLabel)
                     .foregroundStyle(VFColor.textPrimary)
             }
@@ -3075,7 +3458,7 @@ private struct ModelDownloadRow: View {
     private var downloadStatusDetail: String {
         switch downloadState.phase {
         case .notReady:
-            return "Preparing automatically"
+            return "Not installed"
         case .downloading(let progress):
             if progress >= 0.99 {
                 return "Finalizing model artifacts…"
@@ -3084,11 +3467,11 @@ private struct ModelDownloadRow: View {
         case .ready:
             return "Ready - \(downloadState.variant.validationStatus)"
         case .failed:
-            return "Setup failed. Automatic retry available."
+            return "Setup failed. Retry when ready."
         }
     }
 
-    private func triggerAutomaticSetup(forceRuntimeRepair: Bool = false) {
+    private func triggerSetup(forceRuntimeRepair: Bool = false) {
         guard kind == .parakeet else { return }
 
         let sourceStore = ParakeetModelSourceConfigurationStore.shared
@@ -3101,7 +3484,7 @@ private struct ModelDownloadRow: View {
             await ParakeetProvisioningCoordinator.shared.ensureAutomaticSetupForCurrentSelection(
                 forceModelRetry: false,
                 forceRuntimeRepair: forceRuntimeRepair,
-                reason: "settings_model_row"
+                reason: "manual_setup_button"
             )
         }
 
@@ -3119,22 +3502,22 @@ private struct ModelDownloadRow: View {
 
         let lower = trimmed.lowercased()
         if lower.contains("decoder joint artifact") || lower.contains("nemo normalizer artifact") || lower.contains("config artifact") {
-            return "Finalizing required model files. Setup will retry automatically if needed."
+            return "Finalizing required model files. Press Retry setup in a few seconds."
         }
         if lower.contains("incomplete") {
-            return "Model download is incomplete. Setup will continue automatically."
+            return "Model download is incomplete. Retry setup."
         }
         if lower.contains("not connected to internet") || lower.contains("no internet connection") {
-            return "No internet connection detected. Setup will resume when network is available."
+            return "No internet connection detected. Retry after reconnecting."
         }
         if lower.contains("http 404") {
-            return "Model host returned HTTP 404. Setup will retry automatically."
+            return "Model host returned HTTP 404. Retry setup or switch source."
         }
         if lower.contains("http") {
-            return "Network or host error while downloading model. Setup will retry automatically."
+            return "Network or host error while downloading model. Retry setup."
         }
         if lower.contains("timed out") {
-            return "Download timed out. Setup will retry automatically."
+            return "Download timed out. Retry setup."
         }
 
         let firstLine = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? trimmed

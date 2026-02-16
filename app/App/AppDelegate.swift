@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var usesProviderFallback = false
     private var healthBadgeLabel = ""
     private var activityBadgeLabel = ""
+    private var deferredProviderRefresh = false
 
     // MARK: - Lifecycle
 
@@ -104,7 +105,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeModelDownloadChanges()
         observeTranscriptLogActions()
         observeOverlaySettingsChanges()
-        scheduleAutomaticParakeetSetup()
+
+        if ProductOnboardingPreferences.shouldPresentOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                self?.settingsWindow.showSettings(initialTabRawValue: "general", forceOnboarding: true)
+            }
+        }
 
         // Request all permissions in the correct order, then activate
         // the hotkey monitor once we know the permission landscape.
@@ -233,6 +239,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             self.previousCoreState = coreState
+
+            if self.deferredProviderRefresh,
+               coreState == .idle || coreState == .success || coreState.isError {
+                self.deferredProviderRefresh = false
+                self.refreshProviderResolution(logReason: "Applying deferred provider change after active session")
+            }
         }
 
         stateMachine.onAudioLevelChange = { [weak self] level in
@@ -310,11 +322,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            if self.deferProviderRefreshIfSessionActive(reason: "Provider changed in settings") {
+                return
+            }
             self.refreshProviderResolution(logReason: "Provider changed in settings")
 
-            if STTProviderKind.loadSelection() == .parakeet {
-                self.scheduleAutomaticParakeetSetup()
-            } else {
+            if STTProviderKind.loadSelection() != .parakeet {
                 Task {
                     await ParakeetProvisioningCoordinator.shared.cancelRetries()
                 }
@@ -339,8 +352,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            if self.deferProviderRefreshIfSessionActive(reason: "Parakeet model source changed") {
+                return
+            }
             self.refreshProviderResolution(logReason: "Parakeet model source changed")
-            self.scheduleAutomaticParakeetSetup(forceModelRetry: true)
         }
     }
 
@@ -407,19 +422,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         publishProviderDiagnostics(diagnostics)
     }
 
-    private func scheduleAutomaticParakeetSetup(forceModelRetry: Bool = false, forceRuntimeRepair: Bool = false) {
-        // Zero-touch setup for first-time installs: select Parakeet by default.
-        if STTProviderKind.hasPersistedSelection() == false {
-            STTProviderKind.parakeet.saveSelection()
-            refreshProviderResolution(logReason: "Auto-selected Parakeet provider on first launch")
-        }
-
-        Task {
-            await ParakeetProvisioningCoordinator.shared.ensureAutomaticSetupForCurrentSelection(
-                forceModelRetry: forceModelRetry,
-                forceRuntimeRepair: forceRuntimeRepair,
-                reason: "app_delegate"
-            )
+    private func deferProviderRefreshIfSessionActive(reason: String) -> Bool {
+        let currentState = stateMachine.state
+        switch currentState {
+        case .recording, .transcribing:
+            deferredProviderRefresh = true
+            logger.warning("\(reason, privacy: .public): deferring provider refresh while state=\(String(describing: currentState), privacy: .public)")
+            return true
+        case .idle, .success, .error:
+            return false
         }
     }
 

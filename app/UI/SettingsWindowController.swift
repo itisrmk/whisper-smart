@@ -9,7 +9,7 @@ final class SettingsWindowController {
 
     private var windowController: NSWindowController?
 
-    func showSettings() {
+    func showSettings(initialTabRawValue: String? = nil, forceOnboarding: Bool = false) {
         VFTheme.debugAssertTokenSanity()
 
         if let wc = windowController {
@@ -17,12 +17,15 @@ final class SettingsWindowController {
                 applyForcedDarkAppearance(to: window)
                 enforceScrollChromePolicy(for: window)
             }
+            if forceOnboarding {
+                NotificationCenter.default.post(name: .productOnboardingRequested, object: nil)
+            }
             wc.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let settingsView = SettingsView()
+        let settingsView = SettingsView(initialTabRawValue: initialTabRawValue, forceOnboarding: forceOnboarding)
             .vfForcedDarkTheme()
         let hostingController = NSHostingController(rootView: settingsView)
 

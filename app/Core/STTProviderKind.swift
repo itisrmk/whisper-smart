@@ -213,7 +213,7 @@ struct ModelVariant: Equatable, Identifiable {
                 )
                 return ValidationSnapshot(
                     isDownloaded: false,
-                    validationStatus: "Model file appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSize / 1_000_000) MB). Automatic setup will retry."
+                    validationStatus: "Model file appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSize / 1_000_000) MB). Run setup again from Settings -> Provider."
                 )
             }
         }
@@ -247,10 +247,10 @@ struct ModelVariant: Equatable, Identifiable {
             return "Model source is unavailable for variant '\(id)'."
         }
         if let error = source.error {
-            return "\(error) The app will retry with the recommended source automatically."
+            return "\(error) Select the recommended source in Settings -> Provider and run setup again."
         }
         if source.modelURL == nil {
-            return "Model source URL is not configured. Automatic setup will retry with the recommended source."
+            return "Model source URL is not configured. Select the recommended source in Settings -> Provider and run setup again."
         }
         return nil
     }
@@ -301,12 +301,12 @@ struct ModelVariant: Equatable, Identifiable {
 
         let sidecarURL = modelURL.appendingPathExtension("data")
         guard FileManager.default.fileExists(atPath: sidecarURL.path) else {
-            return (false, "ONNX sidecar data file is missing (model.onnx.data). Automatic setup will retry.")
+            return (false, "ONNX sidecar data file is missing (model.onnx.data). Run setup again from Settings -> Provider.")
         }
 
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: sidecarURL.path),
               let fileSize = attrs[.size] as? Int64 else {
-            return (false, "ONNX sidecar data file cannot be read yet. Automatic setup will retry.")
+            return (false, "ONNX sidecar data file cannot be read yet. Run setup again from Settings -> Provider.")
         }
 
         let minimumSidecarBytes: Int64
@@ -320,10 +320,10 @@ struct ModelVariant: Equatable, Identifiable {
             if let expected = source.modelDataExpectedSizeBytes, expected > 0 {
                 return (
                     false,
-                    "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expected / 1_000_000) MB). Automatic setup will retry."
+                    "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expected / 1_000_000) MB). Run setup again from Settings -> Provider."
                 )
             }
-            return (false, "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB). Automatic setup will retry.")
+            return (false, "ONNX sidecar data file appears incomplete (\(fileSize / 1_000_000) MB). Run setup again from Settings -> Provider.")
         }
 
         return (true, "ONNX sidecar ready (\(sidecarURL.lastPathComponent), \(fileSize / 1_000_000) MB)")
@@ -334,14 +334,14 @@ struct ModelVariant: Equatable, Identifiable {
         guard let tokenizerURL = tokenizerLocalURL(using: source) else {
             return (
                 false,
-                "Tokenizer path unavailable. Automatic setup will retry."
+                "Tokenizer path unavailable. Run setup again from Settings -> Provider."
             )
         }
 
         guard FileManager.default.fileExists(atPath: tokenizerURL.path) else {
             return (
                 false,
-                "Tokenizer file is missing. Automatic setup will retry."
+                "Tokenizer file is missing. Run setup again from Settings -> Provider."
             )
         }
 
@@ -349,14 +349,14 @@ struct ModelVariant: Equatable, Identifiable {
               let fileSize = attrs[.size] as? Int64 else {
             return (
                 false,
-                "Tokenizer file cannot be read yet. Automatic setup will retry."
+                "Tokenizer file cannot be read yet. Run setup again from Settings -> Provider."
             )
         }
 
         if fileSize < 128 {
             return (
                 false,
-                "Tokenizer file appears incomplete (\(fileSize) bytes). Automatic setup will retry."
+                "Tokenizer file appears incomplete (\(fileSize) bytes). Run setup again from Settings -> Provider."
             )
         }
 
@@ -380,16 +380,16 @@ struct ModelVariant: Equatable, Identifiable {
 
         for item in requiredItems {
             guard let artifactURL = auxiliaryLocalURL(filename: item.filename) else {
-                return (false, "\(item.label) path is unavailable. Automatic setup will retry.")
+                return (false, "\(item.label) path is unavailable. Run setup again from Settings -> Provider.")
             }
 
             guard FileManager.default.fileExists(atPath: artifactURL.path) else {
-                return (false, "\(item.label) is missing. Automatic setup will retry.")
+                return (false, "\(item.label) is missing. Run setup again from Settings -> Provider.")
             }
 
             guard let attrs = try? FileManager.default.attributesOfItem(atPath: artifactURL.path),
                   let fileSize = attrs[.size] as? Int64 else {
-                return (false, "\(item.label) cannot be read yet. Automatic setup will retry.")
+                return (false, "\(item.label) cannot be read yet. Run setup again from Settings -> Provider.")
             }
 
             if let expectedBytes = item.expectedBytes, expectedBytes > 0 {
@@ -397,11 +397,11 @@ struct ModelVariant: Equatable, Identifiable {
                 if fileSize < minimumExpectedBytes {
                     return (
                         false,
-                        "\(item.label) appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedBytes / 1_000_000) MB). Automatic setup will retry."
+                        "\(item.label) appears incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedBytes / 1_000_000) MB). Run setup again from Settings -> Provider."
                     )
                 }
             } else if fileSize < 64 {
-                return (false, "\(item.label) appears incomplete (\(fileSize) bytes). Automatic setup will retry.")
+                return (false, "\(item.label) appears incomplete (\(fileSize) bytes). Run setup again from Settings -> Provider.")
             }
         }
 
@@ -436,13 +436,14 @@ extension ModelVariant {
 extension STTProviderKind {
     private static let defaultsKey = "selectedSTTProvider"
 
-    /// Load the user's persisted provider choice, defaulting to `.parakeet`.
-    /// Runtime resolver will gracefully fallback while auto-setup completes.
+    /// Load the user's persisted provider choice.
+    /// Fresh installs default to Apple Speech so local model setup stays
+    /// explicit/user-initiated during onboarding.
     static func loadSelection() -> STTProviderKind {
         guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
               let kind = STTProviderKind(rawValue: raw) else {
-            logger.info("No saved STT provider, defaulting to Parakeet")
-            return .parakeet
+            logger.info("No saved STT provider, defaulting to Apple Speech")
+            return .appleSpeech
         }
         logger.info("Loaded STT provider selection: \(kind.rawValue)")
         return kind

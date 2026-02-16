@@ -181,7 +181,7 @@ private extension ParakeetRuntimeBootstrapManager {
                 pythonCommand: nil
             )
             throw ParakeetRuntimeBootstrapError(
-                message: "\(message) Runtime setup is managed automatically; retry Parakeet after a few seconds."
+                message: "\(message) Run runtime setup from Settings -> Provider, then retry Parakeet."
             )
         }
 
@@ -194,7 +194,7 @@ private extension ParakeetRuntimeBootstrapManager {
                 pythonCommand: nil
             )
             throw ParakeetRuntimeBootstrapError(
-                message: "\(message) Runtime setup is managed automatically; retry Parakeet after a few seconds."
+                message: "\(message) Run runtime setup from Settings -> Provider, then retry Parakeet."
             )
         }
 
@@ -256,7 +256,7 @@ private extension ParakeetRuntimeBootstrapManager {
             pythonCommand: nil
         )
         throw ParakeetRuntimeBootstrapError(
-            message: "\(message) Runtime setup is managed automatically; retry Parakeet after a few seconds."
+            message: "\(message) Run runtime setup from Settings -> Provider, then retry Parakeet."
         )
     }
 
@@ -619,7 +619,7 @@ private extension ParakeetRuntimeBootstrapManager {
     func validateHostPrerequisites() throws {
         guard commandExists(bootstrapPythonCommand) else {
             throw ParakeetRuntimeBootstrapError(
-                message: "Python runtime prerequisite not found ('\(bootstrapPythonCommand)'). Automatic setup requires Python 3."
+                message: "Python runtime prerequisite not found ('\(bootstrapPythonCommand)'). Parakeet setup requires Python 3. Install it, then retry from Settings -> Provider."
             )
         }
     }

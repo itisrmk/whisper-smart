@@ -273,7 +273,7 @@ enum STTProviderResolver {
         )
         if !modelReady, fallbackReason == nil {
             canUseParakeet = false
-            fallbackReason = "Parakeet model is still being prepared automatically (\(variant.validationStatus))."
+            fallbackReason = "Parakeet model is not installed (\(variant.validationStatus)). Install it from Settings -> Provider."
         }
 
         let runtimeImplemented = ParakeetSTTProvider.inferenceImplemented
@@ -586,7 +586,7 @@ enum STTProviderResolver {
                     detail: detail
                 ),
                 true,
-                "Parakeet runtime bootstrap failed. Runtime setup is automatic and retrying in background."
+                "Parakeet runtime bootstrap failed. Retry setup from Settings -> Provider."
             )
         }
     }

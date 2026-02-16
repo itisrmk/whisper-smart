@@ -51,29 +51,29 @@ final class ModelDownloadState: ObservableObject {
     // MARK: - Transitions (called by ModelDownloaderService)
 
     func transitionToDownloading() {
-        phase = .downloading(progress: 0)
+        setPhase(.downloading(progress: 0))
         logger.info("Download started for \(self.variant.id)")
     }
 
     func updateProgress(_ fraction: Double) {
-        phase = .downloading(progress: min(max(fraction, 0), 1))
+        setPhase(.downloading(progress: min(max(fraction, 0), 1)))
     }
 
     func transitionToReady() {
         // Verify the file actually passes validation before declaring ready.
         variant.invalidateValidationCache()
         if variant.isDownloaded {
-            phase = .ready
+            setPhase(.ready)
             logger.info("Model ready: \(self.variant.id) — \(self.variant.validationStatus)")
         } else {
             let status = variant.validationStatus
-            phase = .failed(message: "Download completed but model validation failed: \(status)")
+            setPhase(.failed(message: "Download completed but model validation failed: \(status)"))
             logger.error("Post-download validation failed for \(self.variant.id): \(status)")
         }
     }
 
     func transitionToFailed(message: String) {
-        phase = .failed(message: message)
+        setPhase(.failed(message: message))
         logger.error("Download failed for \(self.variant.id): \(message)")
     }
 
@@ -85,7 +85,7 @@ final class ModelDownloadState: ObservableObject {
     func deleteModelFile() {
         guard let url = variant.localURL else { return }
         try? FileManager.default.removeItem(at: url)
-        phase = .notReady
+        setPhase(.notReady)
         logger.info("Deleted model file for \(self.variant.id)")
     }
 
@@ -95,19 +95,29 @@ final class ModelDownloadState: ObservableObject {
     private func syncFromDisk() {
         variant.invalidateValidationCache()
         if variant.isDownloaded {
-            phase = .ready
+            setPhase(.ready)
             logger.info("Disk sync: model present and valid for \(self.variant.id)")
         } else if let url = variant.localURL,
                   FileManager.default.fileExists(atPath: url.path) {
             // File exists but failed validation — likely incomplete or corrupt.
             let status = variant.validationStatus
-            phase = .failed(message: "Model file on disk is invalid: \(status)")
+            setPhase(.failed(message: "Model file on disk is invalid: \(status)"))
             logger.warning("Disk sync: file exists but invalid for \(self.variant.id): \(status)")
         } else if let sourceError = variant.downloadUnavailableReason {
-            phase = .failed(message: sourceError)
+            setPhase(.failed(message: sourceError))
             logger.warning("Disk sync: model source unavailable for \(self.variant.id): \(sourceError)")
         } else {
-            phase = .notReady
+            setPhase(.notReady)
+        }
+    }
+
+    private func setPhase(_ newPhase: Phase) {
+        if Thread.isMainThread {
+            phase = newPhase
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.phase = newPhase
+            }
         }
     }
 }

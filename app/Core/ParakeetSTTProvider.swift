@@ -69,9 +69,8 @@ final class ParakeetSTTProvider: STTProvider {
         guard variant.isDownloaded else {
             let status = variant.validationStatus
             logger.error("Parakeet model not ready: \(status), path: \(modelURL.path)")
-            triggerAutomaticProvisioning()
             throw STTError.providerError(
-                message: "Parakeet setup is running automatically (\(status)). Try dictation again in a few seconds."
+                message: "Parakeet is not installed yet (\(status)). Open Settings -> Provider and click Install Parakeet."
             )
         }
 
@@ -80,7 +79,6 @@ final class ParakeetSTTProvider: STTProvider {
         do {
             pythonCommand = try runtimePythonCommand()
         } catch {
-            triggerAutomaticProvisioning(forceRuntimeRepair: true)
             throw STTError.providerError(message: error.localizedDescription)
         }
 
@@ -170,7 +168,6 @@ final class ParakeetSTTProvider: STTProvider {
         do {
             pythonCommand = try runtimePythonCommand()
         } catch {
-            triggerAutomaticProvisioning(forceRuntimeRepair: true)
             updateInferenceInFlight(false)
             onError?(.providerError(message: error.localizedDescription))
             return
@@ -226,16 +223,6 @@ final class ParakeetSTTProvider: STTProvider {
 // MARK: - Inference
 
 private extension ParakeetSTTProvider {
-    func triggerAutomaticProvisioning(forceRuntimeRepair: Bool = false) {
-        Task {
-            await ParakeetProvisioningCoordinator.shared.ensureAutomaticSetupForCurrentSelection(
-                forceModelRetry: true,
-                forceRuntimeRepair: forceRuntimeRepair,
-                reason: "provider_request"
-            )
-        }
-    }
-
     func runInference(
         samples: [Float],
         modelURL: URL,
@@ -317,7 +304,7 @@ private extension ParakeetSTTProvider {
             try process.run()
         } catch {
             throw STTError.providerError(
-                message: "Failed to launch local Parakeet runtime '\(pythonCommand)'. Runtime setup is automatic; retry in a few seconds. Underlying error: \(error.localizedDescription)"
+                message: "Failed to launch local Parakeet runtime '\(pythonCommand)'. Open Settings -> Provider and run setup again. Underlying error: \(error.localizedDescription)"
             )
         }
 
@@ -330,7 +317,7 @@ private extension ParakeetSTTProvider {
                 process.interrupt()
             }
             throw STTError.providerError(
-                message: "Parakeet local inference timed out. Runtime setup is automatic; try again."
+                message: "Parakeet local inference timed out. Verify runtime/model setup in Settings -> Provider, then retry."
             )
         }
 
@@ -513,7 +500,6 @@ private extension ParakeetSTTProvider {
             Self.invalidateValidationCache(for: modelPath)
         }
         persistentRunner.invalidate()
-        triggerAutomaticProvisioning(forceRuntimeRepair: true)
     }
 
     func shouldTriggerRuntimeRepair(from details: String) -> Bool {
@@ -529,19 +515,19 @@ private extension ParakeetSTTProvider {
     func mappedRunnerFailure(pythonCommand: String, exitCode: Int32, details: String) -> String {
         let lowercased = details.lowercased()
         if (lowercased.contains("no such file") || lowercased.contains("not found")) && lowercased.contains(pythonCommand.lowercased()) {
-            return "Local Parakeet runtime '\(pythonCommand)' is unavailable. Runtime setup is automatic; retry shortly."
+            return "Local Parakeet runtime '\(pythonCommand)' is unavailable. Open Settings -> Provider and run setup."
         }
         if lowercased.contains("model_signature_error") || lowercased.contains("unsupported onnx audio input signature") {
-            return "Parakeet runtime is finalizing model compatibility. Automatic repair is running; retry dictation shortly."
+            return "Parakeet runtime reported an ONNX signature mismatch. Re-run setup in Settings -> Provider."
         }
         if lowercased.contains("model_load_error") {
-            return "MODEL_LOAD_ERROR: Parakeet model setup may be incomplete. Setup will retry automatically; try dictation again shortly."
+            return "MODEL_LOAD_ERROR: Parakeet model setup may be incomplete. Reinstall model files in Settings -> Provider."
         }
         if lowercased.contains("tokenizer_missing") || lowercased.contains("tokenizer_error") {
-            return "Tokenizer setup is still finalizing automatically. Retry dictation in a few seconds."
+            return "Tokenizer setup is incomplete. Reinstall model files in Settings -> Provider."
         }
         if lowercased.contains("modulenotfounderror") || lowercased.contains("dependency_missing") {
-            return "Parakeet runtime dependencies are still installing. Automatic repair is running; retry in a few seconds."
+            return "Parakeet runtime dependencies are missing. Run runtime setup in Settings -> Provider."
         }
         if details.isEmpty {
             return "Parakeet inference runner exited with status \(exitCode) and no error output."

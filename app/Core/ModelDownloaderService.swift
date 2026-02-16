@@ -727,12 +727,12 @@ private extension ModelDownloaderService {
 
     func modelDataArtifactValidationError(at fileURL: URL, expectedSizeBytes: Int64?) -> String? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return "Model data artifact is missing after download. Automatic setup will retry."
+            return "Model data artifact is missing after download. Run setup again from Settings -> Provider."
         }
 
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
               let fileSize = attrs[.size] as? Int64 else {
-            return "Model data artifact cannot be read. Automatic setup will retry."
+            return "Model data artifact cannot be read. Run setup again from Settings -> Provider."
         }
 
         let minimumBytes: Int64
@@ -744,9 +744,9 @@ private extension ModelDownloaderService {
 
         guard fileSize >= minimumBytes else {
             if let expectedSizeBytes, expectedSizeBytes > 0 {
-                return "Model data artifact is incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSizeBytes / 1_000_000) MB). Automatic setup will retry."
+                return "Model data artifact is incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSizeBytes / 1_000_000) MB). Run setup again from Settings -> Provider."
             }
-            return "Model data artifact is incomplete (\(fileSize / 1_000_000) MB). Automatic setup will retry."
+            return "Model data artifact is incomplete (\(fileSize / 1_000_000) MB). Run setup again from Settings -> Provider."
         }
 
         return nil
@@ -758,12 +758,12 @@ private extension ModelDownloaderService {
         label: String
     ) -> String? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return "\(label.capitalized) artifact is missing after download. Automatic setup will retry."
+            return "\(label.capitalized) artifact is missing after download. Run setup again from Settings -> Provider."
         }
 
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
               let fileSize = attrs[.size] as? Int64 else {
-            return "\(label.capitalized) artifact cannot be read. Automatic setup will retry."
+            return "\(label.capitalized) artifact cannot be read. Run setup again from Settings -> Provider."
         }
 
         let minimumBytes: Int64
@@ -775,9 +775,9 @@ private extension ModelDownloaderService {
 
         guard fileSize >= minimumBytes else {
             if let expectedSizeBytes, expectedSizeBytes > 0 {
-                return "\(label.capitalized) artifact is incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSizeBytes / 1_000_000) MB). Automatic setup will retry."
+                return "\(label.capitalized) artifact is incomplete (\(fileSize / 1_000_000) MB; expected about \(expectedSizeBytes / 1_000_000) MB). Run setup again from Settings -> Provider."
             }
-            return "\(label.capitalized) artifact is incomplete (\(fileSize) bytes). Automatic setup will retry."
+            return "\(label.capitalized) artifact is incomplete (\(fileSize) bytes). Run setup again from Settings -> Provider."
         }
 
         return nil
@@ -805,7 +805,7 @@ private extension ModelDownloaderService {
 
         if let expectedLength = source.modelExpectedSizeBytes,
            fileSize < expectedLength {
-            return "Downloaded model size check failed (\(fileSize) < expected \(expectedLength) bytes). Automatic setup will retry."
+            return "Downloaded model size check failed (\(fileSize) < expected \(expectedLength) bytes). Run setup again from Settings -> Provider."
         }
 
         for artifact in additionalArtifacts(for: source) {
@@ -823,7 +823,7 @@ private extension ModelDownloaderService {
 
         if source.tokenizerURL != nil {
             guard let tokenizerURL = variant.tokenizerLocalURL(using: source) else {
-                return "Tokenizer path resolution failed after download. Automatic setup will retry."
+                return "Tokenizer path resolution failed after download. Run setup again from Settings -> Provider."
             }
             if let tokenizerValidationError = TokenizerArtifactValidator.validate(at: tokenizerURL, source: source) {
                 return tokenizerValidationError
@@ -998,17 +998,17 @@ private extension ModelDownloaderService {
     func mappedPreflightFailure(details: String, exitCode: Int32) -> String? {
         let lowercased = details.lowercased()
         if lowercased.contains("model_signature_error") || lowercased.contains("unsupported onnx audio input signature") {
-            return "Downloaded model is not compatible with the local Parakeet runtime yet. Automatic setup will retry."
+            return "Downloaded model is not compatible with the local Parakeet runtime yet. Run setup again from Settings -> Provider."
         }
 
         if lowercased.contains("model_load_error") {
-            return "Parakeet model bundle validation failed during preflight. Automatic setup will retry."
+            return "Parakeet model bundle validation failed during preflight. Run setup again from Settings -> Provider."
         }
         if lowercased.contains("tokenizer_missing") || lowercased.contains("tokenizer_error") {
-            return "Tokenizer validation failed during ONNX preflight. Automatic setup will retry."
+            return "Tokenizer validation failed during ONNX preflight. Run setup again from Settings -> Provider."
         }
         if lowercased.contains("dependency_missing") || lowercased.contains("modulenotfounderror") {
-            return "Parakeet runtime dependencies are still installing. Runtime setup is automatic; retry shortly."
+            return "Parakeet runtime dependencies are not ready. Run runtime setup in Settings -> Provider and retry."
         }
         if details.isEmpty {
             return "ONNX preflight failed with exit status \(exitCode) and no diagnostics."

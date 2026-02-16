@@ -5,3 +5,4 @@ VisperflowClone
 *.log
 scripts/__pycache__/
 __pycache__/
+AGENTS.md
