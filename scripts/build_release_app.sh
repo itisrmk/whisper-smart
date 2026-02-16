@@ -8,6 +8,7 @@ VERSION="${VERSION:-0.2.14}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 LOGO_PATH="${LOGO_PATH:-$REPO_ROOT/logo.png}"
 PARAKEET_RUNNER_SOURCE="$REPO_ROOT/scripts/parakeet_infer.py"
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-2OzsmMn7xg17Iasd5fvc98QIM5ycXEIYzrQT/X5WET0=}"
 
 BUILD_DIR="$REPO_ROOT/.build/release"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
@@ -96,6 +97,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <string>$ICON_FILE_NAME</string>
   <key>SUFeedURL</key>
   <string>https://raw.githubusercontent.com/itisrmk/whisper-smart/main/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>$SPARKLE_PUBLIC_ED_KEY</string>
 </dict>
 </plist>
 PLIST

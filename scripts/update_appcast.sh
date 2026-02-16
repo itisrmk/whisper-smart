@@ -9,6 +9,7 @@ Usage:
     --build-version 202602152259 \
     --dmg-url https://github.com/ORG/REPO/releases/download/v0.2.18/Whisper-Smart-mac.dmg \
     --dmg-length 4701980 \
+    --ed-signature BASE64_SPARKLE_SIGNATURE \
     [--notes-file /path/to/notes.md] \
     [--pub-date "Sun, 15 Feb 2026 22:59:42 +0000"] \
     [--output appcast.xml]
@@ -19,6 +20,7 @@ VERSION=""
 BUILD_VERSION=""
 DMG_URL=""
 DMG_LENGTH=""
+ED_SIGNATURE=""
 NOTES_FILE=""
 OUTPUT="appcast.xml"
 PUB_DATE="$(LC_ALL=C date -u "+%a, %d %b %Y %H:%M:%S +0000")"
@@ -34,6 +36,8 @@ while [[ $# -gt 0 ]]; do
       DMG_URL="${2:-}"; shift 2 ;;
     --dmg-length)
       DMG_LENGTH="${2:-}"; shift 2 ;;
+    --ed-signature)
+      ED_SIGNATURE="${2:-}"; shift 2 ;;
     --notes-file)
       NOTES_FILE="${2:-}"; shift 2 ;;
     --pub-date)
@@ -49,7 +53,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$VERSION" || -z "$BUILD_VERSION" || -z "$DMG_URL" || -z "$DMG_LENGTH" ]]; then
+if [[ -z "$VERSION" || -z "$BUILD_VERSION" || -z "$DMG_URL" || -z "$DMG_LENGTH" || -z "$ED_SIGNATURE" ]]; then
   echo "Missing required arguments." >&2
   usage
   exit 1
@@ -61,13 +65,13 @@ if [[ -z "$NOTES_PATH" ]]; then
   printf "Whisper Smart %s release." "$VERSION" >"$NOTES_PATH"
 fi
 
-/usr/bin/python3 - "$OUTPUT" "$VERSION" "$BUILD_VERSION" "$DMG_URL" "$DMG_LENGTH" "$NOTES_PATH" "$PUB_DATE" "$MIN_SYSTEM_VERSION" <<'PY'
+/usr/bin/python3 - "$OUTPUT" "$VERSION" "$BUILD_VERSION" "$DMG_URL" "$DMG_LENGTH" "$ED_SIGNATURE" "$NOTES_PATH" "$PUB_DATE" "$MIN_SYSTEM_VERSION" <<'PY'
 import os
 import sys
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
-output, version, build_version, dmg_url, dmg_length, notes_path, pub_date, min_system = sys.argv[1:]
+output, version, build_version, dmg_url, dmg_length, ed_signature, notes_path, pub_date, min_system = sys.argv[1:]
 sparkle_ns = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 ET.register_namespace("sparkle", sparkle_ns)
 sparkle = f"{{{sparkle_ns}}}"
@@ -124,6 +128,7 @@ enclosure = ET.SubElement(item, "enclosure")
 enclosure.set("url", dmg_url)
 enclosure.set(f"{sparkle}shortVersionString", version)
 enclosure.set(f"{sparkle}version", build_version)
+enclosure.set(f"{sparkle}edSignature", ed_signature)
 enclosure.set("length", dmg_length)
 enclosure.set("type", "application/octet-stream")
 

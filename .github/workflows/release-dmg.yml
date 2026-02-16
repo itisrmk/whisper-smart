@@ -143,6 +143,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           NOTES_FILE: ${{ steps.release_notes.outputs.path }}
           REPOSITORY: ${{ github.repository }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           APP_PLIST=".build/release/Whisper Smart.app/Contents/Info.plist"
@@ -166,12 +167,27 @@ jobs:
           DMG_LENGTH="$(stat -f%z "$DMG_PATH")"
           DMG_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION}/Whisper-Smart-mac.dmg"
           PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+          SIGN_TOOL=".build/artifacts/sparkle/Sparkle/bin/sign_update"
+          if [[ ! -x "$SIGN_TOOL" ]]; then
+            echo "Missing Sparkle sign_update tool at $SIGN_TOOL"
+            exit 1
+          fi
+          if [[ -z "${SPARKLE_PRIVATE_KEY:-}" ]]; then
+            echo "Missing required secret: SPARKLE_PRIVATE_KEY"
+            exit 1
+          fi
+          ED_SIGNATURE="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_TOOL" --ed-key-file - -p "$DMG_PATH" | tr -d '\n')"
+          if [[ -z "$ED_SIGNATURE" ]]; then
+            echo "Failed to generate Sparkle edSignature for $DMG_PATH"
+            exit 1
+          fi
 
           bash scripts/update_appcast.sh \
             --version "$VERSION" \
             --build-version "$BUILD_VERSION" \
             --dmg-url "$DMG_URL" \
             --dmg-length "$DMG_LENGTH" \
+            --ed-signature "$ED_SIGNATURE" \
             --notes-file "$NOTES_FILE" \
             --pub-date "$PUB_DATE" \
             --output "appcast.xml"
