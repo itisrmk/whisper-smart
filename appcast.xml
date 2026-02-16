@@ -6,6 +6,16 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.22</title>
+      <description>- Fixed first-run dictation startup flow so hotkey monitoring self-heals automatically after Accessibility is granted.
+- Removed manual retry friction for hotkey bootstrap; retry only appears for real hotkey setup errors.
+- Improved launch permission flow to avoid unnecessary Speech prompt unless Apple Speech provider is selected.
+- Reduced unnecessary provider refresh churn during Parakeet model download status events.</description>
+      <pubDate>Mon, 16 Feb 2026 00:51:48 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.22/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.22" sparkle:version="202602151750" sparkle:edSignature="6sEaRMusnmsJRW/dfDm6E8POY6OBdvtyT86oZe3UhJZAHRUmwh5lTN7gXzU5/PrpTPA6bT/V9utg+cmNqRzVBg==" length="4757435" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.21</title>
       <description>Whisper Smart v0.2.21
 - Fixed Sparkle update validation by shipping SUPublicEDKey in the app bundle.
