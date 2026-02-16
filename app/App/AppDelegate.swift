@@ -65,8 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var accessibilityRetryWork: DispatchWorkItem?
     private var accessibilityRetryAttempt = 0
-    private let maxAccessibilityRetryAttempts = 5
-    private let accessibilityRetryDelay: TimeInterval = 3.0
+    private let accessibilityRetryDelay: TimeInterval = 2.5
+    private var pendingHotkeyBootstrap = false
 
     private var recordStartAt: Date?
     private var transcribeStartAt: Date?
@@ -78,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var healthBadgeLabel = ""
     private var activityBadgeLabel = ""
     private var deferredProviderRefresh = false
+    private var lastObservedParakeetModelReady: Bool?
 
     // MARK: - Lifecycle
 
@@ -112,37 +113,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Request all permissions in the correct order, then activate
-        // the hotkey monitor once we know the permission landscape.
-        PermissionDiagnostics.requestAllInOrder { [weak self] snap in
+        // Bootstrap hotkey monitoring immediately when possible so users can
+        // dictate right away. Permission prompts continue in parallel.
+        ensureHotkeyMonitorReady(source: "launch")
+
+        // Request permissions in the background. Completion refreshes readiness
+        // state but does not gate hotkey startup.
+        PermissionDiagnostics.requestAllInOrder(
+            requestSpeechRecognition: shouldRequestSpeechPermissionAtLaunch()
+        ) { [weak self] snap in
             guard let self else { return }
             PermissionDiagnostics.logAll()
-
-            if snap.accessibility.isUsable {
-                self.stateMachine.activate()
-            } else {
-                logger.warning("Accessibility not granted at launch — hotkey monitor deferred")
-                self.bubbleState.transition(
-                    to: .error,
-                    errorDetail: "Accessibility permission required. Grant access in System Settings → Privacy & Security → Accessibility, then use Retry Hotkey Monitor from the menu."
-                )
-                self.menuBar.updateIcon(for: .error)
-                self.menuBar.updateErrorDetail("Accessibility permission not granted")
-                // Schedule a retry: accessibility may be granted after the user
-                // clicks Allow in System Settings.
-                self.scheduleAccessibilityRetry()
+            if !snap.accessibility.isUsable {
+                self.presentAccessibilityGuidance()
             }
+            self.ensureHotkeyMonitorReady(source: "permissions-completed")
         }
     }
 
-    /// Periodically checks if Accessibility was granted after the initial
-    /// prompt. Retries hotkey monitor start once permission appears.
-    private func scheduleAccessibilityRetry() {
-        guard accessibilityRetryWork == nil else { return }
-        guard accessibilityRetryAttempt < maxAccessibilityRetryAttempts else {
-            logger.warning("Accessibility auto-retry exhausted (\(self.maxAccessibilityRetryAttempts) attempts)")
+    /// Ensures global hotkey monitoring is active whenever Accessibility is
+    /// available. This is safe to call repeatedly.
+    private func ensureHotkeyMonitorReady(source: String) {
+        guard PermissionDiagnostics.accessibilityStatus().isUsable else {
+            pendingHotkeyBootstrap = true
+            presentAccessibilityGuidance()
+            scheduleAccessibilityRetry()
             return
         }
+
+        switch stateMachine.state {
+        case .recording, .transcribing:
+            // Do not interrupt active capture/transcribe sessions.
+            pendingHotkeyBootstrap = true
+            scheduleAccessibilityRetry()
+            return
+        case .idle, .success, .error:
+            break
+        }
+
+        if hotkeyMonitor.isRunning {
+            pendingHotkeyBootstrap = false
+            accessibilityRetryAttempt = 0
+            menuBar.updateHotkeyRecoveryAvailability(false)
+            return
+        }
+
+        retryHotkeyMonitor(source: source)
+    }
+
+    /// Periodically checks if Accessibility was granted after the initial
+    /// prompt and self-heals hotkey monitoring once it appears.
+    private func scheduleAccessibilityRetry() {
+        guard pendingHotkeyBootstrap else { return }
+        guard accessibilityRetryWork == nil else { return }
 
         accessibilityRetryAttempt += 1
         let attempt = accessibilityRetryAttempt
@@ -153,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if PermissionDiagnostics.accessibilityStatus().isUsable {
                 logger.info("Accessibility permission granted during auto-retry attempt \(attempt)")
                 self.retryHotkeyMonitor(source: "auto")
-            } else if case .error = self.stateMachine.state {
+            } else if self.pendingHotkeyBootstrap {
                 self.scheduleAccessibilityRetry()
             }
         }
@@ -169,18 +192,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessibilityRetryWork = nil
 
         let snap = PermissionDiagnostics.snapshot()
-        if snap.accessibility.isUsable {
-            stateMachine.deactivate()
-            stateMachine.activate()
-            accessibilityRetryAttempt = 0
-            logger.info("Hotkey monitor retry triggered source=\(source, privacy: .public) accessibility=\(snap.accessibility.rawValue)")
-        } else {
-            let msg = "Accessibility permission still missing. Grant access in System Settings → Privacy & Security → Accessibility, then retry manually from the menu."
-            bubbleState.transition(to: .error, errorDetail: msg)
-            menuBar.updateIcon(for: .error)
-            menuBar.updateErrorDetail(msg)
+        guard snap.accessibility.isUsable else {
+            pendingHotkeyBootstrap = true
+            presentAccessibilityGuidance()
+            scheduleAccessibilityRetry()
             logger.info("Hotkey monitor retry skipped source=\(source, privacy: .public); accessibility missing")
+            return
         }
+
+        switch stateMachine.state {
+        case .recording, .transcribing:
+            pendingHotkeyBootstrap = true
+            scheduleAccessibilityRetry()
+            logger.info("Hotkey monitor retry deferred source=\(source, privacy: .public); session active")
+            return
+        case .idle, .success, .error:
+            break
+        }
+
+        if hotkeyMonitor.isRunning {
+            pendingHotkeyBootstrap = false
+            accessibilityRetryAttempt = 0
+            menuBar.updateHotkeyRecoveryAvailability(false)
+            logger.info("Hotkey monitor already active source=\(source, privacy: .public)")
+            return
+        }
+
+        stateMachine.deactivate()
+        stateMachine.activate()
+        pendingHotkeyBootstrap = false
+        accessibilityRetryAttempt = 0
+        menuBar.updateHotkeyRecoveryAvailability(false)
+        logger.info("Hotkey monitor retry triggered source=\(source, privacy: .public) accessibility=\(snap.accessibility.rawValue)")
+    }
+
+    private func presentAccessibilityGuidance() {
+        let msg = "Accessibility permission required. Grant access in System Settings → Privacy & Security → Accessibility. Hotkey setup resumes automatically."
+        bubbleState.transition(to: .error, errorDetail: msg)
+        menuBar.updateIcon(for: .error)
+        menuBar.updateErrorDetail(msg)
+        menuBar.updateHotkeyRecoveryAvailability(true)
     }
 
     /// Runs a one-shot recording session without the hotkey.
@@ -234,8 +285,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.menuBar.updateIcon(for: uiState)
             self.menuBar.updateDictationAction(for: coreState)
             self.updateActivityBadge(for: coreState)
+            let hotkeySetupIssue = self.isHotkeySetupIssue(for: coreState)
+            self.menuBar.updateHotkeyRecoveryAvailability(hotkeySetupIssue)
             if let detail {
                 self.menuBar.updateErrorDetail(detail)
+            }
+
+            if hotkeySetupIssue {
+                self.pendingHotkeyBootstrap = true
+                self.scheduleAccessibilityRetry()
+            } else if self.hotkeyMonitor.isRunning {
+                self.pendingHotkeyBootstrap = false
+                self.accessibilityRetryAttempt = 0
             }
 
             self.previousCoreState = coreState
@@ -370,9 +431,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   variantID == ModelVariant.parakeetCTC06B.id else {
                 return
             }
-            self.refreshProviderResolution(logReason: "Parakeet model download status changed")
-
             let isReady = (notification.userInfo?["isReady"] as? Bool) ?? false
+            if self.lastObservedParakeetModelReady != isReady {
+                self.lastObservedParakeetModelReady = isReady
+                self.refreshProviderResolution(logReason: "Parakeet model download readiness changed: \(isReady)")
+            }
+
             Task {
                 await ParakeetProvisioningCoordinator.shared.handleModelDownloadEvent(
                     isReady: isReady
@@ -625,6 +689,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bubblePanel.hide()
             topCenterOverlayPanel.show()
         }
+    }
+
+    private func isHotkeySetupIssue(for state: DictationStateMachine.State) -> Bool {
+        guard case .error(let message) = state else { return false }
+        let normalized = message.lowercased()
+        if normalized.contains("cannot monitor hotkeys") { return true }
+        if normalized.contains("accessibility permission") { return true }
+        return false
+    }
+
+    private func shouldRequestSpeechPermissionAtLaunch() -> Bool {
+        STTProviderKind.loadSelection() == .appleSpeech
     }
 
     // MARK: - State Mapping

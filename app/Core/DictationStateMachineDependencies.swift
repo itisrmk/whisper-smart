@@ -5,6 +5,7 @@ protocol HotkeyMonitoring: AnyObject {
     var onHoldStarted: (() -> Void)? { get set }
     var onHoldEnded: (() -> Void)? { get set }
     var onStartFailed: ((HotkeyMonitorError) -> Void)? { get set }
+    var isRunning: Bool { get }
     func start()
     func stop()
 }

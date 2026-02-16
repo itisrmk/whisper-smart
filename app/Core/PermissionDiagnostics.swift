@@ -128,11 +128,14 @@ enum PermissionDiagnostics {
     /// Requests permissions in the correct order for unsigned binaries:
     /// 1. Accessibility (triggers system dialog)
     /// 2. Microphone
-    /// 3. Speech Recognition
+    /// 3. Speech Recognition (optional, controlled by `requestSpeechRecognition`)
     ///
     /// Calls `completion` on the main queue when all prompts have been
     /// presented (not necessarily granted).
-    static func requestAllInOrder(completion: @escaping (Snapshot) -> Void) {
+    static func requestAllInOrder(
+        requestSpeechRecognition: Bool = true,
+        completion: @escaping (Snapshot) -> Void
+    ) {
         // Step 1: Accessibility — prompt via AX API (synchronous dialog)
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
@@ -140,6 +143,13 @@ enum PermissionDiagnostics {
         // Step 2: Microphone
         let micDone = { (micGranted: Bool) in
             logger.info("Microphone prompt result: \(micGranted ? "granted" : "denied")")
+
+            guard requestSpeechRecognition else {
+                DispatchQueue.main.async {
+                    completion(snapshot())
+                }
+                return
+            }
 
             // Step 3: Speech Recognition
             SFSpeechRecognizer.requestAuthorization { srStatus in

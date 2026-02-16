@@ -46,7 +46,7 @@ final class HotkeyMonitor {
     private var runLoopSource: CFRunLoopSource?
     private var keyDownTimestamp: Date?
     private var holdFired = false
-    private var isRunning = false
+    private(set) var isRunning = false
 
     // MARK: - Init
 

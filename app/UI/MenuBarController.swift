@@ -31,6 +31,8 @@ final class MenuBarController {
     private var dictateItem: NSMenuItem?
 
     private var isOneShotActive = false
+    private var hotkeyRecoveryAvailable = false
+    private var currentBubbleState: BubbleState = .idle
 
     init(stateSubject: BubbleStateSubject) {
         self.stateSubject = stateSubject
@@ -57,6 +59,7 @@ final class MenuBarController {
     /// Refresh the menu item icon to reflect current bubble state.
     func updateIcon(for state: BubbleState) {
         guard let button = statusItem?.button else { return }
+        currentBubbleState = state
         let symbolName: String
         switch state {
         case .idle:         symbolName = "mic.fill"
@@ -72,15 +75,23 @@ final class MenuBarController {
         button.image?.size = NSSize(width: VFSize.menuBarIcon, height: VFSize.menuBarIcon)
         button.image?.isTemplate = true
 
-        // Show/hide recovery items based on error state
+        // Show/hide recovery items based on error state. Hotkey recovery is
+        // only shown when the current error is actually hotkey-related.
         let showRecovery = (state == .error)
         errorDetailItem?.isHidden = !showRecovery
-        retryItem?.isHidden = !showRecovery
+        retryItem?.isHidden = !(showRecovery && hotkeyRecoveryAvailable)
 
         if state == .idle {
             isOneShotActive = false
             oneShotItem?.title = "One-Shot Recording (no hotkey)"
         }
+    }
+
+    /// Controls whether the menu should expose hotkey-recovery actions.
+    func updateHotkeyRecoveryAvailability(_ available: Bool) {
+        hotkeyRecoveryAvailable = available
+        let showRecovery = (currentBubbleState == .error)
+        retryItem?.isHidden = !(showRecovery && available)
     }
 
     /// Keeps the primary menu action text aligned with current lifecycle state.

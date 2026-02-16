@@ -6,12 +6,20 @@ private final class MockHotkeyMonitor: HotkeyMonitoring {
     var onHoldStarted: (() -> Void)?
     var onHoldEnded: (() -> Void)?
     var onStartFailed: ((HotkeyMonitorError) -> Void)?
+    private(set) var isRunning = false
 
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
 
-    func start() { startCallCount += 1 }
-    func stop() { stopCallCount += 1 }
+    func start() {
+        startCallCount += 1
+        isRunning = true
+    }
+
+    func stop() {
+        stopCallCount += 1
+        isRunning = false
+    }
 
     func triggerHoldStart() { onHoldStarted?() }
     func triggerHoldEnd() { onHoldEnded?() }
