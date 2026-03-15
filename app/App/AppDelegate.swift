@@ -65,7 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var accessibilityRetryWork: DispatchWorkItem?
     private var accessibilityRetryAttempt = 0
-    private let accessibilityRetryDelay: TimeInterval = 2.5
+    private let baseAccessibilityRetryDelay: TimeInterval = 2.5
+    private let maxAccessibilityRetryDelay: TimeInterval = 30.0
     private var pendingHotkeyBootstrap = false
 
     private var recordStartAt: Date?
@@ -113,21 +114,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Bootstrap hotkey monitoring immediately when possible so users can
-        // dictate right away. Permission prompts continue in parallel.
-        ensureHotkeyMonitorReady(source: "launch")
-
-        // Request permissions in the background. Completion refreshes readiness
-        // state but does not gate hotkey startup.
+        // Request permissions first so the system dialog appears before we
+        // attempt hotkey bootstrap. Once permissions are resolved, start the
+        // hotkey monitor. This avoids showing a scary error before the user
+        // has a chance to click Allow.
         PermissionDiagnostics.requestAllInOrder(
             requestSpeechRecognition: shouldRequestSpeechPermissionAtLaunch()
         ) { [weak self] snap in
             guard let self else { return }
             PermissionDiagnostics.logAll()
-            if !snap.accessibility.isUsable {
-                self.presentAccessibilityGuidance()
-            }
             self.ensureHotkeyMonitorReady(source: "permissions-completed")
+        }
+
+        // If accessibility was already granted from a previous session, start
+        // the hotkey monitor immediately so returning users can dictate right
+        // away without waiting for the permission flow to complete.
+        if PermissionDiagnostics.accessibilityStatus().isUsable {
+            ensureHotkeyMonitorReady(source: "launch")
         }
     }
 
@@ -163,12 +166,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Periodically checks if Accessibility was granted after the initial
     /// prompt and self-heals hotkey monitoring once it appears.
+    /// Uses exponential backoff (2.5s → 5s → 10s → … capped at 30s).
     private func scheduleAccessibilityRetry() {
         guard pendingHotkeyBootstrap else { return }
         guard accessibilityRetryWork == nil else { return }
 
         accessibilityRetryAttempt += 1
         let attempt = accessibilityRetryAttempt
+        let delay = min(
+            baseAccessibilityRetryDelay * pow(2.0, Double(min(attempt - 1, 10))),
+            maxAccessibilityRetryDelay
+        )
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.accessibilityRetryWork = nil
@@ -182,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         accessibilityRetryWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + accessibilityRetryDelay, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Public entry point for manually retrying the hotkey monitor
@@ -220,10 +228,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         stateMachine.deactivate()
         stateMachine.activate()
-        pendingHotkeyBootstrap = false
-        accessibilityRetryAttempt = 0
-        menuBar.updateHotkeyRecoveryAvailability(false)
-        logger.info("Hotkey monitor retry triggered source=\(source, privacy: .public) accessibility=\(snap.accessibility.rawValue)")
+
+        // Only clear the pending flag if activation actually succeeded.
+        // activate() may fire onStartFailed synchronously (which sets
+        // pendingHotkeyBootstrap = true via onStateChange), and we must
+        // not overwrite that.
+        if hotkeyMonitor.isRunning {
+            pendingHotkeyBootstrap = false
+            accessibilityRetryAttempt = 0
+            menuBar.updateHotkeyRecoveryAvailability(false)
+            logger.info("Hotkey monitor retry succeeded source=\(source, privacy: .public) accessibility=\(snap.accessibility.rawValue)")
+        } else {
+            logger.warning("Hotkey monitor retry failed source=\(source, privacy: .public); event tap not created")
+            pendingHotkeyBootstrap = true
+            scheduleAccessibilityRetry()
+        }
     }
 
     private func presentAccessibilityGuidance() {
@@ -364,13 +383,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            guard let self else { return }
             guard let data = notification.userInfo?["binding"] as? Data,
                   let binding = HotkeyBinding.fromUserInfo(data) else {
                 logger.warning("hotkeyBindingDidChange: failed to decode binding from userInfo")
                 return
             }
             logger.info("Hotkey binding updated to: \(binding.displayString)")
-            self?.hotkeyMonitor.updateBinding(binding)
+            self.hotkeyMonitor.updateBinding(binding)
+
+            // If the event tap failed to restart after the binding change,
+            // trigger self-healing so the user isn't stuck without a hotkey.
+            if !self.hotkeyMonitor.isRunning {
+                logger.warning("Hotkey monitor stopped after binding change — triggering recovery")
+                self.ensureHotkeyMonitorReady(source: "binding-change-recovery")
+            }
         }
     }
 

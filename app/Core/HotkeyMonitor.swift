@@ -81,6 +81,7 @@ final class HotkeyMonitor {
 
     /// Replaces the active binding. Tears down and reinstalls the event tap
     /// so the new key/modifier combination takes effect immediately.
+    /// If the event tap cannot be recreated, `onStartFailed` fires.
     func updateBinding(_ newBinding: HotkeyBinding) {
         guard newBinding != binding else { return }
 
@@ -91,8 +92,13 @@ final class HotkeyMonitor {
         binding = newBinding
         matchingKeyCodes = Self.pairedKeyCodes(for: newBinding.keyCode)
 
-        if wasRunning { start() }
-        logger.info("Binding active: \(newBinding.displayString), running: \(wasRunning)")
+        if wasRunning {
+            start()
+            if !isRunning {
+                logger.error("Event tap failed to restart after binding change to: \(newBinding.displayString)")
+            }
+        }
+        logger.info("Binding active: \(newBinding.displayString), running: \(self.isRunning)")
     }
 
     // MARK: - Lifecycle

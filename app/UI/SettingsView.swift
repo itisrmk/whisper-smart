@@ -2237,10 +2237,11 @@ private struct HotkeySettingsTab: View {
 
     private static func modifierSymbols(from flags: NSEvent.ModifierFlags) -> String {
         var parts: [String] = []
-        if flags.contains(.control) { parts.append("⌃") }
-        if flags.contains(.option)  { parts.append("⌥") }
-        if flags.contains(.shift)   { parts.append("⇧") }
-        if flags.contains(.command) { parts.append("⌘") }
+        if flags.contains(.control)  { parts.append("⌃") }
+        if flags.contains(.option)   { parts.append("⌥") }
+        if flags.contains(.shift)    { parts.append("⇧") }
+        if flags.contains(.command)  { parts.append("⌘") }
+        if flags.contains(.function) { parts.append("Fn") }
         return parts.joined(separator: " ")
     }
 

@@ -6,6 +6,17 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.24</title>
+      <description>- Fixed critical race condition in hotkey self-healing that left the app stuck in error state with no recovery UI.
+- Fixed premature error display at launch: permission dialogs now appear before any error state is shown.
+- Added exponential backoff to accessibility retry loop (2.5s to 30s cap) to reduce CPU waste.
+- Fixed hotkey monitor binding change: event tap failure after shortcut change now triggers self-healing recovery.
+- Fixed key recorder missing Fn key display in live modifier preview.</description>
+      <pubDate>Sat, 15 Mar 2026 01:47:00 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.24/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.24" sparkle:version="202603150146" length="4798044" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.23</title>
       <description>- Fixed update path to preserve macOS permission continuity by enforcing stable code-signing identity for shipped builds.
 - Added release guardrails to prevent ad-hoc signed artifacts from being published.
