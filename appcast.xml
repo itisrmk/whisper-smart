@@ -6,6 +6,14 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.26</title>
+      <description>- Updated app icon to new sound-wave logo design.
+- New icon appears in menu bar, app bundle, DMG installer, and README.</description>
+      <pubDate>Sat, 15 Mar 2026 02:30:00 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.26/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.26" sparkle:version="202603150230" length="3103311" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.25</title>
       <description>- Left and right modifier keys are now distinct: setting Right ⌘ no longer triggers on Left ⌘.
 - Hotkey presets and recorder now label which side (e.g. "Right ⌘ Hold" instead of "⌘ Hold").
