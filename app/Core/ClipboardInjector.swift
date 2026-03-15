@@ -9,6 +9,9 @@ private let logger = Logger(subsystem: "com.visperflow", category: "TextInjector
 /// Strategy order (Phase 1 reliability core):
 ///   1. Accessibility insertion (AX) into the focused element.
 ///   2. Pasteboard + Cmd-V fallback with best-effort full pasteboard snapshot/restore.
+///
+/// Terminal-aware: detects terminal emulators and uses longer delays to
+/// accommodate PTY-based paste handling.
 final class ClipboardInjector {
 
     enum Strategy {
@@ -25,14 +28,41 @@ final class ClipboardInjector {
     /// Delay before attempting clipboard restore.
     var restoreDelay: TimeInterval = 0.2
 
+    /// Bundle IDs of known terminal emulators that need special paste handling.
+    private static let terminalBundleIDs: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "net.kovidgoyal.kitty",
+        "co.zeit.hyper",
+        "com.mitchellh.ghostty",
+        "dev.warp.Warp-Stable",
+        "com.github.wez.wezterm",
+        "io.alacritty",
+        "com.panic.Prompt",
+        "org.tabby",
+    ]
+
+    /// Longer paste delay for terminal apps where PTY processing is async.
+    private let terminalPasteDelay: TimeInterval = 0.10
+
+    /// Longer restore delay for terminals; the shell/PTY may read the
+    /// clipboard well after the ⌘V event is delivered.
+    private let terminalRestoreDelay: TimeInterval = 1.5
+
     func inject(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        let isTerminal = Self.frontmostAppIsTerminal()
+        if isTerminal {
+            logger.info("Frontmost app is a terminal — using terminal-aware injection")
+        }
+
         let activeStrategyOrder: [Strategy]
         switch DictationWorkflowSettings.insertionMode {
         case .smart:
-            activeStrategyOrder = strategyOrder
+            // For terminals, skip AX (it always fails) and go straight to paste.
+            activeStrategyOrder = isTerminal ? [.pasteboard] : strategyOrder
         case .accessibilityOnly:
             activeStrategyOrder = [.accessibility]
         case .pasteboardOnly:
@@ -49,12 +79,20 @@ final class ClipboardInjector {
                 logger.info("Accessibility insertion unavailable/failed; falling back")
 
             case .pasteboard:
-                injectViaPasteboard(text: trimmed)
+                injectViaPasteboard(text: trimmed, isTerminal: isTerminal)
                 return
             }
         }
 
         logger.error("No viable text injection strategy configured")
+    }
+
+    /// Returns true if the current frontmost application is a terminal emulator.
+    private static func frontmostAppIsTerminal() -> Bool {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+            return false
+        }
+        return terminalBundleIDs.contains(bundleID)
     }
 
     // MARK: - Accessibility strategy
@@ -131,7 +169,7 @@ final class ClipboardInjector {
 
     // MARK: - Pasteboard fallback
 
-    private func injectViaPasteboard(text: String) {
+    private func injectViaPasteboard(text: String, isTerminal: Bool = false) {
         let pasteboard = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
 
@@ -139,10 +177,14 @@ final class ClipboardInjector {
         pasteboard.setString(text, forType: .string)
         let injectionChangeCount = pasteboard.changeCount
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + pasteDelay) { [weak self] in
-            self?.synthesisePaste()
+        let effectivePasteDelay = isTerminal ? terminalPasteDelay : pasteDelay
+        let effectiveRestoreDelay = isTerminal ? terminalRestoreDelay : restoreDelay
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + (self?.restoreDelay ?? 0.2)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + effectivePasteDelay) { [weak self] in
+            self?.synthesisePaste()
+            logger.info("Paste synthesised (terminal=\(isTerminal), pasteDelay=\(effectivePasteDelay)s, restoreDelay=\(effectiveRestoreDelay)s)")
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + effectiveRestoreDelay) {
                 guard let snapshot else { return }
                 // If clipboard changed after injection (e.g. user copied
                 // something else), do not overwrite user intent.

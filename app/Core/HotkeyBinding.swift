@@ -39,7 +39,7 @@ struct HotkeyBinding: Equatable, Codable {
     static let rightCommandHold = HotkeyBinding(
         keyCode: kVK_RightCommand,
         modifierFlags: [],
-        displayString: "⌘ Hold",
+        displayString: "Right ⌘ Hold",
         isModifierOnly: true
     )
 
@@ -60,7 +60,7 @@ struct HotkeyBinding: Equatable, Codable {
     static let controlHold = HotkeyBinding(
         keyCode: kVK_Control,
         modifierFlags: [],
-        displayString: "⌃ Hold",
+        displayString: "Left ⌃ Hold",
         isModifierOnly: true
     )
 
@@ -118,14 +118,19 @@ struct HotkeyBinding: Equatable, Codable {
     }
 
     /// Returns (symbol, CGEventFlags) for modifier key codes, nil for non-modifiers.
+    /// Distinguishes left from right variants so the display label is precise.
     private static func modifierKeyInfo(for keyCode: Int) -> (String, CGEventFlags)? {
         switch keyCode {
-        case kVK_Command, kVK_RightCommand: return ("⌘", .maskCommand)
-        case kVK_Shift, kVK_RightShift:     return ("⇧", .maskShift)
-        case kVK_Option, kVK_RightOption:    return ("⌥", .maskAlternate)
-        case kVK_Control, kVK_RightControl:  return ("⌃", .maskControl)
-        case kVK_Function:                   return ("Fn", .maskSecondaryFn)
-        default:                             return nil
+        case kVK_Command:      return ("Left ⌘", .maskCommand)
+        case kVK_RightCommand: return ("Right ⌘", .maskCommand)
+        case kVK_Shift:        return ("Left ⇧", .maskShift)
+        case kVK_RightShift:   return ("Right ⇧", .maskShift)
+        case kVK_Option:       return ("Left ⌥", .maskAlternate)
+        case kVK_RightOption:  return ("Right ⌥", .maskAlternate)
+        case kVK_Control:      return ("Left ⌃", .maskControl)
+        case kVK_RightControl: return ("Right ⌃", .maskControl)
+        case kVK_Function:     return ("Fn", .maskSecondaryFn)
+        default:               return nil
         }
     }
 

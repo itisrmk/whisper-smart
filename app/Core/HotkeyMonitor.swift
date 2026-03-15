@@ -56,21 +56,11 @@ final class HotkeyMonitor {
         self.matchingKeyCodes = Self.pairedKeyCodes(for: binding.keyCode)
     }
 
-    /// Returns a set containing both left and right variants for modifier keys,
-    /// or a singleton set for non-modifier keys.
+    /// Returns the exact key code to monitor. Each side of a modifier key
+    /// (left vs right) is treated as distinct so users can bind specifically
+    /// to Right ⌘ without Left ⌘ triggering it.
     private static func pairedKeyCodes(for code: Int) -> Set<Int> {
-        switch code {
-        case kVK_Command, kVK_RightCommand:
-            return [kVK_Command, kVK_RightCommand]
-        case kVK_Shift, kVK_RightShift:
-            return [kVK_Shift, kVK_RightShift]
-        case kVK_Option, kVK_RightOption:
-            return [kVK_Option, kVK_RightOption]
-        case kVK_Control, kVK_RightControl:
-            return [kVK_Control, kVK_RightControl]
-        default:
-            return [code]
-        }
+        return [code]
     }
 
     deinit {
@@ -256,21 +246,33 @@ final class HotkeyMonitor {
 
     // MARK: - Helpers
 
-    /// Returns `true` when the modifier flag corresponding to `keyCode` is set.
+    // Device-dependent modifier masks from IOLLEvent.h.
+    // These distinguish left vs right physical keys, unlike the generic
+    // .maskCommand/.maskShift which fire for either side.
+    private static let deviceLCmdMask:   UInt64 = 0x00000008
+    private static let deviceRCmdMask:   UInt64 = 0x00000010
+    private static let deviceLShiftMask: UInt64 = 0x00000002
+    private static let deviceRShiftMask: UInt64 = 0x00000004
+    private static let deviceLAltMask:   UInt64 = 0x00000020
+    private static let deviceRAltMask:   UInt64 = 0x00000040
+    private static let deviceLCtlMask:   UInt64 = 0x00000001
+    private static let deviceRCtlMask:   UInt64 = 0x00002000
+
+    /// Returns `true` when the specific physical modifier key is pressed.
+    /// Uses device-dependent flags to distinguish left from right.
     private func isModifierPressed(flags: CGEventFlags, keyCode: Int) -> Bool {
+        let raw = flags.rawValue
         switch keyCode {
-        case kVK_RightCommand, kVK_Command:
-            return flags.contains(.maskCommand)
-        case kVK_Shift, kVK_RightShift:
-            return flags.contains(.maskShift)
-        case kVK_Option, kVK_RightOption:
-            return flags.contains(.maskAlternate)
-        case kVK_Control, kVK_RightControl:
-            return flags.contains(.maskControl)
-        case kVK_Function:
-            return flags.contains(.maskSecondaryFn)
-        default:
-            return false
+        case kVK_Command:      return raw & Self.deviceLCmdMask != 0
+        case kVK_RightCommand: return raw & Self.deviceRCmdMask != 0
+        case kVK_Shift:        return raw & Self.deviceLShiftMask != 0
+        case kVK_RightShift:   return raw & Self.deviceRShiftMask != 0
+        case kVK_Option:       return raw & Self.deviceLAltMask != 0
+        case kVK_RightOption:  return raw & Self.deviceRAltMask != 0
+        case kVK_Control:      return raw & Self.deviceLCtlMask != 0
+        case kVK_RightControl: return raw & Self.deviceRCtlMask != 0
+        case kVK_Function:     return flags.contains(.maskSecondaryFn)
+        default:               return false
         }
     }
 }

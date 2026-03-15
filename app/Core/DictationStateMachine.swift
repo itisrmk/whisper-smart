@@ -369,6 +369,8 @@ final class DictationStateMachine {
         guard state == .recording else { return }
 
         cancelSilenceAutoStopWatchdog()
+        let hadSpeech = detectedSpeechInCurrentRecording
+        let wasOneShot = oneShotModeActive
         oneShotModeActive = false
         detectedSpeechInCurrentRecording = false
 
@@ -376,6 +378,18 @@ final class DictationStateMachine {
         if let sessionStartedAt {
             let recordMs = Int(Date().timeIntervalSince(sessionStartedAt) * 1000)
             logger.info("Dictation timing: recordingDurationMs=\(recordMs)")
+        }
+
+        // If no speech was detected at all, skip transcription entirely.
+        // Sending silent audio to the STT provider wastes time and produces
+        // no useful output.
+        if !hadSpeech {
+            logger.info("No speech detected during recording — skipping transcription")
+            sttProvider.endSession()
+            sessionStartedAt = nil
+            transcribingStartedAt = nil
+            transition(to: .idle)
+            return
         }
 
         // Transition to .transcribing BEFORE endSession() so that synchronous
@@ -427,7 +441,7 @@ final class DictationStateMachine {
     }
 
     private func handleAudioLevel(_ level: Float) {
-        guard state == .recording, oneShotModeActive else { return }
+        guard state == .recording else { return }
         if level >= 0.08 {
             detectedSpeechInCurrentRecording = true
             lastDetectedSpeechAt = Date()
