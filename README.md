@@ -1,65 +1,82 @@
-# Whisper Smart (macOS)
+<p align="center">
+  <img src="docs/screenshots/00-app-icon-reference.png" width="128" alt="Whisper Smart icon" />
+</p>
 
-Whisper Smart is a lightweight macOS menu-bar dictation app that supports local speech-to-text workflows.
+<h1 align="center">Whisper Smart</h1>
 
-## Smart model presets
+<p align="center">
+  <strong>Voice-to-text for macOS, right from the menu bar.</strong><br>
+  Hold a key, speak, release — your words appear wherever your cursor is.
+</p>
 
-In **Settings → Provider**, the app now includes explicit model presets:
-- **Light**: Whisper Tiny/Base (local, fastest setup)
-- **Balanced**: Parakeet TDT 0.6B v3 ONNX source (experimental)
-- **Best**: Whisper Large-v3 Turbo (local quality-focused)
-- **Cloud**: OpenAI Whisper API
+<p align="center">
+  <a href="https://github.com/itisrmk/whisper-smart/releases/latest">Download the latest release</a>
+</p>
 
-If the selected provider is missing runtime/model files, the app degrades gracefully to Apple Speech and shows direct install/download actions in the same settings screen.
+---
 
-Cloud API keys are normalized on paste/save and stored in macOS Keychain when available (with safe fallback handling for constrained environments).
-Cloud endpoint profile is configurable (official OpenAI or OpenAI-compatible gateway), including custom base URL + model.
+## How it works
 
-Whisper and Parakeet setup is managed in-app (runtime + model downloads), but host prerequisites still apply: Apple Command Line Tools are required for local builds, `make` is required for Whisper runtime build, and Python 3 with `venv` support is required for Parakeet runtime bootstrap. The app now fails fast with actionable guidance when these are missing.
+1. **Hold your hotkey** (default: Right Command)
+2. **Speak** — the app records from your mic
+3. **Release** — transcription is injected at the cursor
 
-## App icon
+Works in any app: browsers, editors, terminals, Slack, email — everywhere you type.
 
-![Whisper Smart app icon](docs/screenshots/00-app-icon-reference.png)
+## Install
 
-## Download
+1. Download **Whisper-Smart-mac.dmg** from [Releases](https://github.com/itisrmk/whisper-smart/releases/latest)
+2. Open the DMG and drag **Whisper Smart** into **Applications**
+3. Launch — it appears as a mic icon in your menu bar
+4. Grant **Accessibility** and **Microphone** permissions when prompted
 
-- Grab the latest DMG from **GitHub Releases**.
-- Open the DMG and drag **Whisper Smart.app** into **Applications**.
+> Requires macOS 14 (Sonoma) or later.
+
+## Speech providers
+
+Choose the provider that fits your workflow in **Settings > Provider**:
+
+| Preset | Engine | Runs locally | Setup |
+|--------|--------|:---:|-------|
+| **Light** | Whisper Tiny/Base | Yes | Needs Command Line Tools |
+| **Balanced** | Parakeet TDT 0.6B | Yes | One-click in-app download |
+| **Best** | Whisper Large-v3 Turbo | Yes | Needs Command Line Tools |
+| **Cloud** | OpenAI Whisper API | No | Paste your API key |
+
+If the selected provider isn't ready yet, the app falls back to **Apple Speech** (built-in, zero setup) so you're never stuck.
+
+## Features
+
+- **Press-and-hold or one-shot** — hold the hotkey while speaking, or click "Start Dictation" from the menu for toggle mode
+- **Left/right key aware** — bind specifically to Right Command without Left Command triggering it
+- **Configurable hotkey** — pick a preset or record any modifier combo in Settings
+- **Terminal-friendly** — special paste handling for Terminal.app, iTerm2, Kitty, Warp, Ghostty, and more
+- **Smart silence detection** — if you don't speak, it returns to idle instantly instead of waiting
+- **Writing styles** — neutral, formal, concise, casual, or developer mode with per-app overrides
+- **Auto-updates** — built-in Sparkle updater checks for new versions automatically
+- **Privacy-first** — local providers keep audio on your Mac; cloud is opt-in
+
+## Customizing the hotkey
+
+Open **Settings > Hotkey** to:
+
+- **Pick a preset**: Right Command Hold, Left Control Hold, Option+Space, Control+Space, Fn Hold
+- **Record a custom combo**: Click the shortcut pill and press your key combination
+- **Left vs right matters**: Each physical key is tracked independently
+
+## Building from source
 
 ```bash
+# Build
+swift build
+
+# Run
+.build/debug/Whisper\ Smart
+
+# Package a DMG
 bash scripts/package_dmg.sh
 ```
 
-Output:
+## License
 
-- `.build/release/Whisper-Smart-mac.dmg`
-
-## Verification
-
-```bash
-bash scripts/run_qa_smoke.sh
-bash scripts/run_visual_regression.sh
-bash scripts/qa_latency_report.sh
-bash scripts/run_app_compatibility_matrix.sh
-bash scripts/typecheck.sh
-bash scripts/swift_test_check.sh
-bash scripts/release_gate.sh
-```
-
-`swift_test_check.sh` intentionally skips `swift test` when no SwiftPM tests exist under `Tests/` and reports that decision explicitly to avoid false failures.
-
-## Phase Execution Roadmap
-
-- 5-phase execution tracker: `docs/PHASE_EXECUTION_ROADMAP.md`
-- Phase 5 QA + release checklist: `docs/PHASE5_QA_RELEASE_READINESS.md`
-- Release checklist: `docs/RELEASE_CHECKLIST.md`
-- Provider/performance plan: `docs/PERF_AND_PROVIDER_EXPANSION_PLAN.md`
-
-## GitHub Automation
-
-- CI validation workflow: `.github/workflows/macos-ci.yml`
-- Manual DMG release workflow: `.github/workflows/release-dmg.yml` (runs full release gate + includes rollback reference)
-
-## Notes
-
-Use a stable Developer ID code signature for every shipped update. Ad-hoc signatures can cause macOS permission grants (Accessibility/Microphone/Speech) to reset across updates.
+See [LICENSE](LICENSE) for details.
