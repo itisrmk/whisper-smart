@@ -181,7 +181,15 @@ enum VFFontRegistrar {
             return
         }
 
-        guard let url = Bundle.module.url(
+        // Bundle.module only exists in SwiftPM builds; the QA/visual-regression
+        // harnesses compile these sources with raw swiftc and fall back to
+        // the main bundle (and then to the system font).
+        #if SWIFT_PACKAGE
+        let resourceBundle = Bundle.module
+        #else
+        let resourceBundle = Bundle.main
+        #endif
+        guard let url = resourceBundle.url(
             forResource: "Archivo-Variable", withExtension: "ttf", subdirectory: "Fonts"
         ) else {
             NSLog("[VFFont] Archivo font resource not found; using system font")
