@@ -6,3 +6,6 @@ VisperflowClone
 scripts/__pycache__/
 __pycache__/
 AGENTS.md
+
+# Conductor personal settings
+.conductor/settings.local.toml

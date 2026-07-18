@@ -7,18 +7,14 @@ import AppKit
 /// hairline + 2px rules, zero corner radius, adaptive light/dark.
 struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .general
-    @State private var showOnboarding: Bool
-    @State private var onboardingPreset: OnboardingPreset = .localPrivate
-    @State private var onboardingStep: OnboardingStep = .welcome
 
-    init(initialTabRawValue: String? = nil, forceOnboarding: Bool = false) {
+    init(initialTabRawValue: String? = nil) {
         if let initialTabRawValue,
            let initialTab = SettingsTab(rawValue: initialTabRawValue) {
             _selectedTab = State(initialValue: initialTab)
         } else {
             _selectedTab = State(initialValue: .general)
         }
-        _showOnboarding = State(initialValue: forceOnboarding || ProductOnboardingPreferences.shouldPresentOnLaunch)
     }
 
     var body: some View {
@@ -26,8 +22,8 @@ struct SettingsView: View {
             SettingsSidebar(
                 selectedTab: $selectedTab,
                 onOpenOnboarding: {
-                    onboardingStep = .welcome
-                    showOnboarding = true
+                    // The standalone onboarding window is owned by AppDelegate.
+                    NotificationCenter.default.post(name: .productOnboardingRequested, object: nil)
                 }
             )
             .frame(width: VFSize.sidebarWidth)
@@ -54,35 +50,8 @@ struct SettingsView: View {
         .background(VFColor.bg)
         // The select pills draw their own accent chevron.
         .menuIndicator(.hidden)
-        .overlay(alignment: .center) {
-            if showOnboarding {
-                ProductOnboardingOverlay(
-                    step: $onboardingStep,
-                    selectedPreset: $onboardingPreset,
-                    onClose: {
-                        ProductOnboardingPreferences.markCompleted()
-                        showOnboarding = false
-                    },
-                    onApplyPreset: { preset in
-                        applyOnboardingPreset(preset)
-                    },
-                    onOpenProvider: {
-                        withAnimation(VFAnimation.springSnappy) {
-                            selectedTab = .provider
-                        }
-                    }
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                .zIndex(12)
-            }
-        }
         .vfForcedDarkTheme()
         .animation(VFAnimation.fadeMedium, value: selectedTab)
-        .animation(VFAnimation.fadeFast, value: showOnboarding)
-        .onReceive(NotificationCenter.default.publisher(for: .productOnboardingRequested)) { _ in
-            onboardingStep = .welcome
-            showOnboarding = true
-        }
     }
 
     @ViewBuilder
@@ -99,24 +68,6 @@ struct SettingsView: View {
         }
     }
 
-    private func applyOnboardingPreset(_ preset: OnboardingPreset) {
-        let providerKind: STTProviderKind
-        switch preset {
-        case .localPrivate:
-            providerKind = .whisper
-        case .balanced:
-            providerKind = .parakeet
-        case .cloudFast:
-            providerKind = .openaiAPI
-        }
-
-        providerKind.saveSelection()
-        NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
-
-        withAnimation(VFAnimation.springSnappy) {
-            selectedTab = .provider
-        }
-    }
 }
 
 // MARK: - Tab Enum
@@ -161,292 +112,6 @@ private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
         case .provider: return "Choose where transcription runs — right on your Mac, or in the cloud."
         case .history: return "Everything you've dictated, with timing so you can spot what to tune."
         }
-    }
-}
-
-private enum OnboardingStep: Int {
-    case welcome
-    case permissions
-    case finish
-}
-
-private enum OnboardingPreset: String, CaseIterable, Identifiable {
-    case localPrivate
-    case balanced
-    case cloudFast
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .localPrivate: return "Local Private"
-        case .balanced: return "Balanced"
-        case .cloudFast: return "Cloud Fast"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .localPrivate: return "Whisper local, no cloud dependency"
-        case .balanced: return "Parakeet MLX, local + private"
-        case .cloudFast: return "OpenAI Whisper API with your key"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .localPrivate: return "internaldrive.fill"
-        case .balanced: return "bird.fill"
-        case .cloudFast: return "cloud.bolt.fill"
-        }
-    }
-}
-
-private struct ProductOnboardingOverlay: View {
-    @Binding var step: OnboardingStep
-    @Binding var selectedPreset: OnboardingPreset
-    let onClose: () -> Void
-    let onApplyPreset: (OnboardingPreset) -> Void
-    let onOpenProvider: () -> Void
-
-    @State private var permissionSnapshot = PermissionDiagnostics.snapshot()
-
-    var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(Color.black.opacity(0.48))
-                .ignoresSafeArea()
-                .onTapGesture {}
-
-            VStack(alignment: .leading, spacing: VFSpacing.md) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
-                        Text("Welcome to Whisper Smart")
-                            .font(VFFont.sheetTitle)
-                            .foregroundStyle(VFColor.text)
-                        Text("Set your default dictation mode and verify permissions in under a minute.")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.muted)
-                    }
-                    Spacer()
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(VFColor.textSecondary)
-                    }
-                    .buttonStyle(GlassIconButtonStyle())
-                }
-
-                HStack(spacing: VFSpacing.xs) {
-                    onboardingStepChip(label: "1", title: "Mode", isActive: step == .welcome)
-                    onboardingStepChip(label: "2", title: "Permissions", isActive: step == .permissions)
-                    onboardingStepChip(label: "3", title: "Finish", isActive: step == .finish)
-                }
-
-                switch step {
-                case .welcome:
-                    welcomeContent
-                case .permissions:
-                    permissionsContent
-                case .finish:
-                    finishContent
-                }
-
-                HStack {
-                    if step != .welcome {
-                        Button("Back") {
-                            withAnimation(VFAnimation.fadeFast) {
-                                step = OnboardingStep(rawValue: max(0, step.rawValue - 1)) ?? .welcome
-                            }
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
-                    }
-
-                    Spacer()
-
-                    switch step {
-                    case .welcome:
-                        Button("Continue") {
-                            withAnimation(VFAnimation.fadeFast) {
-                                step = .permissions
-                            }
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
-                    case .permissions:
-                        Button("Continue") {
-                            withAnimation(VFAnimation.fadeFast) {
-                                step = .finish
-                            }
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
-                    case .finish:
-                        Button("Apply and Open Provider") {
-                            onApplyPreset(selectedPreset)
-                            onOpenProvider()
-                            onClose()
-                        }
-                        .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
-                    }
-                }
-            }
-            .padding(VFSpacing.lg)
-            .frame(width: 700)
-            .background(
-                Rectangle()
-                    .fill(VFColor.panel)
-                    .overlay(Rectangle().stroke(VFColor.border2, lineWidth: 1))
-                    .shadow(color: Color.black.opacity(0.25), radius: 30, y: 12)
-            )
-        }
-        .onAppear {
-            permissionSnapshot = PermissionDiagnostics.snapshot()
-        }
-    }
-
-    private var welcomeContent: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.md) {
-            Text("Choose your default mode")
-                .font(VFFont.settingsBody)
-                .foregroundStyle(VFColor.textPrimary)
-
-            HStack(spacing: VFSpacing.sm) {
-                ForEach(OnboardingPreset.allCases) { preset in
-                    Button {
-                        selectedPreset = preset
-                    } label: {
-                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                            HStack {
-                                Image(systemName: preset.icon)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(VFColor.accent)
-                                Spacer()
-                                if selectedPreset == preset {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(VFColor.accent)
-                                }
-                            }
-                            Text(preset.title)
-                                .font(VFFont.settingsBody)
-                                .foregroundStyle(VFColor.text)
-                            Text(preset.subtitle)
-                                .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.muted)
-                                .lineLimit(2)
-                        }
-                        .padding(VFSpacing.md)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            Rectangle()
-                                .fill(selectedPreset == preset ? VFColor.active : VFColor.panel)
-                                .overlay(
-                                    Rectangle().stroke(
-                                        selectedPreset == preset ? VFColor.accent : VFColor.border,
-                                        lineWidth: selectedPreset == preset ? 1.5 : 1
-                                    )
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private var permissionsContent: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.md) {
-            Text("Permission readiness")
-                .font(VFFont.settingsBody)
-                .foregroundStyle(VFColor.textPrimary)
-
-            VStack(spacing: VFSpacing.xs) {
-                permissionRow("Accessibility", status: permissionSnapshot.accessibility)
-                permissionRow("Microphone", status: permissionSnapshot.microphone)
-                permissionRow("Speech Recognition", status: permissionSnapshot.speechRecognition)
-            }
-
-            HStack(spacing: VFSpacing.sm) {
-                Button("Request Permissions") {
-                    PermissionDiagnostics.requestAllInOrder { snap in
-                        permissionSnapshot = snap
-                    }
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
-
-                Button("Open Privacy Settings") {
-                    guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") else { return }
-                    NSWorkspace.shared.open(url)
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
-            }
-        }
-    }
-
-    private var finishContent: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.md) {
-            Text("You are ready")
-                .font(VFFont.settingsBody)
-                .foregroundStyle(VFColor.textPrimary)
-
-            VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                Text("Selected mode: \(selectedPreset.title)")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textPrimary)
-                Text("Next: open Provider to install local model/runtime or save your cloud API key.")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
-                Text("Tip: you can reopen onboarding anytime from the sidebar.")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
-            }
-            .padding(VFSpacing.md)
-            .background(
-                Rectangle()
-                    .fill(VFColor.panel2)
-                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
-            )
-        }
-    }
-
-    private func onboardingStepChip(label: String, title: String, isActive: Bool) -> some View {
-        HStack(spacing: VFSpacing.xs) {
-            Text(label)
-                .font(VFFont.archivo(10, .bold))
-                .foregroundStyle(isActive ? Color.white : VFColor.muted)
-                .frame(width: 16, height: 16)
-                .background(Rectangle().fill(isActive ? VFColor.accent : VFColor.panel2))
-            Text(title)
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(isActive ? VFColor.text : VFColor.muted)
-        }
-        .padding(.horizontal, VFSpacing.sm)
-        .padding(.vertical, 5)
-        .background(
-            Rectangle()
-                .fill(isActive ? VFColor.active : Color.clear)
-                .overlay(
-                    Rectangle().stroke(isActive ? VFColor.accent : VFColor.border, lineWidth: 1)
-                )
-        )
-    }
-
-    private func permissionRow(_ title: String, status: PermissionDiagnostics.Status) -> some View {
-        HStack {
-            Text(title)
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.text)
-            Spacer()
-            Text(status.actionHint)
-                .font(VFFont.settingsFootnote)
-                .foregroundStyle(status.isUsable ? VFColor.success : VFColor.muted)
-        }
-        .padding(.horizontal, VFSpacing.sm)
-        .padding(.vertical, VFSpacing.sm)
-        .background(
-            Rectangle()
-                .fill(VFColor.panel2)
-                .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
-        )
     }
 }
 

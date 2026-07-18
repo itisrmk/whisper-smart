@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var bubblePanel = BubblePanelController(stateSubject: bubbleState)
     private lazy var topCenterOverlayPanel = TopCenterOverlayPanelController(stateSubject: bubbleState)
     private lazy var settingsWindow = SettingsWindowController()
+    private lazy var onboardingWindow = OnboardingWindowController(stateSubject: bubbleState)
 
     // MARK: - Core
 
@@ -58,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mlxModelInstallObserver: NSObjectProtocol?
     private var transcriptLogObserver: NSObjectProtocol?
     private var userDefaultsObserver: NSObjectProtocol?
+    private var onboardingRequestObserver: NSObjectProtocol?
 
     private let recordingSoundPlayer = RecordingSoundPlayer.shared
     private var previousCoreState: DictationStateMachine.State = .idle
@@ -104,23 +106,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeMLXModelInstallChanges()
         observeTranscriptLogActions()
         observeOverlaySettingsChanges()
+        observeOnboardingRequests()
 
         if ProductOnboardingPreferences.shouldPresentOnLaunch {
+            // Fresh install: the onboarding window drives permission prompts
+            // one card at a time, so don't fire all system dialogs at launch —
+            // that would stack scary prompts behind the welcome screen.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-                self?.settingsWindow.showSettings(initialTabRawValue: "general", forceOnboarding: true)
+                self?.onboardingWindow.show()
             }
-        }
-
-        // Request permissions first so the system dialog appears before we
-        // attempt hotkey bootstrap. Once permissions are resolved, start the
-        // hotkey monitor. This avoids showing a scary error before the user
-        // has a chance to click Allow.
-        PermissionDiagnostics.requestAllInOrder(
-            requestSpeechRecognition: shouldRequestSpeechPermissionAtLaunch()
-        ) { [weak self] snap in
-            guard let self else { return }
-            PermissionDiagnostics.logAll()
-            self.ensureHotkeyMonitorReady(source: "permissions-completed")
+        } else {
+            // Request permissions first so the system dialog appears before we
+            // attempt hotkey bootstrap. Once permissions are resolved, start the
+            // hotkey monitor. This avoids showing a scary error before the user
+            // has a chance to click Allow.
+            PermissionDiagnostics.requestAllInOrder(
+                requestSpeechRecognition: shouldRequestSpeechPermissionAtLaunch()
+            ) { [weak self] snap in
+                guard let self else { return }
+                PermissionDiagnostics.logAll()
+                self.ensureHotkeyMonitorReady(source: "permissions-completed")
+            }
         }
 
         // If accessibility was already granted from a previous session, start
@@ -363,6 +369,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         bubbleState.onTap = { [weak self] in
             self?.menuBar.onToggleDictation?()
+        }
+
+        onboardingWindow.onPermissionsChanged = { [weak self] in
+            self?.ensureHotkeyMonitorReady(source: "onboarding-permissions")
+        }
+
+        onboardingWindow.onFinished = { [weak self] in
+            guard let self else { return }
+            self.ensureHotkeyMonitorReady(source: "onboarding-finished")
+            // Land the user in Settings so they can see providers, hotkey,
+            // and history right after finishing the guided flow.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                self.settingsWindow.showSettings()
+            }
+        }
+    }
+
+    /// Opens the standalone onboarding window when requested from Settings
+    /// (sidebar "Onboarding" button) or anywhere else.
+    private func observeOnboardingRequests() {
+        onboardingRequestObserver = NotificationCenter.default.addObserver(
+            forName: .productOnboardingRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.onboardingWindow.show()
         }
     }
 
