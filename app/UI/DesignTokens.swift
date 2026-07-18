@@ -230,6 +230,52 @@ enum VFFontRegistrar {
     }
 }
 
+// MARK: - Brand Assets
+
+/// Loads the bundled logo mark without SwiftPM's `Bundle.module` accessor —
+/// same resolution strategy as `VFFontRegistrar` (that accessor traps at
+/// launch in the packaged .app and does not exist for the raw-swiftc QA
+/// harness builds).
+enum VFBrand {
+    /// The app logo mark (dark rounded square, transparent margin cropped).
+    /// `nil` when the resource bundle is missing; callers should fall back
+    /// to a drawn placeholder.
+    static let logo: NSImage? = loadLogo()
+
+    private static func loadLogo() -> NSImage? {
+        let bundleName = "WhisperSmart_App.bundle"
+
+        var candidates: [URL] = []
+        if let resourceURL = Bundle.main.resourceURL {
+            candidates.append(resourceURL.appendingPathComponent(bundleName))
+        }
+        if let executableURL = Bundle.main.executableURL {
+            candidates.append(
+                executableURL.deletingLastPathComponent().appendingPathComponent(bundleName)
+            )
+        }
+        candidates.append(Bundle.main.bundleURL.appendingPathComponent(bundleName))
+
+        for candidate in candidates {
+            if let bundle = Bundle(url: candidate),
+               let url = bundle.url(
+                   forResource: "whisper-smart-logo", withExtension: "png", subdirectory: "Brand"
+               ),
+               let image = NSImage(contentsOf: url) {
+                return image
+            }
+        }
+
+        // Loose fallback: asset copied directly into the app's Resources.
+        if let url = Bundle.main.url(
+            forResource: "whisper-smart-logo", withExtension: "png", subdirectory: "Brand"
+        ) {
+            return NSImage(contentsOf: url)
+        }
+        return nil
+    }
+}
+
 enum VFFont {
     /// Archivo with a graceful system-font fallback.
     static func archivo(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {

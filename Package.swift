@@ -17,7 +17,11 @@ let package = Package(
             path: "app",
             exclude: [],
             sources: ["App", "Core", "UI"],
-            resources: [.copy("Resources/Fonts")]
+            resources: [
+                .copy("Resources/Fonts"),
+                .copy("Resources/Brand"),
+                .copy("Resources/Icons")
+            ]
         )
     ]
 )
