@@ -181,17 +181,7 @@ enum VFFontRegistrar {
             return
         }
 
-        // Bundle.module only exists in SwiftPM builds; the QA/visual-regression
-        // harnesses compile these sources with raw swiftc and fall back to
-        // the main bundle (and then to the system font).
-        #if SWIFT_PACKAGE
-        let resourceBundle = Bundle.module
-        #else
-        let resourceBundle = Bundle.main
-        #endif
-        guard let url = resourceBundle.url(
-            forResource: "Archivo-Variable", withExtension: "ttf", subdirectory: "Fonts"
-        ) else {
+        guard let url = fontResourceURL() else {
             NSLog("[VFFont] Archivo font resource not found; using system font")
             return
         }
@@ -202,6 +192,41 @@ enum VFFontRegistrar {
             NSLog("[VFFont] Archivo registration note: \(error)")
         }
         archivoAvailable = NSFont(name: "Archivo-Regular", size: 12) != nil
+    }
+
+    /// Locates the bundled font without SwiftPM's `Bundle.module` accessor —
+    /// that accessor traps at launch in the packaged .app (it never checks
+    /// Contents/Resources) and does not exist at all for the raw-swiftc QA
+    /// harness builds. Checks every place the resource bundle can live.
+    private static func fontResourceURL() -> URL? {
+        let bundleName = "WhisperSmart_App.bundle"
+
+        var candidates: [URL] = []
+        if let resourceURL = Bundle.main.resourceURL {
+            // Packaged .app: Contents/Resources/WhisperSmart_App.bundle
+            candidates.append(resourceURL.appendingPathComponent(bundleName))
+        }
+        if let executableURL = Bundle.main.executableURL {
+            // swift build / swift run: bundle sits next to the binary
+            candidates.append(
+                executableURL.deletingLastPathComponent().appendingPathComponent(bundleName)
+            )
+        }
+        candidates.append(Bundle.main.bundleURL.appendingPathComponent(bundleName))
+
+        for candidate in candidates {
+            if let bundle = Bundle(url: candidate),
+               let url = bundle.url(
+                   forResource: "Archivo-Variable", withExtension: "ttf", subdirectory: "Fonts"
+               ) {
+                return url
+            }
+        }
+
+        // Loose fallback: fonts copied directly into the app's Resources.
+        return Bundle.main.url(
+            forResource: "Archivo-Variable", withExtension: "ttf", subdirectory: "Fonts"
+        )
     }
 }
 
