@@ -97,7 +97,7 @@ enum STTProviderResolver {
         var speechRecognizerFactory: () -> SFSpeechRecognizer?
         var cloudFallbackEnabled: () -> Bool
         var openAIAPIKey: () -> String
-        var parakeetBootstrapStatus: () -> ParakeetRuntimeBootstrapStatus
+        var mlxBootstrapStatus: () -> MLXRuntimeBootstrapStatus
 
         static let live = Environment(
             microphoneStatus: { PermissionDiagnostics.microphoneStatus() },
@@ -105,7 +105,7 @@ enum STTProviderResolver {
             speechRecognizerFactory: { SFSpeechRecognizer(locale: .current) },
             cloudFallbackEnabled: { DictationProviderPolicy.cloudFallbackEnabled },
             openAIAPIKey: { DictationProviderPolicy.openAIAPIKey },
-            parakeetBootstrapStatus: { ParakeetRuntimeBootstrapManager.shared.statusSnapshot() }
+            mlxBootstrapStatus: { MLXRuntimeBootstrapManager.shared.statusSnapshot() }
         )
     }
 
@@ -134,10 +134,8 @@ enum STTProviderResolver {
         switch requestedKind {
         case .appleSpeech:
             return appleSpeechDiagnostics(requestedKind: requestedKind, environment: environment)
-        case .parakeet:
-            return parakeetDiagnostics(requestedKind: requestedKind, environment: environment)
-        case .whisper:
-            return whisperLocalDiagnostics(requestedKind: requestedKind, environment: environment)
+        case .parakeet, .whisper:
+            return mlxLocalDiagnostics(requestedKind: requestedKind, environment: environment)
         case .openaiAPI:
             return openAIDiagnostics(requestedKind: requestedKind, environment: environment)
         case .stub:
@@ -167,202 +165,66 @@ enum STTProviderResolver {
         )
     }
 
-    private static func parakeetDiagnostics(requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
+    /// Diagnostics for the MLX-backed local providers (Parakeet + Whisper).
+    /// No silent fallback: the effective kind always stays the requested one,
+    /// with health level and checks explaining anything that is not ready.
+    private static func mlxLocalDiagnostics(requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
         var checks = [microphoneCheck(environment: environment)]
-        var fallbackReason: String?
-        var canUseParakeet = true
+        var ready = true
+        var unavailableReason: String?
 
-        guard let variant = requestedKind.defaultVariant else {
+        if let model = MLXModelCatalog.selectedModel(for: requestedKind) {
+            let installed = MLXModelInstaller.shared.isInstalled(model)
             checks.append(
                 ProviderHealthCheck(
-                    id: "parakeet.variant",
-                    title: "Parakeet Model Variant",
+                    id: "mlx.model",
+                    title: "\(model.displayName) Model",
+                    isPassing: installed,
+                    detail: installed
+                        ? "Installed (\(model.approxSizeLabel))."
+                        : "Not installed. Download it from Settings -> Provider."
+                )
+            )
+            if !installed {
+                ready = false
+                unavailableReason = "\(model.displayName) is not installed. Download it from Settings -> Provider."
+            }
+        } else {
+            checks.append(
+                ProviderHealthCheck(
+                    id: "mlx.model",
+                    title: "MLX Model Selection",
                     isPassing: false,
-                    detail: "No Parakeet model variant is configured."
+                    detail: "No MLX model is configured for this provider."
                 )
             )
-            canUseParakeet = false
-            fallbackReason = "No Parakeet model variant is configured in this build."
-            return finalizeParakeetDiagnostics(
-                requestedKind: requestedKind,
-                checks: checks,
-                canUseParakeet: canUseParakeet,
-                fallbackReason: fallbackReason,
-                environment: environment
-            )
+            ready = false
+            unavailableReason = "No MLX model is configured for this provider."
         }
 
-        let pathResolved = (variant.localURL != nil)
-        checks.append(
-            ProviderHealthCheck(
-                id: "parakeet.model_path",
-                title: "Model Path Resolution",
-                isPassing: pathResolved,
-                detail: pathResolved
-                    ? "Model path resolved to Application Support."
-                    : "Cannot resolve Application Support model path."
-            )
-        )
-        if !pathResolved {
-            canUseParakeet = false
-            fallbackReason = "Cannot resolve Parakeet model storage path."
-        }
-
-        let modelReady = variant.isDownloaded
-        let sourceConfigured = variant.hasDownloadSource || modelReady
-        let sourceDetail: String
-        if variant.hasDownloadSource {
-            sourceDetail = "Using source '\(variant.configuredSourceDisplayName)'."
-        } else if modelReady {
-            sourceDetail = "Model file is already present on disk."
-        } else {
-            sourceDetail = variant.downloadUnavailableReason ?? "Model source not configured."
-        }
-        checks.append(
-            ProviderHealthCheck(
-                id: "parakeet.model_source",
-                title: "Model Source Configuration",
-                isPassing: sourceConfigured,
-                detail: sourceDetail
-            )
-        )
-        checks.append(
-            ProviderHealthCheck(
-                id: "parakeet.model_source_url",
-                title: "Model Source URL",
-                isPassing: sourceConfigured,
-                detail: variant.configuredSourceURLDisplay
-            )
-        )
-
-        if let source = variant.configuredSource {
-            if let tokenizerStatus = variant.tokenizerValidationStatus(using: source) {
-                checks.append(
-                    ProviderHealthCheck(
-                        id: "parakeet.tokenizer",
-                        title: "Tokenizer Artifact",
-                        isPassing: tokenizerStatus.isReady,
-                        detail: tokenizerStatus.detail
-                    )
-                )
-            } else {
-                checks.append(
-                    ProviderHealthCheck(
-                        id: "parakeet.tokenizer",
-                        title: "Tokenizer Artifact",
-                        isPassing: true,
-                        detail: "Tokenizer download is optional for this source."
-                    )
-                )
-            }
-        }
-
-        if !sourceConfigured, fallbackReason == nil {
-            canUseParakeet = false
-            fallbackReason = variant.downloadUnavailableReason
-                ?? "Model source is not configured."
-        }
-
-        checks.append(
-            ProviderHealthCheck(
-                id: "parakeet.model_ready",
-                title: "Model File Validation",
-                isPassing: modelReady,
-                detail: variant.validationStatus
-            )
-        )
-        if !modelReady, fallbackReason == nil {
-            canUseParakeet = false
-            fallbackReason = "Parakeet model is not installed (\(variant.validationStatus)). Install it from Settings -> Provider."
-        }
-
-        let runtimeImplemented = ParakeetSTTProvider.inferenceImplemented
-        checks.append(
-            ProviderHealthCheck(
-                id: "parakeet.runtime",
-                title: "Parakeet Inference Runtime",
-                isPassing: runtimeImplemented,
-                detail: runtimeImplemented
-                    ? "ONNX runtime integration is available."
-                    : "ONNX runtime integration is not wired in this build."
-            )
-        )
-        if !runtimeImplemented, fallbackReason == nil {
-            canUseParakeet = false
-            fallbackReason = "Parakeet inference runtime is not integrated yet."
-        }
-
-        let bootstrapAssessment = parakeetRuntimeBootstrapCheck(environment: environment)
+        let bootstrapAssessment = mlxRuntimeBootstrapCheck(environment: environment)
         checks.append(bootstrapAssessment.check)
-        if bootstrapAssessment.blocksParakeet, fallbackReason == nil {
-            canUseParakeet = false
-            fallbackReason = bootstrapAssessment.failureReason
+        if bootstrapAssessment.blocksMLX {
+            ready = false
+            if unavailableReason == nil {
+                unavailableReason = bootstrapAssessment.failureReason
+            }
         }
 
-        return finalizeParakeetDiagnostics(
-            requestedKind: requestedKind,
-            checks: checks,
-            canUseParakeet: canUseParakeet,
-            fallbackReason: fallbackReason,
-            environment: environment
-        )
-    }
-
-    private static func finalizeParakeetDiagnostics(
-        requestedKind: STTProviderKind,
-        checks: [ProviderHealthCheck],
-        canUseParakeet: Bool,
-        fallbackReason: String?,
-        environment _: Environment
-    ) -> ProviderRuntimeDiagnostics {
-        let finalChecks = checks
         let level: ProviderHealthLevel
-        if canUseParakeet {
-            level = finalChecks.allSatisfy(\.isPassing) ? .healthy : .degraded
+        if ready {
+            level = checks.allSatisfy(\.isPassing) ? .healthy : .degraded
         } else {
-            level = finalChecks.allSatisfy(\.isPassing) ? .degraded : .unavailable
-            if let fallbackReason {
-                logger.warning("Parakeet diagnostics unavailable: \(fallbackReason, privacy: .public)")
+            level = checks.allSatisfy(\.isPassing) ? .degraded : .unavailable
+            if let unavailableReason {
+                logger.warning("MLX diagnostics unavailable for \(requestedKind.rawValue, privacy: .public): \(unavailableReason, privacy: .public)")
             }
         }
 
         return ProviderRuntimeDiagnostics(
             timestamp: Date(),
             requestedKind: requestedKind,
-            effectiveKind: .parakeet,
-            healthLevel: level,
-            checks: finalChecks,
-            fallbackReason: nil
-        )
-    }
-
-    private static func whisperLocalDiagnostics(requestedKind: STTProviderKind, environment: Environment) -> ProviderRuntimeDiagnostics {
-        var checks = [microphoneCheck(environment: environment)]
-
-        let runtimeReason = WhisperLocalRuntime.unavailableReason()
-        checks.append(
-            ProviderHealthCheck(
-                id: "whisper.runtime",
-                title: "Whisper CLI Runtime",
-                isPassing: runtimeReason == nil,
-                detail: runtimeReason ?? "Local whisper-cli runtime is configured and executable."
-            )
-        )
-
-        guard runtimeReason == nil else {
-            return fallbackToApple(
-                requestedKind: requestedKind,
-                checks: checks,
-                fallbackReason: runtimeReason ?? "Whisper local runtime unavailable.",
-                environment: environment
-            )
-        }
-
-        let level: ProviderHealthLevel = checks.allSatisfy(\.isPassing) ? .healthy : .degraded
-        return ProviderRuntimeDiagnostics(
-            timestamp: Date(),
-            requestedKind: requestedKind,
-            effectiveKind: .whisper,
+            effectiveKind: requestedKind,
             healthLevel: level,
             checks: checks,
             fallbackReason: nil
@@ -519,13 +381,9 @@ enum STTProviderResolver {
         case .appleSpeech:
             return AppleSpeechSTTProvider()
         case .parakeet:
-            guard let variant = diagnostics.requestedKind.defaultVariant else {
-                logger.error("Parakeet resolved without a configured variant; falling back to Apple Speech provider instance")
-                return AppleSpeechSTTProvider()
-            }
-            return ParakeetSTTProvider(variant: variant)
+            return MLXSTTProvider(model: MLXModelCatalog.selectedParakeetModel)
         case .whisper:
-            return WhisperLocalSTTProvider()
+            return MLXSTTProvider(model: MLXModelCatalog.selectedWhisperModel)
         case .openaiAPI:
             return OpenAIWhisperAPISTTProvider()
         case .stub:
@@ -535,20 +393,20 @@ enum STTProviderResolver {
 
     // MARK: - Shared checks
 
-    private static func parakeetRuntimeBootstrapCheck(environment: Environment) -> (
+    private static func mlxRuntimeBootstrapCheck(environment: Environment) -> (
         check: ProviderHealthCheck,
-        blocksParakeet: Bool,
+        blocksMLX: Bool,
         failureReason: String?
     ) {
-        let status = environment.parakeetBootstrapStatus()
+        let status = environment.mlxBootstrapStatus()
         let detail = status.detail
 
         switch status.phase {
         case .idle:
             return (
                 ProviderHealthCheck(
-                    id: "parakeet.runtime_bootstrap",
-                    title: "Parakeet Runtime Bootstrap",
+                    id: "mlx.runtime_bootstrap",
+                    title: "MLX Runtime",
                     isPassing: true,
                     detail: detail
                 ),
@@ -558,8 +416,8 @@ enum STTProviderResolver {
         case .bootstrapping:
             return (
                 ProviderHealthCheck(
-                    id: "parakeet.runtime_bootstrap",
-                    title: "Parakeet Runtime Bootstrap",
+                    id: "mlx.runtime_bootstrap",
+                    title: "MLX Runtime",
                     isPassing: false,
                     detail: detail
                 ),
@@ -569,8 +427,8 @@ enum STTProviderResolver {
         case .ready:
             return (
                 ProviderHealthCheck(
-                    id: "parakeet.runtime_bootstrap",
-                    title: "Parakeet Runtime Bootstrap",
+                    id: "mlx.runtime_bootstrap",
+                    title: "MLX Runtime",
                     isPassing: true,
                     detail: detail
                 ),
@@ -580,13 +438,13 @@ enum STTProviderResolver {
         case .failed:
             return (
                 ProviderHealthCheck(
-                    id: "parakeet.runtime_bootstrap",
-                    title: "Parakeet Runtime Bootstrap",
+                    id: "mlx.runtime_bootstrap",
+                    title: "MLX Runtime",
                     isPassing: false,
                     detail: detail
                 ),
                 true,
-                "Parakeet runtime bootstrap failed. Retry setup from Settings -> Provider."
+                "MLX runtime setup failed. Retry setup from Settings -> Provider."
             )
         }
     }

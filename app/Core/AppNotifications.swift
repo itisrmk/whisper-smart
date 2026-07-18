@@ -1,7 +1,7 @@
 import Foundation
 
 // Cross-layer notification names. Defined in Core (not UI) so that Core
-// components — e.g. WhisperModelInstaller — can post them and the smoke-test
+// components — e.g. the MLX model installer — can post them and the smoke-test
 // target (which compiles app/Core only) can reference them.
 
 extension Notification.Name {

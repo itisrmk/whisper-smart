@@ -196,7 +196,7 @@ private enum OnboardingPreset: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .localPrivate: return "Whisper local, no cloud dependency"
-        case .balanced: return "Parakeet local model + manual install"
+        case .balanced: return "Parakeet MLX, local + private"
         case .cloudFast: return "OpenAI Whisper API with your key"
         }
     }
@@ -2293,9 +2293,9 @@ private struct ProviderSettingsTab: View {
 
         var subtitle: String {
             switch self {
-            case .light: return "Whisper Tiny/Base · fastest local"
-            case .balanced: return "Parakeet TDT 0.6B v3 · local experimental"
-            case .best: return "Whisper Large-v3 Turbo · highest local accuracy"
+            case .light: return "Whisper Base (MLX) · fast local"
+            case .balanced: return "Parakeet TDT 0.6B (MLX) · best local speed"
+            case .best: return "Whisper Large-v3 Turbo (MLX) · highest local accuracy"
             case .cloud: return "OpenAI Whisper API · remote transcription"
             }
         }
@@ -2319,9 +2319,7 @@ private struct ProviderSettingsTab: View {
     }
 
     @State private var selectedKind: STTProviderKind = STTProviderKind.loadSelection()
-    @StateObject private var downloadState = ModelDownloadState.sharedParakeet
-    @StateObject private var whisperInstaller = WhisperModelInstaller.shared
-    @StateObject private var whisperRuntimeInstaller = WhisperRuntimeInstaller.shared
+    @StateObject private var mlxInstaller = MLXModelInstaller.shared
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
     @State private var openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
     @State private var openAIBaseURL = DictationProviderPolicy.openAIBaseURL
@@ -2372,8 +2370,8 @@ private struct ProviderSettingsTab: View {
                         }
                     }
 
-                    if selectedKind == .parakeet {
-                        ModelDownloadRow(kind: .parakeet, downloadState: downloadState)
+                    if selectedKind == .parakeet || selectedKind == .whisper {
+                        MLXModelDetailRow(kind: selectedKind, installer: mlxInstaller)
                     }
 
                     if selectedKind == .openaiAPI {
@@ -2390,15 +2388,12 @@ private struct ProviderSettingsTab: View {
             // both of which re-enter the view graph mid-update and crash
             // (AttributeGraph precondition failure).
             DispatchQueue.main.async {
-                syncDownloadState(for: selectedKind)
                 DictationProviderPolicy.cloudFallbackEnabled = true
                 openAIAPIKey = DictationProviderPolicy.openAIAPIKey
                 openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
                 openAIBaseURL = DictationProviderPolicy.openAIBaseURL
                 openAIModel = DictationProviderPolicy.openAIModel
                 openAIAPIKeyStatusMessage = nil
-                whisperRuntimeInstaller.refreshState()
-                whisperInstaller.refreshState()
                 refreshPresetDiagnostics()
             }
         }
@@ -2411,14 +2406,14 @@ private struct ProviderSettingsTab: View {
         }
         .onReceive(
             NotificationCenter.default
-                .publisher(for: .parakeetRuntimeBootstrapDidChange)
+                .publisher(for: .mlxRuntimeBootstrapDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
             refreshPresetDiagnostics()
         }
         .onReceive(
             NotificationCenter.default
-                .publisher(for: .modelDownloadDidChange)
+                .publisher(for: .mlxModelInstallDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
             refreshPresetDiagnostics()
@@ -2678,41 +2673,33 @@ private struct ProviderSettingsTab: View {
         case failed(String)
     }
 
-    private func presetInstallState(for preset: SmartModelPreset) -> PresetInstallState {
+    /// The MLX model each preset installs and runs.
+    private func presetModel(for preset: SmartModelPreset) -> MLXModel? {
         switch preset {
-        case .light, .best:
-            let tiers: [WhisperModelTier] = preset == .light ? [.tinyEn, .baseEn] : [.largeV3Turbo]
-            if case .installing = whisperRuntimeInstaller.phase {
-                return .working("Installing runtime…")
-            }
-            if case .failed(let message) = whisperRuntimeInstaller.phase {
-                return .failed(sanitizedStatusMessage(message, fallback: "Runtime install failed."))
-            }
-            if case .downloading(let tier, let progress) = whisperInstaller.phase, tiers.contains(tier) {
-                return .working("Downloading \(Int(progress * 100))%")
-            }
-            if case .failed(let message) = whisperInstaller.phase {
-                return .failed(sanitizedStatusMessage(message, fallback: "Model download failed."))
-            }
-            return whisperRuntimeIsReady && whisperModelInstalled(tiers) ? .installed : .notInstalled
-        case .balanced:
-            if ModelVariant.parakeetCTC06B.isDownloaded {
-                return .installed
-            }
-            switch downloadState.phase {
-            case .downloading(let progress):
-                return .working("Downloading \(Int(progress * 100))%")
-            case .failed(let message):
-                return .failed(sanitizedStatusMessage(message, fallback: "Parakeet install failed."))
-            default:
-                return .notInstalled
-            }
-        case .cloud:
-            // Use the cached key (loaded onAppear) — reading the Keychain
-            // from body would reintroduce side effects during view updates.
+        case .light: return MLXModelCatalog.whisperBase
+        case .balanced: return MLXModelCatalog.selectedParakeetModel
+        case .best: return MLXModelCatalog.selectedWhisperModel
+        case .cloud: return nil
+        }
+    }
+
+    private func presetInstallState(for preset: SmartModelPreset) -> PresetInstallState {
+        guard let model = presetModel(for: preset) else {
+            // Cloud: use the cached key (loaded onAppear) — reading the
+            // Keychain from body would reintroduce side effects during view
+            // updates.
             return openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? .notInstalled
                 : .installed
+        }
+
+        switch mlxInstaller.phase {
+        case .installing(let modelID, let detail) where modelID == model.id:
+            return .working(detail)
+        case .failed(let modelID, let message) where modelID == model.id:
+            return .failed(sanitizedStatusMessage(message, fallback: "Install failed."))
+        default:
+            return mlxInstaller.isInstalled(model) ? .installed : .notInstalled
         }
     }
 
@@ -2751,95 +2738,33 @@ private struct ProviderSettingsTab: View {
     }
 
     private func startPresetInstall(_ preset: SmartModelPreset) {
-        switch preset {
-        case .light:
-            whisperInstaller.setTier(whisperModelInstalled([.tinyEn]) ? .tinyEn : .baseEn)
-            installWhisperRuntimeThenDownloadModel()
-        case .best:
-            whisperInstaller.setTier(.largeV3Turbo)
-            installWhisperRuntimeThenDownloadModel()
-        case .balanced:
-            // The click is the consent for the 650 MB model + runtime install.
-            ParakeetSetupPolicy.setupConsentGranted = true
-            _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
-                id: "hf_parakeet_tdt06b_v3_onnx",
-                for: ModelVariant.parakeetCTC06B.id
-            )
-            syncDownloadState(for: .parakeet)
-            downloadState.reset()
-            ModelDownloaderService.shared.download(variant: .parakeetCTC06B, state: downloadState)
-            Task.detached(priority: .utility) {
-                _ = try? ParakeetRuntimeBootstrapManager.shared.ensureRuntimeReady(allowInstall: true)
-            }
-        case .cloud:
-            // Selecting Cloud reveals the API key form below the cards.
+        guard let model = presetModel(for: preset) else {
+            // Cloud: selecting reveals the API key form below the cards.
             applyPreset(.cloud)
+            return
         }
+        // The click is the consent for the model download + runtime install.
+        MLXModelInstaller.shared.install(model)
     }
 
     private func cancelPresetInstall(_ preset: SmartModelPreset) {
-        switch preset {
-        case .light, .best:
-            if case .installing = whisperRuntimeInstaller.phase {
-                whisperRuntimeInstaller.cancelInstall()
-            } else {
-                whisperInstaller.cancel()
-            }
-        case .balanced:
-            ModelDownloaderService.shared.cancel(variant: .parakeetCTC06B, state: downloadState)
-        case .cloud:
-            break
-        }
+        MLXModelInstaller.shared.cancelInstall()
     }
 
     private func applyPreset(_ preset: SmartModelPreset) {
         switch preset {
         case .light:
-            whisperInstaller.setTier(whisperModelInstalled([.tinyEn]) ? .tinyEn : .baseEn)
+            MLXModelCatalog.selectedWhisperModel = MLXModelCatalog.whisperBase
             selectProvider(.whisper)
-            whisperInstaller.refreshState()
         case .balanced:
-            // Select only. The 650 MB model download and Python runtime
-            // install start when the user clicks Install Parakeet.
             selectProvider(.parakeet)
-            syncDownloadState(for: .parakeet)
         case .best:
-            whisperInstaller.setTier(.largeV3Turbo)
+            if MLXModelCatalog.selectedWhisperModel == MLXModelCatalog.whisperBase {
+                MLXModelCatalog.selectedWhisperModel = MLXModelCatalog.whisperLargeTurbo
+            }
             selectProvider(.whisper)
-            whisperInstaller.refreshState()
         case .cloud:
             selectProvider(.openaiAPI)
-        }
-    }
-
-    /// One click installs everything: runtime first if needed, then the model
-    /// download chains automatically instead of requiring a second click.
-    private func installWhisperRuntimeThenDownloadModel() {
-        if whisperRuntimeIsReady {
-            whisperInstaller.downloadSelectedModel()
-            return
-        }
-        whisperRuntimeInstaller.installRuntime { success in
-            if success {
-                whisperInstaller.downloadSelectedModel()
-            }
-        }
-    }
-
-    private var whisperRuntimeIsReady: Bool {
-        if case .ready = whisperRuntimeInstaller.phase { return true }
-        return false
-    }
-
-    private func whisperModelInstalled(_ tiers: [WhisperModelTier]) -> Bool {
-        tiers.contains { tier in
-            let path = whisperInstaller.localModelURL(for: tier).path
-            guard FileManager.default.fileExists(atPath: path),
-                  let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-                  let size = attrs[.size] as? Int64 else {
-                return false
-            }
-            return size > 10_000_000
         }
     }
 
@@ -2850,7 +2775,7 @@ private struct ProviderSettingsTab: View {
         case .parakeet:
             return .balanced
         case .whisper:
-            return whisperInstaller.selectedTier == .largeV3Turbo ? .best : .light
+            return MLXModelCatalog.selectedWhisperModel == MLXModelCatalog.whisperBase ? .light : .best
         case .appleSpeech, .stub:
             return .light
         }
@@ -2993,7 +2918,6 @@ private struct ProviderSettingsTab: View {
     private func selectProvider(_ kind: STTProviderKind) {
         selectedKind = kind
         kind.saveSelection()
-        syncDownloadState(for: kind)
         NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
     }
 
@@ -3060,12 +2984,6 @@ private struct ProviderSettingsTab: View {
         persistOpenAIAPIKey(clipboard)
     }
 
-    private func syncDownloadState(for kind: STTProviderKind) {
-        if let variant = kind.defaultVariant {
-            downloadState.rebind(to: variant)
-        }
-    }
-
     /// Recomputes provider diagnostics for every preset card. Must only run
     /// outside a view update (deferred onAppear, notification delivery) —
     /// diagnostics touch TCC, Keychain, and the filesystem.
@@ -3076,191 +2994,6 @@ private struct ProviderSettingsTab: View {
         }
         presetDiagnostics = map
     }
-}
-
-private struct ProviderDiagnosticsView: View {
-    let diagnostics: ProviderRuntimeDiagnostics
-    let selectedKind: STTProviderKind
-    @State private var runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
-    @State private var telemetrySnapshot = ParakeetTelemetrySnapshot.empty
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.sm) {
-            HStack(spacing: VFSpacing.sm) {
-                Circle()
-                    .fill(healthColor)
-                    .frame(width: 8, height: 8)
-                Text("Runtime Diagnostics")
-                    .font(VFFont.settingsBody)
-                    .foregroundStyle(VFColor.textPrimary)
-                Spacer()
-                if diagnostics.usesFallback {
-                    Text("Fallback")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(VFColor.error)
-                        .padding(.horizontal, VFSpacing.sm)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(VFColor.error.opacity(0.22))
-                                .overlay(Capsule(style: .continuous).stroke(VFColor.error.opacity(0.45), lineWidth: 0.5))
-                        )
-                }
-                Text(diagnostics.healthLevel.rawValue)
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(healthColor)
-            }
-
-            DiagnosticLine(label: "Requested", value: diagnostics.requestedKind.displayName)
-            DiagnosticLine(label: "Effective", value: diagnostics.effectiveKind.displayName)
-
-            if selectedKind != diagnostics.requestedKind {
-                Text("Refreshing runtime diagnostics for \(selectedKind.displayName)…")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
-            }
-
-            if let fallbackReason = diagnostics.fallbackReason {
-                HStack(alignment: .top, spacing: VFSpacing.xs) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(VFColor.error)
-                    Text("Fallback reason: \(fallbackReason)")
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.error)
-                }
-            }
-
-            if shouldShowParakeetRepairAction {
-                HStack(spacing: VFSpacing.sm) {
-                    Button {
-                        ParakeetSetupPolicy.setupConsentGranted = true
-                        ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
-                    } label: {
-                        HStack(spacing: VFSpacing.xs) {
-                            if runtimeBootstrapStatus.phase == .bootstrapping {
-                                ProgressView()
-                                    .progressViewStyle(.circular)
-                                    .controlSize(.small)
-                                    .tint(VFColor.textPrimary)
-                            } else {
-                                Image(systemName: "wrench.and.screwdriver.fill")
-                                    .font(.system(size: 11, weight: .semibold))
-                            }
-                            Text(repairButtonLabel)
-                                .font(VFFont.pillLabel)
-                        }
-                        .foregroundStyle(VFColor.textPrimary)
-                    }
-                    .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
-                    .disabled(runtimeBootstrapStatus.phase == .bootstrapping)
-
-                    Text("Runtime setup is in-app. Use this when manual setup or prior provisioning failed.")
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textSecondary)
-                }
-            }
-
-            if isParakeetContext {
-                DiagnosticLine(label: "Runtime retries", value: "\(telemetrySnapshot.runtimeBootstrapRetryCount)")
-                DiagnosticLine(label: "Model retries", value: "\(telemetrySnapshot.modelDownloadRetryCount)")
-                DiagnosticLine(label: "Transport retries", value: "\(telemetrySnapshot.modelDownloadTransportRetryCount)")
-                DiagnosticLine(label: "Top runtime failure", value: topRuntimeFailureLabel)
-                DiagnosticLine(label: "Top model failure", value: topModelFailureLabel)
-            }
-
-            ForEach(diagnostics.checks) { check in
-                HStack(alignment: .top, spacing: VFSpacing.xs) {
-                    Image(systemName: check.isPassing ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(check.isPassing ? VFColor.success : VFColor.error)
-                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
-                        Text(check.title)
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textPrimary)
-                        Text(check.detail)
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
-                    }
-                }
-            }
-
-            Text("Last updated \(Self.timestampFormatter.string(from: diagnostics.timestamp))")
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textTertiary)
-        }
-        .onAppear {
-            runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
-            refreshTelemetrySnapshot()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .parakeetRuntimeBootstrapDidChange)) { _ in
-            runtimeBootstrapStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .parakeetTelemetryDidChange)) { _ in
-            refreshTelemetrySnapshot()
-        }
-    }
-
-    private var healthColor: Color {
-        switch diagnostics.healthLevel {
-        case .healthy:
-            return VFColor.success
-        case .degraded:
-            return VFColor.accentFallback
-        case .unavailable:
-            return VFColor.error
-        }
-    }
-
-    private var shouldShowParakeetRepairAction: Bool {
-        isParakeetContext && runtimeBootstrapStatus.phase == .failed
-    }
-
-    private var repairButtonLabel: String {
-        switch runtimeBootstrapStatus.phase {
-        case .idle, .failed:
-            return "Retry Runtime Setup"
-        case .bootstrapping:
-            return "Provisioning…"
-        case .ready:
-            return "Reinstall Runtime"
-        }
-    }
-
-    private var isParakeetContext: Bool {
-        selectedKind == .parakeet || diagnostics.requestedKind == .parakeet || diagnostics.effectiveKind == .parakeet
-    }
-
-    private var topRuntimeFailureLabel: String {
-        topFailureLabel(from: telemetrySnapshot.runtimeBootstrapFailureCounts)
-    }
-
-    private var topModelFailureLabel: String {
-        topFailureLabel(from: telemetrySnapshot.modelDownloadFailureCounts)
-    }
-
-    private func topFailureLabel(from bucket: [String: Int]) -> String {
-        guard let top = bucket.max(by: { $0.value < $1.value }) else {
-            return "None"
-        }
-        return "\(top.key) (\(top.value))"
-    }
-
-    private func refreshTelemetrySnapshot() {
-        Task {
-            let snapshot = await ParakeetTelemetryStore.shared.snapshotValue()
-            await MainActor.run {
-                telemetrySnapshot = snapshot
-            }
-        }
-    }
-
-    private static let timestampFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .medium
-        return formatter
-    }()
 }
 
 private struct DiagnosticLine: View {
@@ -3281,121 +3014,85 @@ private struct DiagnosticLine: View {
 
 // MARK: - Model Download Row
 
-private struct ModelDownloadRow: View {
+private struct MLXModelDetailRow: View {
     let kind: STTProviderKind
-    @ObservedObject var downloadState: ModelDownloadState
-    @State private var runtimeStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+    @ObservedObject var installer: MLXModelInstaller
+    @State private var runtimeStatus = MLXRuntimeBootstrapManager.shared.statusSnapshot()
+    @State private var selectedModelID: String = ""
+
+    private var options: [MLXModel] {
+        kind == .parakeet ? MLXModelCatalog.parakeetOptions : MLXModelCatalog.whisperOptions
+    }
+
+    private var selectedModel: MLXModel {
+        MLXModelCatalog.model(withID: selectedModelID)
+            ?? MLXModelCatalog.selectedModel(for: kind)
+            ?? MLXModelCatalog.parakeetV3
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.sm) {
-            RoundedRectangle(cornerRadius: VFRadius.pill, style: .continuous)
-                .fill(statusAccentColor.opacity(0.72))
-                .frame(height: 2)
-
             HStack {
-                HStack(spacing: VFSpacing.md) {
-                    modelArtwork
-
-                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
-                        Text("Model")
-                            .font(VFFont.settingsBody)
-                            .foregroundStyle(VFColor.textPrimary)
-                        Text(downloadState.variant.displayName)
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
-                    }
+                VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                    Text("Model")
+                        .font(VFFont.settingsBody)
+                        .foregroundStyle(VFColor.textPrimary)
+                    Text("Runs locally with MLX on Apple Silicon.")
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
                 }
-
                 Spacer()
-
-                statusChip
+                Menu {
+                    ForEach(options) { option in
+                        Button("\(option.displayName) · \(option.qualityBand) · \(option.approxSizeLabel)") {
+                            select(option)
+                        }
+                    }
+                } label: {
+                    Text(selectedModel.displayName)
+                        .glassSelectPill()
+                }
+                .menuStyle(.borderlessButton)
             }
 
             NeuDivider()
 
-            DiagnosticLine(label: "Status", value: downloadStatusDetail)
-            if kind == .parakeet {
-                DiagnosticLine(label: "Runtime", value: runtimeStatusLine)
-            }
-            DiagnosticLine(label: "Source", value: downloadState.variant.configuredSourceDisplayName)
-            DiagnosticLine(label: "Files", value: "encoder-model.int8.onnx + decoder_joint-model.int8.onnx + config.json + nemo128.onnx + vocab.txt")
-            Text("Installation is manual. Click Install when you want to set up Parakeet.")
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textSecondary)
+            DiagnosticLine(label: "Status", value: statusLine)
+            DiagnosticLine(label: "Runtime", value: runtimeStatusLine)
+            DiagnosticLine(label: "Source", value: selectedModel.repo)
 
-            if kind == .parakeet, runtimeStatus.phase == .failed {
+            switch installer.phase {
+            case .installing(let modelID, let detail) where modelID == selectedModel.id:
+                HStack(spacing: VFSpacing.sm) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                    Text(detail)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.textSecondary)
+                    Button {
+                        installer.cancelInstall()
+                    } label: {
+                        Text("Cancel")
+                            .font(VFFont.pillLabel)
+                            .foregroundStyle(VFColor.textPrimary)
+                    }
+                    .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
+                }
+            case .failed(let modelID, let message) where modelID == selectedModel.id:
                 HStack(alignment: .top, spacing: VFSpacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(VFColor.error)
-                    Text(runtimeStatus.detail)
+                    Text(message)
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.error)
                 }
-                Button {
-                    ParakeetSetupPolicy.setupConsentGranted = true
-                    ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
-                } label: {
-                    Text("Retry runtime setup")
-                        .font(VFFont.pillLabel)
-                        .foregroundStyle(VFColor.textPrimary)
+                installButton(title: "Retry install")
+            default:
+                if !installer.isInstalled(selectedModel) {
+                    installButton(title: "Download \(selectedModel.displayName) (\(selectedModel.approxSizeLabel))")
                 }
-                .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
-            }
-
-            if let modelCardURL = URL(string: "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3") {
-                Link(destination: modelCardURL) {
-                    Label("View model card", systemImage: "photo")
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.accentFallback)
-                }
-                .buttonStyle(.plain)
-            }
-
-            // Progress bar
-            if case .downloading(let progress) = downloadState.phase {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(VFColor.accentFallback)
-                    .padding(.vertical, VFSpacing.xxs)
-            }
-
-            if case .failed(let message) = downloadState.phase {
-                HStack(alignment: .top, spacing: VFSpacing.xs) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(VFColor.error)
-                    Text(sanitizedDownloadError(message))
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.error)
-                }
-
-                Button {
-                    triggerSetup(forceRuntimeRepair: true)
-                } label: {
-                    Text("Retry setup")
-                        .font(VFFont.pillLabel)
-                        .foregroundStyle(VFColor.textPrimary)
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
-            }
-
-            if case .notReady = downloadState.phase {
-                Button {
-                    triggerSetup()
-                } label: {
-                    Text("Install Parakeet")
-                        .font(VFFont.pillLabel)
-                        .foregroundStyle(VFColor.textOnAccent)
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
-            }
-
-            // Show validation status when ready
-            if case .ready = downloadState.phase {
-                Text(downloadState.variant.validationStatus)
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textTertiary)
             }
         }
         .padding(VFSpacing.md)
@@ -3407,230 +3104,62 @@ private struct ModelDownloadRow: View {
                         .stroke(VFColor.glassBorder.opacity(0.85), lineWidth: 0.8)
                 )
         )
+        .onAppear {
+            // Deferred: state writes during the initial layout pass re-enter
+            // the view graph mid-update.
+            DispatchQueue.main.async {
+                selectedModelID = MLXModelCatalog.selectedModel(for: kind)?.id ?? ""
+            }
+        }
         .onReceive(
             NotificationCenter.default
-                .publisher(for: .parakeetRuntimeBootstrapDidChange)
+                .publisher(for: .mlxRuntimeBootstrapDidChange)
                 .receive(on: DispatchQueue.main)
         ) { _ in
-            runtimeStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+            runtimeStatus = MLXRuntimeBootstrapManager.shared.statusSnapshot()
         }
+    }
+
+    private func select(_ option: MLXModel) {
+        selectedModelID = option.id
+        if kind == .parakeet {
+            MLXModelCatalog.selectedParakeetModel = option
+        } else {
+            MLXModelCatalog.selectedWhisperModel = option
+        }
+        NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+    }
+
+    private func installButton(title: String) -> some View {
+        Button {
+            MLXModelInstaller.shared.install(selectedModel)
+        } label: {
+            Text(title)
+                .font(VFFont.pillLabel)
+                .foregroundStyle(VFColor.textOnAccent)
+        }
+        .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
+    }
+
+    private var statusLine: String {
+        installer.isInstalled(selectedModel)
+            ? "Installed (\(selectedModel.approxSizeLabel))"
+            : "Not installed"
     }
 
     private var runtimeStatusLine: String {
         switch runtimeStatus.phase {
         case .idle:
-            return "Not installed"
+            return "Not installed (installs with the model)"
         case .bootstrapping:
             return "Installing… \(runtimeStatus.detail)"
         case .ready:
             return "Ready"
         case .failed:
-            return "Failed"
+            return "Failed — \(runtimeStatus.detail)"
         }
-    }
-
-    private var modelArtwork: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            VFColor.accentFallback.opacity(0.35),
-                            VFColor.controlInset.opacity(0.95)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
-                        .stroke(VFColor.glassBorder, lineWidth: 0.8)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous)
-                        .fill(
-                            RadialGradient(
-                                colors: [VFColor.textureMeshCool.opacity(0.38), .clear],
-                                center: .topLeading,
-                                startRadius: 0,
-                                endRadius: 44
-                            )
-                        )
-                )
-                .overlay(
-                    GrainTexture(opacity: 0.015, cellSize: 1.8)
-                        .clipShape(RoundedRectangle(cornerRadius: VFRadius.button, style: .continuous))
-                )
-
-            VStack(spacing: 4) {
-                Image(systemName: "bird.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(VFColor.textPrimary)
-                Text("TDT v3")
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(VFColor.textSecondary)
-            }
-        }
-        .frame(width: 54, height: 54)
-        .shadow(color: VFShadow.raisedControlColor.opacity(0.65), radius: 8, y: 2)
-    }
-
-    @ViewBuilder
-    private var statusChip: some View {
-        switch downloadState.phase {
-        case .ready:
-            HStack(spacing: VFSpacing.sm) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(VFColor.success)
-                Text("Ready")
-                    .font(VFFont.pillLabel)
-                    .foregroundStyle(VFColor.success)
-            }
-            .padding(.horizontal, VFSpacing.md)
-            .padding(.vertical, 6)
-            .background(statusChipBackground(color: VFColor.success))
-        case .downloading(let progress):
-            HStack(spacing: VFSpacing.sm) {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .controlSize(.small)
-                    .tint(VFColor.textPrimary)
-                Text("Preparing \(Int(progress * 100))%")
-                    .font(VFFont.pillLabel)
-                    .foregroundStyle(VFColor.textPrimary)
-            }
-            .padding(.horizontal, VFSpacing.md)
-            .padding(.vertical, 6)
-            .background(statusChipBackground(color: VFColor.accentFallback))
-        case .failed:
-            HStack(spacing: VFSpacing.sm) {
-                Image(systemName: "xmark.octagon.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(VFColor.error)
-                Text("Setup failed")
-                    .font(VFFont.pillLabel)
-                    .foregroundStyle(VFColor.error)
-            }
-            .padding(.horizontal, VFSpacing.md)
-            .padding(.vertical, 6)
-            .background(statusChipBackground(color: VFColor.error))
-        case .notReady:
-            HStack(spacing: VFSpacing.sm) {
-                Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(VFColor.textPrimary)
-                Text("Not installed")
-                    .font(VFFont.pillLabel)
-                    .foregroundStyle(VFColor.textPrimary)
-            }
-            .padding(.horizontal, VFSpacing.md)
-            .padding(.vertical, 6)
-            .background(statusChipBackground(color: VFColor.accentFallback))
-        }
-    }
-
-    private func statusChipBackground(color: Color) -> some View {
-        Capsule(style: .continuous)
-            .fill(color.opacity(0.14))
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(color.opacity(0.42), lineWidth: 0.7)
-            )
-    }
-
-    private var statusAccentColor: Color {
-        switch downloadState.phase {
-        case .ready:
-            return VFColor.success
-        case .failed:
-            return VFColor.error
-        case .downloading, .notReady:
-            return VFColor.accentFallback
-        }
-    }
-
-    private var downloadStatusDetail: String {
-        switch downloadState.phase {
-        case .notReady:
-            return "Not installed"
-        case .downloading(let progress):
-            if progress >= 0.99 {
-                return "Finalizing model artifacts…"
-            }
-            return "Downloading (\(Int(progress * 100))%)"
-        case .ready:
-            return "Ready - \(downloadState.variant.validationStatus)"
-        case .failed:
-            return "Setup failed. Retry when ready."
-        }
-    }
-
-    private func triggerSetup(forceRuntimeRepair: Bool = false) {
-        guard kind == .parakeet else { return }
-
-        // The user clicked Install/Retry — this is the consent that unlocks
-        // model downloads and runtime installs everywhere else.
-        ParakeetSetupPolicy.setupConsentGranted = true
-
-        let sourceStore = ParakeetModelSourceConfigurationStore.shared
-        if sourceStore.selectedSourceID(for: downloadState.variant.id) != "hf_parakeet_tdt06b_v3_onnx" {
-            _ = sourceStore.selectSource(id: "hf_parakeet_tdt06b_v3_onnx", for: downloadState.variant.id)
-            downloadState.reset()
-        }
-
-        Task {
-            await ParakeetProvisioningCoordinator.shared.ensureAutomaticSetupForCurrentSelection(
-                forceModelRetry: false,
-                forceRuntimeRepair: forceRuntimeRepair,
-                reason: "manual_setup_button"
-            )
-        }
-
-        ModelDownloaderService.shared.download(
-            variant: downloadState.variant,
-            state: downloadState
-        )
-    }
-
-    private func sanitizedDownloadError(_ message: String) -> String {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return "Setup is still running. Retry in a few seconds."
-        }
-
-        let lower = trimmed.lowercased()
-        if lower.contains("decoder joint artifact") || lower.contains("nemo normalizer artifact") || lower.contains("config artifact") {
-            return "Finalizing required model files. Press Retry setup in a few seconds."
-        }
-        if lower.contains("incomplete") {
-            return "Model download is incomplete. Retry setup."
-        }
-        if lower.contains("not connected to internet") || lower.contains("no internet connection") {
-            return "No internet connection detected. Retry after reconnecting."
-        }
-        if lower.contains("http 404") {
-            return "Model host returned HTTP 404. Retry setup or switch source."
-        }
-        if lower.contains("http") {
-            return "Network or host error while downloading model. Retry setup."
-        }
-        if lower.contains("timed out") {
-            return "Download timed out. Retry setup."
-        }
-
-        let firstLine = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
-        if lower.contains("domain=") || lower.contains("code=") {
-            return "Setup is still running. Retry in a few seconds."
-        }
-        if firstLine.count > 160 {
-            return String(firstLine.prefix(160)) + "…"
-        }
-        return firstLine
     }
 }
-
-// MARK: - Transcript History
 
 private struct TranscriptHistoryTab: View {
     @ObservedObject private var store = TranscriptLogStore.shared

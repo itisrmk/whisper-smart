@@ -65,7 +65,7 @@ protocol STTProvider: AnyObject {
 }
 ```
 
-Implementations: `AppleSpeechSTTProvider` (built-in fallback), `ParakeetSTTProvider` (local ONNX), `OpenAIWhisperAPISTTProvider` (cloud), `WhisperLocalSTTProvider` (whisper.cpp). Provider selection and fallback logic lives in `STTProviderKind.swift` / `STTProviderDiagnostics.swift`.
+Implementations: `AppleSpeechSTTProvider` (built-in fallback), `MLXSTTProvider` (local Parakeet + Whisper via MLX — spawns `scripts/mlx_stt_infer.py` in an app-managed Python venv), `OpenAIWhisperAPISTTProvider` (cloud). Model catalog and selection live in `MLXModelCatalog.swift`; model installs in `MLXModelInstaller.swift`; the Python runtime bootstrap (venv + pip install parakeet-mlx/mlx-whisper) in `MLXRuntimeBootstrapManager.swift`. Provider selection and fallback logic lives in `STTProviderKind.swift` / `STTProviderDiagnostics.swift`. Local MLX providers require Apple Silicon.
 
 ### Text Injection
 
@@ -118,7 +118,8 @@ All colors, fonts, spacing, and animation values are centralized in `app/UI/Desi
 Settings changes are communicated to AppDelegate via `NotificationCenter`:
 - `.hotkeyBindingDidChange` — hotkey recorder applies new binding
 - `.sttProviderDidChange` — provider picker triggers provider swap
-- `.parakeetRuntimeBootstrapDidChange` — runtime status updates
+- `.mlxRuntimeBootstrapDidChange` — Python runtime status updates
+- `.mlxModelInstallDidChange` — MLX model install/uninstall events
 - `.modelDownloadDidChange` — model download progress/completion
 - `.transcriptLogReinsertRequested` — history re-inject action
 

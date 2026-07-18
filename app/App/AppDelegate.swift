@@ -54,9 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var bindingObserver: NSObjectProtocol?
     private var providerObserver: NSObjectProtocol?
-    private var parakeetBootstrapObserver: NSObjectProtocol?
-    private var parakeetModelSourceObserver: NSObjectProtocol?
-    private var modelDownloadObserver: NSObjectProtocol?
+    private var mlxBootstrapObserver: NSObjectProtocol?
+    private var mlxModelInstallObserver: NSObjectProtocol?
     private var transcriptLogObserver: NSObjectProtocol?
     private var userDefaultsObserver: NSObjectProtocol?
 
@@ -79,7 +78,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var healthBadgeLabel = ""
     private var activityBadgeLabel = ""
     private var deferredProviderRefresh = false
-    private var lastObservedParakeetModelReady: Bool?
 
     // MARK: - Lifecycle
 
@@ -102,9 +100,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wireCallbacks()
         observeBindingChanges()
         observeProviderChanges()
-        observeParakeetBootstrapChanges()
-        observeParakeetModelSourceChanges()
-        observeModelDownloadChanges()
+        observeMLXBootstrapChanges()
+        observeMLXModelInstallChanges()
         observeTranscriptLogActions()
         observeOverlaySettingsChanges()
 
@@ -262,9 +259,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         accessibilityRetryWork?.cancel()
         accessibilityRetryWork = nil
-        Task {
-            await ParakeetProvisioningCoordinator.shared.cancelRetries()
-        }
         stateMachine.deactivate()
         if let observer = bindingObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -272,13 +266,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let observer = providerObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        if let observer = parakeetBootstrapObserver {
+        if let observer = mlxBootstrapObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        if let observer = parakeetModelSourceObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let observer = modelDownloadObserver {
+        if let observer = mlxModelInstallObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = transcriptLogObserver {
@@ -419,64 +410,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 self.refreshProviderResolution(logReason: "Provider changed in settings")
-
-                if STTProviderKind.loadSelection() != .parakeet {
-                    Task {
-                        await ParakeetProvisioningCoordinator.shared.cancelRetries()
-                    }
-                }
             }
         }
     }
 
-    private func observeParakeetBootstrapChanges() {
-        parakeetBootstrapObserver = NotificationCenter.default.addObserver(
-            forName: .parakeetRuntimeBootstrapDidChange,
+    private func observeMLXBootstrapChanges() {
+        mlxBootstrapObserver = NotificationCenter.default.addObserver(
+            forName: .mlxRuntimeBootstrapDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleParakeetBootstrapStatusChange()
+            // Diagnostics-only refresh: never hot-swap the provider purely
+            // because runtime phase changed (races an in-flight session).
+            self?.refreshProviderDiagnostics(logReason: "MLX runtime status changed")
         }
     }
 
-    private func observeParakeetModelSourceChanges() {
-        parakeetModelSourceObserver = NotificationCenter.default.addObserver(
-            forName: .parakeetModelSourceDidChange,
+    private func observeMLXModelInstallChanges() {
+        mlxModelInstallObserver = NotificationCenter.default.addObserver(
+            forName: .mlxModelInstallDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             // Deferred for the same reason as the provider-change observer.
             DispatchQueue.main.async {
                 guard let self else { return }
-                if self.deferProviderRefreshIfSessionActive(reason: "Parakeet model source changed") {
+                if self.deferProviderRefreshIfSessionActive(reason: "MLX model install changed") {
                     return
                 }
-                self.refreshProviderResolution(logReason: "Parakeet model source changed")
-            }
-        }
-    }
-
-    private func observeModelDownloadChanges() {
-        modelDownloadObserver = NotificationCenter.default.addObserver(
-            forName: .modelDownloadDidChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self else { return }
-            guard let variantID = notification.userInfo?["variantID"] as? String,
-                  variantID == ModelVariant.parakeetCTC06B.id else {
-                return
-            }
-            let isReady = (notification.userInfo?["isReady"] as? Bool) ?? false
-            if self.lastObservedParakeetModelReady != isReady {
-                self.lastObservedParakeetModelReady = isReady
-                self.refreshProviderResolution(logReason: "Parakeet model download readiness changed: \(isReady)")
-            }
-
-            Task {
-                await ParakeetProvisioningCoordinator.shared.handleModelDownloadEvent(
-                    isReady: isReady
-                )
+                self.refreshProviderResolution(logReason: "MLX model install changed")
             }
         }
     }
@@ -507,17 +469,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.updateBubbleVisibility(for: self.stateMachine.state)
             }
-        }
-    }
-
-    private func handleParakeetBootstrapStatusChange() {
-        // Important: never hot-swap the provider purely because bootstrap phase
-        // changed. Doing so can race with an in-flight beginSession() and cause
-        // endSession() to run on a different provider instance.
-        refreshProviderDiagnostics(logReason: "Parakeet runtime bootstrap status changed")
-        let status = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
-        Task {
-            await ParakeetProvisioningCoordinator.shared.handleRuntimeBootstrapStatusChange(status)
         }
     }
 
