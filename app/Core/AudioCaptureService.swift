@@ -53,6 +53,12 @@ final class AudioCaptureService {
     /// Once we pin any device on the engine's input unit, the pin persists on
     /// the reused engine instance — later default-device sessions must re-pin.
     private var didPinInputDevice = false
+    /// In-place restarts consumed for the current session. Starting the mic
+    /// itself can fire a configuration change (hardware format renegotiation,
+    /// Bluetooth mics switching profiles), so interruptions first attempt a
+    /// silent restart; the cap prevents a restart↔reconfigure loop.
+    private var restartAttemptsThisSession = 0
+    private let maxRestartAttemptsPerSession = 3
 
     // MARK: - Lifecycle
 
@@ -121,6 +127,26 @@ final class AudioCaptureService {
             }
         }
 
+        registerInterruptionObservers()
+
+        do {
+            try configureAndStartEngine()
+        } catch {
+            // Clean up the partially-started session (tap, device switch,
+            // observers) so a failed start doesn't leak state.
+            stop()
+            throw error
+        }
+        restartAttemptsThisSession = 0
+        isRunning = true
+    }
+
+    /// Reads the current hardware format, wires the converter + tap, and
+    /// starts the engine. Shared by `start()` and in-place restarts, so it
+    /// must be callable on an engine that has just been stopped.
+    private func configureAndStartEngine() throws {
+        let inputNode = engine.inputNode
+
         // Read the hardware format only after the device is pinned so the tap
         // and converter match the device that will actually feed the engine.
         let hardwareFormat = inputNode.outputFormat(forBus: 0)
@@ -142,8 +168,6 @@ final class AudioCaptureService {
             throw AudioCaptureError.conversionFailed
         }
         self.converter = audioConverter
-
-        registerInterruptionObservers()
 
         let bufferSize: AVAudioFrameCount = AVAudioFrameCount(hardwareFormat.sampleRate * 0.1)
 
@@ -183,12 +207,10 @@ final class AudioCaptureService {
         do {
             try engine.start()
         } catch {
-            // Clean up the partially-started session (tap, device switch,
-            // observers) so a failed start doesn't leak state.
-            stop()
+            inputNode.removeTap(onBus: 0)
+            tapInstalled = false
             throw error
         }
-        isRunning = true
     }
 
     func stop() {
@@ -231,14 +253,69 @@ final class AudioCaptureService {
         removeDefaultInputDeviceListenerIfNeeded()
     }
 
-    /// Must be called on the main queue — tears down the engine and reports
-    /// the interruption to the state machine.
+    /// Must be called on the main queue. First tries to restart capture in
+    /// place — the engine routinely reports a configuration change right
+    /// after its first start (hardware format renegotiation, AirPods
+    /// switching A2DP→HFP), and killing the session there made first-press
+    /// dictation die. Only surfaces the interruption when restart fails.
     private func handleInterruption(_ reason: InterruptionReason) {
         guard isRunning else { return }
 
         logger.warning("Audio interruption detected: \(reason.rawValue, privacy: .public)")
+        if attemptInPlaceRestart(reason: reason) {
+            return
+        }
         stop()
         onInterruption?(reason)
+    }
+
+    private func attemptInPlaceRestart(reason: InterruptionReason) -> Bool {
+        guard restartAttemptsThisSession < maxRestartAttemptsPerSession else {
+            logger.warning("In-place audio restart budget exhausted (\(self.maxRestartAttemptsPerSession)) — giving up")
+            return false
+        }
+        restartAttemptsThisSession += 1
+
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+        if engine.isRunning {
+            engine.stop()
+        }
+        converter = nil
+
+        // The session follows the system default mic, and that default just
+        // changed — re-pin so the restarted capture uses the new device.
+        if reason == .defaultInputDeviceChanged,
+           !usingExplicitInputDevice,
+           let deviceID = defaultInputDeviceID(),
+           let audioUnit = engine.inputNode.audioUnit {
+            var deviceIDValue = deviceID
+            let status = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &deviceIDValue,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+            if status == noErr {
+                didPinInputDevice = true
+                logger.log("Re-pinned engine input to new default device id=\(deviceID)")
+            } else {
+                logger.warning("Failed to re-pin input device after default change (status=\(status))")
+            }
+        }
+
+        do {
+            try configureAndStartEngine()
+            logger.log("Recovered audio capture in place after \(reason.rawValue, privacy: .public) (attempt \(self.restartAttemptsThisSession))")
+            return true
+        } catch {
+            logger.error("In-place audio restart failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     private func handleDefaultInputDeviceChanged() {

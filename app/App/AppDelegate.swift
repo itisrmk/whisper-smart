@@ -70,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let maxAccessibilityRetryDelay: TimeInterval = 30.0
     private var pendingHotkeyBootstrap = false
 
+    private var errorOverlayHideWork: DispatchWorkItem?
+    private let errorOverlayDisplayDuration: TimeInterval = 4.0
+
     private var recordStartAt: Date?
     private var transcribeStartAt: Date?
     private var recordingDurationMsForLog: Int?
@@ -690,10 +693,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mode = DictationOverlaySettings.overlayMode
         let shouldShowOverlay: Bool
 
+        errorOverlayHideWork?.cancel()
+        errorOverlayHideWork = nil
+
         switch state {
         case .recording, .transcribing:
             shouldShowOverlay = true
-        case .idle, .success, .error:
+        case .error:
+            // Keep the overlay up briefly so failures are visible — a session
+            // killed by an audio interruption otherwise vanishes silently and
+            // reads as a dead hotkey.
+            shouldShowOverlay = true
+            scheduleErrorOverlayHide()
+        case .idle, .success:
             shouldShowOverlay = false
         }
 
@@ -714,6 +726,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bubblePanel.hide()
             topCenterOverlayPanel.show()
         }
+    }
+
+    private func scheduleErrorOverlayHide() {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.errorOverlayHideWork = nil
+            if case .error = self.stateMachine.state {
+                self.bubblePanel.hide()
+                self.topCenterOverlayPanel.hide()
+            }
+        }
+        errorOverlayHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + errorOverlayDisplayDuration, execute: work)
     }
 
     private func isHotkeySetupIssue(for state: DictationStateMachine.State) -> Bool {

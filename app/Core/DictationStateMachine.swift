@@ -586,7 +586,7 @@ final class DictationStateMachine {
         if newState != .success {
             cancelSuccessReset()
         }
-        logger.info("State transition: \(String(describing: self.state)) → \(String(describing: newState))")
+        logger.log("State transition: \(String(describing: self.state)) → \(String(describing: newState))")
         state = newState
     }
 

@@ -46,6 +46,10 @@ final class HotkeyMonitor {
     private var runLoopSource: CFRunLoopSource?
     private var keyDownTimestamp: Date?
     private var holdFired = false
+    private var holdCheckWork: DispatchWorkItem?
+    private var healthWatchdog: Timer?
+    private var wakeObserver: NSObjectProtocol?
+    private let healthCheckInterval: TimeInterval = 5.0
     private(set) var isRunning = false
 
     // MARK: - Init
@@ -145,11 +149,18 @@ final class HotkeyMonitor {
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         isRunning = true
-        logger.info("Event tap installed, monitoring: \(self.binding.displayString)")
+        startHealthWatchdog()
+        observeSystemWake()
+        logger.log("Event tap installed, monitoring: \(self.binding.displayString)")
     }
 
     /// Removes the event tap.
     func stop() {
+        stopHealthWatchdog()
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
@@ -160,6 +171,62 @@ final class HotkeyMonitor {
         runLoopSource = nil
         isRunning = false
         resetState()
+    }
+
+    // MARK: - Self-healing
+
+    /// macOS silently disables event taps under load and across sleep/wake,
+    /// and the `.tapDisabledByTimeout` callback is not always delivered —
+    /// without an active check the hotkey stays dead until restart.
+    private func startHealthWatchdog() {
+        stopHealthWatchdog()
+        let timer = Timer(timeInterval: healthCheckInterval, repeats: true) { [weak self] _ in
+            self?.checkTapHealth()
+        }
+        timer.tolerance = 1.0
+        RunLoop.main.add(timer, forMode: .common)
+        healthWatchdog = timer
+    }
+
+    private func stopHealthWatchdog() {
+        healthWatchdog?.invalidate()
+        healthWatchdog = nil
+    }
+
+    private func checkTapHealth() {
+        guard let tap = eventTap else { return }
+        guard !CGEvent.tapIsEnabled(tap: tap) else { return }
+
+        logger.warning("Event tap found disabled by watchdog — re-enabling")
+        CGEvent.tapEnable(tap: tap, enable: true)
+        if !CGEvent.tapIsEnabled(tap: tap) {
+            logger.error("Event tap could not be re-enabled — reinstalling")
+            reinstall()
+        }
+        // A disabled tap swallowed events, so any tracked key state is
+        // unreliable. Drop it rather than block the next press.
+        resetState()
+    }
+
+    private func observeSystemWake() {
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            logger.log("System woke — reinstalling event tap")
+            self?.reinstall()
+        }
+    }
+
+    private func reinstall() {
+        guard isRunning else { return }
+        stop()
+        start()
+        if !isRunning {
+            logger.error("Event tap reinstall failed")
+        }
     }
 
     // MARK: - Event handling
@@ -190,12 +257,20 @@ final class HotkeyMonitor {
             let isPressed = isModifierPressed(flags: flags, keyCode: binding.keyCode)
 
             if matchingKeyCodes.contains(code) {
-                if isPressed { onKeyDown() } else { onKeyUp() }
+                if isPressed { onKeyDown(isAutorepeat: false) } else { onKeyUp() }
             } else if !isPressed && (keyDownTimestamp != nil || holdFired) {
-                // Safety: another flagsChanged arrived (e.g. a different modifier was
-                // tapped) while our modifier is no longer held. Force release to
-                // prevent stuck-key states.
-                onKeyUp()
+                // Safety: our modifier reads as released on an event we didn't
+                // match. Device-dependent bits are per-keyboard, so an event
+                // from a second keyboard (or a virtual driver like Karabiner)
+                // legitimately lacks our key's bit while it is still physically
+                // held — force-release only when the generic modifier flag is
+                // gone too, i.e. no device is holding it.
+                let genericStillHeld = Self.genericModifierFlag(for: binding.keyCode)
+                    .map { flags.contains($0) } ?? false
+                if !genericStillHeld {
+                    logger.log("Forced release: modifier no longer held on any device")
+                    onKeyUp()
+                }
             }
         }
         // For modifier+key combos, flagsChanged is irrelevant — we track keyDown/keyUp.
@@ -208,7 +283,8 @@ final class HotkeyMonitor {
         // Check that the required modifiers are held.
         let flags = event.flags
         guard flags.contains(binding.modifierFlags) else { return }
-        onKeyDown()
+        let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        onKeyDown(isAutorepeat: isAutorepeat)
     }
 
     private func handleKeyUp(event: CGEvent) {
@@ -220,19 +296,30 @@ final class HotkeyMonitor {
 
     // MARK: - Key state transitions
 
-    private func onKeyDown() {
-        guard keyDownTimestamp == nil else { return } // already tracking
+    private func onKeyDown(isAutorepeat: Bool) {
+        if keyDownTimestamp != nil {
+            // Key-repeat while held is expected for modifier+key combos.
+            guard !isAutorepeat else { return }
+            // A fresh key-down while still tracking means the release event
+            // was lost (tap disabled mid-hold, sleep, secure input). Recover
+            // and treat this as a new press instead of swallowing it.
+            logger.warning("Key-down with stale tracking state (holdFired=\(self.holdFired)) — recovering")
+            if holdFired { onHoldEnded?() }
+            resetState()
+        }
         keyDownTimestamp = Date()
         holdFired = false
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + minimumHoldDuration) { [weak self] in
+        let work = DispatchWorkItem { [weak self] in
             self?.checkHoldThreshold()
         }
+        holdCheckWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + minimumHoldDuration, execute: work)
     }
 
     private func onKeyUp() {
         if holdFired {
-            logger.info("Hold ended (\(self.binding.displayString))")
+            logger.log("Hold ended (\(self.binding.displayString))")
             onHoldEnded?()
         }
         resetState()
@@ -243,12 +330,14 @@ final class HotkeyMonitor {
         let elapsed = Date().timeIntervalSince(downTime)
         if elapsed >= minimumHoldDuration {
             holdFired = true
-            logger.info("Hold started (\(self.binding.displayString))")
+            logger.log("Hold started (\(self.binding.displayString))")
             onHoldStarted?()
         }
     }
 
     private func resetState() {
+        holdCheckWork?.cancel()
+        holdCheckWork = nil
         keyDownTimestamp = nil
         holdFired = false
     }
@@ -266,6 +355,19 @@ final class HotkeyMonitor {
     private static let deviceRAltMask:   UInt64 = 0x00000040
     private static let deviceLCtlMask:   UInt64 = 0x00000001
     private static let deviceRCtlMask:   UInt64 = 0x00002000
+
+    /// Device-independent flag for a modifier key code — set while *any*
+    /// keyboard holds that modifier (either side, any device).
+    private static func genericModifierFlag(for keyCode: Int) -> CGEventFlags? {
+        switch keyCode {
+        case kVK_Command, kVK_RightCommand: return .maskCommand
+        case kVK_Shift, kVK_RightShift:     return .maskShift
+        case kVK_Option, kVK_RightOption:   return .maskAlternate
+        case kVK_Control, kVK_RightControl: return .maskControl
+        case kVK_Function:                  return .maskSecondaryFn
+        default:                            return nil
+        }
+    }
 
     /// Returns `true` when the specific physical modifier key is pressed.
     /// Uses device-dependent flags to distinguish left from right.
