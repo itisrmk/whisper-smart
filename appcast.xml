@@ -6,6 +6,16 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.3.3</title>
+      <description>Automated DMG release for v0.3.3.
+Release channel: **beta**
+Release artifact: `.build/release/Whisper-Smart-mac.dmg`
+Rollback reference: https://github.com/itisrmk/whisper-smart/releases/tag/v0.3.2</description>
+      <pubDate>Sat, 18 Jul 2026 09:55:41 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.3.3/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.3.3" sparkle:version="202607180955" sparkle:edSignature="6XV9p/HjQVrmVVO3jnWCCz8XIdp+1FFh+AX0zlGliPckVScoHedhXx7qcaAzhL88E0iMf1ZDSQWDWXz2sc5WCw==" length="2608256" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.3.2</title>
       <description>Menu bar now shows the custom Whisper Smart logo (template image, adapts to light/dark mode) instead of the generic mic symbol when idle. Active states keep their status symbols.
 Release channel: **beta**
