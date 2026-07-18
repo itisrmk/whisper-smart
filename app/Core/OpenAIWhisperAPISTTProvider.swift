@@ -110,6 +110,9 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
 
             var request = URLRequest(url: transcriptionURL)
             request.httpMethod = "POST"
+            // Bound the request so a stalled network never outlives the state
+            // machine's transcription timeout and leaks a hung task.
+            request.timeoutInterval = 30
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 

@@ -37,6 +37,8 @@ private final class MockAudioCapture: AudioCapturing {
 
     func start() throws { startCallCount += 1 }
     func stop() { stopCallCount += 1 }
+
+    func simulateSpeech(level: Float = 0.5) { onAudioLevel?(level) }
 }
 
 private final class MockInjector: TextInjecting {
@@ -105,9 +107,11 @@ private func runStateMachineSmoke() throws {
     hotkey.triggerHoldStart()
     try expect(machine.state == .recording, "hold start should enter recording")
 
-    // Simulate speech above the 0.08 detection threshold — silent recordings
-    // intentionally skip transcription and return to idle.
-    audio.onAudioLevel?(0.5)
+    // Silent recordings skip transcription entirely, so simulate speech
+    // before releasing the hotkey. Level delivery hops to the main queue,
+    // so spin the run loop to let it land.
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
 
     hotkey.triggerHoldEnd()
     try expect(machine.state == .transcribing, "hold end should enter transcribing")
@@ -136,8 +140,8 @@ private func runResolverSmoke() throws {
         speechRecognizerFactory: { nil },
         cloudFallbackEnabled: { false },
         openAIAPIKey: { "" },
-        parakeetBootstrapStatus: {
-            ParakeetRuntimeBootstrapStatus(
+        mlxBootstrapStatus: {
+            MLXRuntimeBootstrapStatus(
                 phase: .ready,
                 detail: "ready",
                 runtimeDirectory: nil,
@@ -158,7 +162,7 @@ private func runResolverSmoke() throws {
         speechRecognizerFactory: { nil },
         cloudFallbackEnabled: { true },
         openAIAPIKey: { "sk-test-key" },
-        parakeetBootstrapStatus: noCloudEnv.parakeetBootstrapStatus
+        mlxBootstrapStatus: noCloudEnv.mlxBootstrapStatus
     )
 
     let ready = STTProviderResolver.diagnostics(for: .openaiAPI, environment: cloudEnv)
@@ -176,8 +180,8 @@ private func runParakeetNoSilentFallbackSmoke() throws {
         speechRecognizerFactory: { SFSpeechRecognizer(locale: Locale(identifier: "en-US")) },
         cloudFallbackEnabled: { false },
         openAIAPIKey: { "" },
-        parakeetBootstrapStatus: {
-            ParakeetRuntimeBootstrapStatus(
+        mlxBootstrapStatus: {
+            MLXRuntimeBootstrapStatus(
                 phase: .bootstrapping,
                 detail: "bootstrapping",
                 runtimeDirectory: nil,
@@ -201,110 +205,89 @@ private func runParakeetNoSilentFallbackSmoke() throws {
 }
 
 
-private func runDownloadCompletionTransitionSmoke() throws {
-    let state = ModelDownloadState(variant: .parakeetCTC06B)
-    state.transitionToDownloading()
-    state.updateProgress(1)
-    state.transitionToFailed(message: "Synthetic finalization failure")
-
-    if case .downloading = state.phase {
-        throw SmokeFailure.assertion("Download state should leave downloading once completion resolves (ready/failed).")
-    }
-
-    print("✓ Download completion transition smoke passed")
-}
-
-private func runLegacyCanarySourceMigrationSmoke() throws {
-    let store = ParakeetModelSourceConfigurationStore.shared
-    let defaults = UserDefaults.standard
-    let variantID = ParakeetModelCatalog.ctc06BVariantID
-    let selectedSourceKey = "parakeet.modelSource.\(variantID).selected"
-
-    let previousValue = defaults.string(forKey: selectedSourceKey)
-    defaults.set("hf_canary_qwen_2_5b_safetensors", forKey: selectedSourceKey)
-
-    defer {
-        if let previousValue {
-            defaults.set(previousValue, forKey: selectedSourceKey)
-        } else {
-            defaults.removeObject(forKey: selectedSourceKey)
-        }
-        _ = store.selectSource(id: "hf_parakeet_tdt06b_v3_onnx", for: variantID)
-    }
-
-    let variant = ModelVariant.parakeetCTC06B
-    try expect(variant.configuredSource?.selectedSourceID == "hf_parakeet_tdt06b_v3_onnx", "Legacy Canary source id should auto-fallback to the recommended Parakeet source")
-    try expect(variant.hasDownloadSource == true, "Parakeet should remain downloadable when legacy Canary source id is persisted")
+private func runMLXCatalogSmoke() throws {
+    try expect(!MLXModelCatalog.parakeetOptions.isEmpty, "Catalog should offer Parakeet MLX models")
+    try expect(MLXModelCatalog.whisperOptions.count >= 4, "Catalog should offer several Whisper MLX options")
     try expect(
-        variant.downloadUnavailableReason == nil,
-        "Legacy Canary source selection should not block download"
+        MLXModelCatalog.all.allSatisfy { $0.repo.hasPrefix("mlx-community/") },
+        "All MLX models should come from the mlx-community hub"
+    )
+    try expect(
+        Set(MLXModelCatalog.all.map(\.id)).count == MLXModelCatalog.all.count,
+        "MLX model ids must be unique"
     )
 
-    print("✓ Legacy Canary source migration smoke passed")
-}
-
-private func runParakeetArtifactMetadataSmoke() throws {
-    let source = ModelVariant.parakeetCTC06B.configuredSource
-    try expect(source?.modelDataURL == nil, "Parakeet source should use int8 encoder artifact without external .data sidecar.")
-    try expect(source?.decoderJointURL != nil, "Parakeet source should include decoder_joint artifact URL.")
-    try expect(source?.configURL != nil, "Parakeet source should include config.json artifact URL.")
-    try expect(source?.nemoNormalizerURL != nil, "Parakeet source should include nemo128 artifact URL.")
-
-    let expectedEncoderBytes = source?.modelExpectedSizeBytes ?? 0
-    let expectedDecoderBytes = source?.decoderJointExpectedSizeBytes ?? 0
-    try expect(expectedEncoderBytes > 500_000_000, "Parakeet int8 encoder expected size should be set.")
-    try expect(expectedDecoderBytes > 10_000_000, "Parakeet int8 decoder expected size should be set.")
-
-    print("✓ Parakeet artifact metadata smoke passed")
-}
-
-private func runTokenizerValidationSmoke() throws {
-    let tempDir = FileManager.default.temporaryDirectory
-        .appendingPathComponent("qa-smoke-tokenizer-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: tempDir) }
-
-    let tokenizerURL = tempDir.appendingPathComponent("vocab.txt")
-    var payload = "<blank>\n"
-    payload += String(repeating: "token\n", count: 9)
-
-    let targetSize = Int(TokenizerArtifactValidator.knownParakeetVocabSizeBytes)
-    if payload.utf8.count < targetSize {
-        payload += String(repeating: "a", count: targetSize - payload.utf8.count)
+    let defaults = UserDefaults.standard
+    let previous = defaults.string(forKey: "mlx.whisper.selectedModel")
+    defer {
+        if let previous {
+            defaults.set(previous, forKey: "mlx.whisper.selectedModel")
+        } else {
+            defaults.removeObject(forKey: "mlx.whisper.selectedModel")
+        }
     }
-    try payload.write(to: tokenizerURL, atomically: true, encoding: .utf8)
 
-    let source = ParakeetResolvedModelSource(
-        selectedSourceID: "hf_parakeet_tdt06b_v3_onnx",
-        selectedSourceName: "Hugging Face",
-        isBuiltInSource: true,
-        modelURL: nil,
-        modelDataURL: nil,
-        tokenizerURL: URL(string: "https://example.com/vocab.txt"),
-        decoderJointURL: nil,
-        configURL: nil,
-        nemoNormalizerURL: nil,
-        tokenizerFilename: "vocab.txt",
-        decoderJointFilename: nil,
-        configFilename: nil,
-        nemoNormalizerFilename: nil,
-        modelExpectedSizeBytes: nil,
-        modelDataExpectedSizeBytes: nil,
-        tokenizerExpectedSizeBytes: 100_000,
-        decoderJointExpectedSizeBytes: nil,
-        configExpectedSizeBytes: nil,
-        nemoNormalizerExpectedSizeBytes: nil,
-        modelSHA256: nil,
-        tokenizerSHA256: nil,
-        error: nil,
-        runtimeCompatibility: .runnable,
-        availableSources: []
+    MLXModelCatalog.selectedWhisperModel = MLXModelCatalog.whisperSmall
+    try expect(
+        MLXModelCatalog.selectedWhisperModel == MLXModelCatalog.whisperSmall,
+        "Whisper model selection should persist"
+    )
+    try expect(
+        MLXModelCatalog.selectedModel(for: .whisper) == MLXModelCatalog.whisperSmall,
+        "Provider kind should resolve to the selected Whisper model"
+    )
+    try expect(
+        MLXModelCatalog.selectedModel(for: .parakeet)?.engine == .parakeet,
+        "Parakeet kind should resolve to a Parakeet-engine model"
+    )
+    try expect(
+        MLXModelCatalog.selectedModel(for: .appleSpeech) == nil,
+        "Non-MLX kinds should not resolve to an MLX model"
     )
 
-    let validationError = TokenizerArtifactValidator.validate(at: tokenizerURL, source: source)
-    try expect(validationError == nil, "Tokenizer validator should accept current known Parakeet vocab size (~93,939 bytes)")
+    // Corrupt selection falls back to a sane default.
+    defaults.set("parakeet-tdt-0.6b-v3", forKey: "mlx.whisper.selectedModel")
+    try expect(
+        MLXModelCatalog.selectedWhisperModel.engine == .whisper,
+        "A cross-engine selection id must not leak into the Whisper slot"
+    )
 
-    print("✓ Tokenizer validator smoke passed")
+    print("✓ MLX catalog smoke passed")
+}
+
+private func runMLXModelNotInstalledDiagnosticsSmoke() throws {
+    // With no install marker present, the whisper kind must stay selected
+    // (no silent fallback) while reporting itself unavailable/degraded.
+    let env = STTProviderResolver.Environment(
+        microphoneStatus: { .granted },
+        speechRecognitionStatus: { .granted },
+        speechRecognizerFactory: { nil },
+        cloudFallbackEnabled: { false },
+        openAIAPIKey: { "" },
+        mlxBootstrapStatus: {
+            MLXRuntimeBootstrapStatus(
+                phase: .idle,
+                detail: "Runtime not installed.",
+                runtimeDirectory: nil,
+                pythonCommand: nil,
+                timestamp: Date()
+            )
+        }
+    )
+
+    let diagnostics = STTProviderResolver.diagnostics(for: .whisper, environment: env)
+    try expect(diagnostics.effectiveKind == .whisper, "Whisper (MLX) must not silently fall back")
+    try expect(diagnostics.fallbackReason == nil, "No fallback reason when the kind stays selected")
+    try expect(
+        diagnostics.checks.contains { $0.id == "mlx.runtime_bootstrap" },
+        "Diagnostics should include the MLX runtime check"
+    )
+    try expect(
+        diagnostics.checks.contains { $0.id == "mlx.model" },
+        "Diagnostics should include the MLX model check"
+    )
+
+    print("✓ MLX not-installed diagnostics smoke passed")
 }
 
 private func runOpenAIAPIKeyNormalizationSmoke() throws {
@@ -522,10 +505,8 @@ struct QASmokeMain {
             try runStateMachineSmoke()
             try runResolverSmoke()
             try runParakeetNoSilentFallbackSmoke()
-            try runDownloadCompletionTransitionSmoke()
-            try runLegacyCanarySourceMigrationSmoke()
-            try runParakeetArtifactMetadataSmoke()
-            try runTokenizerValidationSmoke()
+            try runMLXCatalogSmoke()
+            try runMLXModelNotInstalledDiagnosticsSmoke()
             try runOpenAIAPIKeyNormalizationSmoke()
             try runGlobalWritingStyleFallbackSmoke()
             try runDomainPresetFallbackSmoke()

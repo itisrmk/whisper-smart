@@ -3,22 +3,22 @@ import os.log
 
 private let bootstrapLogger = Logger(subsystem: "com.visperflow", category: "ParakeetBootstrap")
 
-enum ParakeetRuntimeBootstrapPhase: String {
+enum MLXRuntimeBootstrapPhase: String {
     case idle = "Idle"
     case bootstrapping = "Bootstrapping"
     case ready = "Ready"
     case failed = "Failed"
 }
 
-struct ParakeetRuntimeBootstrapStatus: Equatable {
-    let phase: ParakeetRuntimeBootstrapPhase
+struct MLXRuntimeBootstrapStatus: Equatable {
+    let phase: MLXRuntimeBootstrapPhase
     let detail: String
     let runtimeDirectory: URL?
     let pythonCommand: String?
     let timestamp: Date
 }
 
-struct ParakeetRuntimeBootstrapError: Error, LocalizedError {
+struct MLXRuntimeBootstrapError: Error, LocalizedError {
     let message: String
 
     var errorDescription: String? {
@@ -26,24 +26,24 @@ struct ParakeetRuntimeBootstrapError: Error, LocalizedError {
     }
 }
 
-final class ParakeetRuntimeBootstrapManager {
-    static let shared = ParakeetRuntimeBootstrapManager()
+final class MLXRuntimeBootstrapManager {
+    static let shared = MLXRuntimeBootstrapManager()
 
     private let queue = DispatchQueue(label: "com.visperflow.parakeet.bootstrap", qos: .userInitiated)
     private let statusLock = NSLock()
     private let fileManager = FileManager.default
     // Parakeet TDT requires onnx-asr compatibility glue; raw ONNX fallback is
     // not sufficient for this model family.
-    private let runtimeDependencies = ["numpy", "onnxruntime", "onnx-asr[cpu,hub]"]
+    private let runtimeDependencies = ["parakeet-mlx", "mlx-whisper"]
     private let commandTimeoutSeconds: TimeInterval = 45 * 60
     private let networkCommandTimeoutSeconds: TimeInterval = 20 * 60
     private let minimumSupportedPythonMinor = 10
     private let preferredMaximumPythonMinor = 13
-    private let dependencyImportProbe = "import numpy, onnxruntime, onnx_asr"
+    private let dependencyImportProbe = "import parakeet_mlx, mlx_whisper"
 
-    private var status = ParakeetRuntimeBootstrapStatus(
+    private var status = MLXRuntimeBootstrapStatus(
         phase: .idle,
-        detail: "Runtime not bootstrapped yet. It will auto-install in the background.",
+        detail: "Runtime not installed. Install it from Settings -> Provider.",
         runtimeDirectory: nil,
         pythonCommand: nil,
         timestamp: Date()
@@ -51,24 +51,28 @@ final class ParakeetRuntimeBootstrapManager {
 
     private init() {}
 
-    func statusSnapshot() -> ParakeetRuntimeBootstrapStatus {
+    func statusSnapshot() -> MLXRuntimeBootstrapStatus {
         statusLock.lock()
         defer { statusLock.unlock() }
         return status
     }
 
-    func ensureRuntimeReady(forceRepair: Bool = false) throws -> String {
+    /// - Parameter allowInstall: when false (the default), only verifies an
+    ///   already-installed runtime and throws if none exists. Installation
+    ///   (venv creation, pip installs, toolchain downloads) requires the
+    ///   user-initiated setup path in Settings -> Provider to pass true.
+    func ensureRuntimeReady(forceRepair: Bool = false, allowInstall: Bool = false) throws -> String {
         if let override = pythonOverrideCommand() {
             // Never trust override blindly. Validate required imports first.
             do {
                 try runCommand(
                     executablePath: "/usr/bin/env",
                     arguments: [override, "-c", dependencyImportProbe],
-                    step: "verify VISPERFLOW_PARAKEET_PYTHON override"
+                    step: "verify VISPERFLOW_MLX_PYTHON override"
                 )
                 updateStatus(
                     phase: .ready,
-                    detail: "Using VISPERFLOW_PARAKEET_PYTHON override (\(override)).",
+                    detail: "Using VISPERFLOW_MLX_PYTHON override (\(override)).",
                     runtimeDirectory: nil,
                     pythonCommand: override
                 )
@@ -79,14 +83,14 @@ final class ParakeetRuntimeBootstrapManager {
         }
 
         return try queue.sync {
-            try bootstrapLocked(forceRepair: forceRepair)
+            try bootstrapLocked(forceRepair: forceRepair, allowInstall: allowInstall)
         }
     }
 
     func repairRuntimeInBackground() {
         queue.async {
             do {
-                _ = try self.bootstrapLocked(forceRepair: true)
+                _ = try self.bootstrapLocked(forceRepair: true, allowInstall: true)
             } catch {
                 bootstrapLogger.error("Background Parakeet runtime repair failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -96,9 +100,9 @@ final class ParakeetRuntimeBootstrapManager {
 
 // MARK: - Bootstrap internals
 
-private extension ParakeetRuntimeBootstrapManager {
+private extension MLXRuntimeBootstrapManager {
     var bootstrapPythonCommand: String {
-        let raw = ProcessInfo.processInfo.environment["VISPERFLOW_PARAKEET_BOOTSTRAP_PYTHON"]
+        let raw = ProcessInfo.processInfo.environment["VISPERFLOW_MLX_BOOTSTRAP_PYTHON"]
             ?? ProcessInfo.processInfo.environment["VISPERFLOW_BOOTSTRAP_PYTHON"]
             ?? "python3"
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -126,14 +130,14 @@ private extension ParakeetRuntimeBootstrapManager {
     }
 
     func pythonOverrideCommand() -> String? {
-        guard let raw = ProcessInfo.processInfo.environment["VISPERFLOW_PARAKEET_PYTHON"] else {
+        guard let raw = ProcessInfo.processInfo.environment["VISPERFLOW_MLX_PYTHON"] else {
             return nil
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    func bootstrapLocked(forceRepair: Bool) throws -> String {
+    func bootstrapLocked(forceRepair: Bool, allowInstall: Bool) throws -> String {
         let runtimeRoot = try resolveRuntimeRootDirectory()
         let venvDirectory = runtimeRoot.appendingPathComponent("venv", isDirectory: true)
         let venvPythonURL = venvDirectory.appendingPathComponent("bin/python3")
@@ -162,6 +166,18 @@ private extension ParakeetRuntimeBootstrapManager {
             return shimPythonURL.path
         }
 
+        guard allowInstall else {
+            updateStatus(
+                phase: .idle,
+                detail: "Runtime not installed. Install it from Settings -> Provider.",
+                runtimeDirectory: runtimeRoot,
+                pythonCommand: nil
+            )
+            throw MLXRuntimeBootstrapError(
+                message: "Parakeet runtime is not installed. Open Settings -> Provider and click Install Parakeet."
+            )
+        }
+
         updateStatus(
             phase: .bootstrapping,
             detail: forceRepair ? "Repairing runtime directory…" : "Preparing runtime directory…",
@@ -180,7 +196,7 @@ private extension ParakeetRuntimeBootstrapManager {
                 runtimeDirectory: runtimeRoot,
                 pythonCommand: nil
             )
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "\(message) Run runtime setup from Settings -> Provider, then retry Parakeet."
             )
         }
@@ -193,7 +209,7 @@ private extension ParakeetRuntimeBootstrapManager {
                 runtimeDirectory: runtimeRoot,
                 pythonCommand: nil
             )
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "\(message) Run runtime setup from Settings -> Provider, then retry Parakeet."
             )
         }
@@ -255,7 +271,7 @@ private extension ParakeetRuntimeBootstrapManager {
             runtimeDirectory: runtimeRoot,
             pythonCommand: nil
         )
-        throw ParakeetRuntimeBootstrapError(
+        throw MLXRuntimeBootstrapError(
             message: "\(message) Run runtime setup from Settings -> Provider, then retry Parakeet."
         )
     }
@@ -491,7 +507,7 @@ private extension ParakeetRuntimeBootstrapManager {
             return portable
         }
 
-        throw ParakeetRuntimeBootstrapError(
+        throw MLXRuntimeBootstrapError(
             message: "Failed to locate managed Python executable after toolchain extraction."
         )
     }
@@ -539,21 +555,21 @@ private extension ParakeetRuntimeBootstrapManager {
 
         if semaphore.wait(timeout: .now() + networkCommandTimeoutSeconds) == .timedOut {
             task.cancel()
-            throw ParakeetRuntimeBootstrapError(message: "Timed out while querying managed Python toolchain metadata.")
+            throw MLXRuntimeBootstrapError(message: "Timed out while querying managed Python toolchain metadata.")
         }
 
         if let resultError {
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "Failed to query managed Python toolchain metadata: \(resultError.localizedDescription)"
             )
         }
 
         guard let httpResponse = resultResponse as? HTTPURLResponse else {
-            throw ParakeetRuntimeBootstrapError(message: "Managed Python metadata request returned an invalid response.")
+            throw MLXRuntimeBootstrapError(message: "Managed Python metadata request returned an invalid response.")
         }
 
         guard (200...299).contains(httpResponse.statusCode), let resultData else {
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "Managed Python metadata request failed with HTTP \(httpResponse.statusCode)."
             )
         }
@@ -562,7 +578,7 @@ private extension ParakeetRuntimeBootstrapManager {
         do {
             decoded = try JSONDecoder().decode(LatestRelease.self, from: resultData)
         } catch {
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "Failed to parse managed Python metadata: \(error.localizedDescription)"
             )
         }
@@ -576,7 +592,7 @@ private extension ParakeetRuntimeBootstrapManager {
             }
         }
 
-        throw ParakeetRuntimeBootstrapError(
+        throw MLXRuntimeBootstrapError(
             message: "No managed Python download asset found for \(architectureToken)."
         )
     }
@@ -618,7 +634,7 @@ private extension ParakeetRuntimeBootstrapManager {
 
     func validateHostPrerequisites() throws {
         guard commandExists(bootstrapPythonCommand) else {
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "Python runtime prerequisite not found ('\(bootstrapPythonCommand)'). Parakeet setup requires Python 3. Install it, then retry from Settings -> Provider."
             )
         }
@@ -647,7 +663,7 @@ private extension ParakeetRuntimeBootstrapManager {
     }
 
     func resolveRuntimeRootDirectory() throws -> URL {
-        if let override = ProcessInfo.processInfo.environment["VISPERFLOW_PARAKEET_RUNTIME_DIR"]?
+        if let override = ProcessInfo.processInfo.environment["VISPERFLOW_MLX_RUNTIME_DIR"]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !override.isEmpty {
             let url = URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL
@@ -658,7 +674,7 @@ private extension ParakeetRuntimeBootstrapManager {
         let projectLocal = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
             .appendingPathComponent(".visperflow", isDirectory: true)
             .appendingPathComponent("runtime", isDirectory: true)
-            .appendingPathComponent("parakeet", isDirectory: true)
+            .appendingPathComponent("mlx", isDirectory: true)
 
         var candidates = AppStoragePaths.runtimeRootCandidates(fileManager: fileManager)
         candidates.append(projectLocal)
@@ -673,8 +689,8 @@ private extension ParakeetRuntimeBootstrapManager {
             }
         }
 
-        throw ParakeetRuntimeBootstrapError(
-            message: "Cannot create Parakeet runtime directory. Tried: \(createErrors.joined(separator: " | "))"
+        throw MLXRuntimeBootstrapError(
+            message: "Cannot create MLX runtime directory. Tried: \(createErrors.joined(separator: " | "))"
         )
     }
 
@@ -867,7 +883,7 @@ private extension ParakeetRuntimeBootstrapManager {
         do {
             try process.run()
         } catch {
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "Failed to \(step): \(error.localizedDescription)"
             )
         }
@@ -883,7 +899,7 @@ private extension ParakeetRuntimeBootstrapManager {
 
             stdoutPipe.fileHandleForReading.readabilityHandler = nil
             stderrPipe.fileHandleForReading.readabilityHandler = nil
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "Failed to \(step): command timed out after \(Int(timeoutSeconds))s."
             )
         }
@@ -901,7 +917,7 @@ private extension ParakeetRuntimeBootstrapManager {
 
         guard process.terminationStatus == 0 else {
             let details = !stderr.isEmpty ? stderr : stdout
-            throw ParakeetRuntimeBootstrapError(
+            throw MLXRuntimeBootstrapError(
                 message: "Failed to \(step) (exit \(process.terminationStatus)): \(details)"
             )
         }
@@ -910,13 +926,13 @@ private extension ParakeetRuntimeBootstrapManager {
     }
 
     func updateStatus(
-        phase: ParakeetRuntimeBootstrapPhase,
+        phase: MLXRuntimeBootstrapPhase,
         detail: String,
         runtimeDirectory: URL?,
         pythonCommand: String?
     ) {
         statusLock.lock()
-        status = ParakeetRuntimeBootstrapStatus(
+        status = MLXRuntimeBootstrapStatus(
             phase: phase,
             detail: detail,
             runtimeDirectory: runtimeDirectory,
@@ -926,10 +942,14 @@ private extension ParakeetRuntimeBootstrapManager {
         statusLock.unlock()
 
         bootstrapLogger.info("Parakeet runtime status: \(phase.rawValue, privacy: .public) - \(detail, privacy: .public)")
-        NotificationCenter.default.post(name: .parakeetRuntimeBootstrapDidChange, object: nil)
+        // Post on main: NotificationCenter.publisher delivers on the posting
+        // thread, and SwiftUI observers must not mutate state off-main.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .mlxRuntimeBootstrapDidChange, object: nil)
+        }
     }
 }
 
 extension Notification.Name {
-    static let parakeetRuntimeBootstrapDidChange = Notification.Name("parakeetRuntimeBootstrapDidChange")
+    static let mlxRuntimeBootstrapDidChange = Notification.Name("mlxRuntimeBootstrapDidChange")
 }

@@ -263,9 +263,6 @@ enum DictationProviderPolicy {
         static let openAIEndpointProfile = "provider.openAI.endpointProfile"
         static let openAIBaseURL = "provider.openAI.baseURL"
         static let openAIModel = "provider.openAI.model"
-        static let whisperCLIPath = "provider.whisper.cliPath"
-        static let whisperModelPath = "provider.whisper.modelPath"
-        static let whisperModelTier = "provider.whisper.modelTier"
     }
 
     private enum SecureAccount {
@@ -534,32 +531,5 @@ enum DictationProviderPolicy {
         }
 
         return .malformed(reason: "Expected an OpenAI key starting with sk-.")
-    }
-
-    static var whisperCLIPath: String {
-        get {
-            let stored = defaults.string(forKey: Key.whisperCLIPath)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let stored, !stored.isEmpty { return stored }
-            return ProcessInfo.processInfo.environment["VISPERFLOW_WHISPER_CLI"] ?? ""
-        }
-        set { defaults.set(newValue, forKey: Key.whisperCLIPath) }
-    }
-
-    static var whisperModelPath: String {
-        get {
-            let stored = defaults.string(forKey: Key.whisperModelPath)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let stored, !stored.isEmpty { return stored }
-            return ProcessInfo.processInfo.environment["VISPERFLOW_WHISPER_MODEL"] ?? ""
-        }
-        set { defaults.set(newValue, forKey: Key.whisperModelPath) }
-    }
-
-    static var whisperModelTier: String {
-        get {
-            let stored = defaults.string(forKey: Key.whisperModelTier)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let stored, !stored.isEmpty { return stored }
-            return "base_en"
-        }
-        set { defaults.set(newValue, forKey: Key.whisperModelTier) }
     }
 }

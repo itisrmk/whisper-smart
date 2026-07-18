@@ -7,7 +7,7 @@ BUNDLE_ID="${BUNDLE_ID:-com.whispersmart.desktop}"
 VERSION="${VERSION:-0.2.14}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 LOGO_PATH="${LOGO_PATH:-$REPO_ROOT/logo.png}"
-PARAKEET_RUNNER_SOURCE="$REPO_ROOT/scripts/parakeet_infer.py"
+MLX_RUNNER_SOURCE="$REPO_ROOT/scripts/mlx_stt_infer.py"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-2OzsmMn7xg17Iasd5fvc98QIM5ycXEIYzrQT/X5WET0=}"
 EXPECTED_BUNDLE_ID="com.whispersmart.desktop"
 ALLOW_ADHOC_SIGNING="${ALLOW_ADHOC_SIGNING:-0}"
@@ -27,11 +27,14 @@ if [[ "$BUNDLE_ID" != "$EXPECTED_BUNDLE_ID" ]]; then
   exit 1
 fi
 
-rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-
 echo "Building release binary for ${APP_NAME}..."
 swift build -c release --package-path "$REPO_ROOT"
+
+# Create the bundle AFTER swift build: SwiftPM prunes unknown directories
+# inside its product folder during the build, which used to delete the
+# freshly created bundle skeleton and fail the copy step below.
+rm -rf "$APP_BUNDLE"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 # Copy the built executable
 cp "$REPO_ROOT/.build/arm64-apple-macosx/release/$APP_NAME" "$EXECUTABLE_PATH"
@@ -62,13 +65,13 @@ fi
 
 cp "$LOGO_PATH" "$RESOURCES_DIR/logo.png" 2>/dev/null || true
 
-if [ ! -f "$PARAKEET_RUNNER_SOURCE" ]; then
-  echo "Missing Parakeet runner script at $PARAKEET_RUNNER_SOURCE"
+if [ ! -f "$MLX_RUNNER_SOURCE" ]; then
+  echo "Missing MLX runner script at $MLX_RUNNER_SOURCE"
   exit 1
 fi
 
 mkdir -p "$RESOURCES_DIR/scripts"
-cp "$PARAKEET_RUNNER_SOURCE" "$RESOURCES_DIR/scripts/parakeet_infer.py"
+cp "$MLX_RUNNER_SOURCE" "$RESOURCES_DIR/scripts/mlx_stt_infer.py"
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
