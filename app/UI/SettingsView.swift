@@ -3,8 +3,8 @@ import Carbon.HIToolbox
 import AppKit
 
 /// Root settings view hosted in its own `NSWindow`.
-/// Dark neumorphic design with soft raised cards, inset controls,
-/// and an iOS-like rounded aesthetic.
+/// Modernist design: Archivo type, a single red accent, flush-left labels,
+/// hairline + 2px rules, zero corner radius, adaptive light/dark.
 struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .general
     @State private var showOnboarding: Bool
@@ -22,7 +22,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        HStack(spacing: VFSpacing.md) {
+        HStack(spacing: 0) {
             SettingsSidebar(
                 selectedTab: $selectedTab,
                 onOpenOnboarding: {
@@ -30,48 +30,30 @@ struct SettingsView: View {
                     showOnboarding = true
                 }
             )
-                .frame(width: 220)
+            .frame(width: VFSize.sidebarWidth)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .background(VFColor.sidebar)
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(VFColor.border).frame(width: 1)
+            }
 
-            VStack(alignment: .leading, spacing: VFSpacing.md) {
-                SettingsPaneHeader(selectedTab: selectedTab)
-
-                ScrollView(.vertical, showsIndicators: false) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: VFSpacing.xl) {
+                    SettingsPaneHeader(selectedTab: selectedTab)
                     selectedTabContent
                         .frame(maxWidth: .infinity, alignment: .top)
-                        .padding(.bottom, VFSpacing.xxl)
                 }
-                .scrollIndicators(.hidden)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(EdgeInsets(top: 34, leading: 32, bottom: 44, trailing: 32))
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(VFSpacing.md)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [VFColor.surface1.opacity(0.96), VFColor.surface2.opacity(0.88)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
-                            .stroke(VFColor.glassBorder.opacity(0.9), lineWidth: 1)
-                    )
-                    .overlay(
-                        GrainTexture(opacity: 0.010, cellSize: 2)
-                            .clipShape(RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous))
-                    )
-            )
+            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(VFColor.bg)
         }
-        .padding(VFSpacing.md)
         .frame(width: VFSize.settingsWidth, height: VFSize.settingsHeight)
-        .layeredDepthBackground()
-        .clipShape(RoundedRectangle(cornerRadius: VFRadius.window, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: VFRadius.window, style: .continuous)
-                .stroke(VFColor.glassBorder.opacity(0.9), lineWidth: 1)
-        )
+        .background(VFColor.bg)
+        // The select pills draw their own accent chevron.
+        .menuIndicator(.hidden)
         .overlay(alignment: .center) {
             if showOnboarding {
                 ProductOnboardingOverlay(
@@ -155,19 +137,29 @@ private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
 
     var icon: String {
         switch self {
-        case .general:  return "gearshape.fill"
+        case .general:  return "slider.horizontal.3"
         case .hotkey:   return "command"
-        case .provider: return "cloud.fill"
-        case .history:  return "list.bullet.rectangle.portrait"
+        case .provider: return "cloud"
+        case .history:  return "list.bullet"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .general: return "Startup, audio, workflow"
+        case .general: return "Startup, audio & workflow"
         case .hotkey: return "Global shortcut controls"
-        case .provider: return "Models and cloud setup"
-        case .history: return "Transcript metrics and logs"
+        case .provider: return "Models & cloud setup"
+        case .history: return "Transcript metrics & logs"
+        }
+    }
+
+    /// Lede under the page title.
+    var lede: String {
+        switch self {
+        case .general: return "Startup, audio, and your everyday dictation workflow."
+        case .hotkey: return "One global shortcut for hands-free dictation, anywhere on your Mac."
+        case .provider: return "Choose where transcription runs — right on your Mac, or in the cloud."
+        case .history: return "Everything you've dictated, with timing so you can spot what to tune."
         }
     }
 }
@@ -230,11 +222,11 @@ private struct ProductOnboardingOverlay: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: VFSpacing.xxs) {
                         Text("Welcome to Whisper Smart")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(VFColor.textPrimary)
+                            .font(VFFont.sheetTitle)
+                            .foregroundStyle(VFColor.text)
                         Text("Set your default dictation mode and verify permissions in under a minute.")
                             .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
+                            .foregroundStyle(VFColor.muted)
                     }
                     Spacer()
                     Button(action: onClose) {
@@ -300,23 +292,10 @@ private struct ProductOnboardingOverlay: View {
             .padding(VFSpacing.lg)
             .frame(width: 700)
             .background(
-                RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [VFColor.surface1.opacity(0.98), VFColor.surface2.opacity(0.95)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
-                            .stroke(VFColor.glassBorder.opacity(0.95), lineWidth: 1)
-                    )
-                    .shadow(color: VFShadow.raisedControlColor.opacity(0.35), radius: 20, y: 10)
-            )
-            .overlay(
-                GrainTexture(opacity: 0.012, cellSize: 2)
-                    .clipShape(RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous))
+                Rectangle()
+                    .fill(VFColor.panel)
+                    .overlay(Rectangle().stroke(VFColor.border2, lineWidth: 1))
+                    .shadow(color: Color.black.opacity(0.25), radius: 30, y: 12)
             )
         }
         .onAppear {
@@ -339,39 +318,32 @@ private struct ProductOnboardingOverlay: View {
                             HStack {
                                 Image(systemName: preset.icon)
                                     .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(VFColor.textPrimary)
+                                    .foregroundStyle(VFColor.accent)
                                 Spacer()
                                 if selectedPreset == preset {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(VFColor.accentFallback)
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(VFColor.accent)
                                 }
                             }
                             Text(preset.title)
                                 .font(VFFont.settingsBody)
-                                .foregroundStyle(VFColor.textPrimary)
+                                .foregroundStyle(VFColor.text)
                             Text(preset.subtitle)
                                 .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.textSecondary)
+                                .foregroundStyle(VFColor.muted)
                                 .lineLimit(2)
                         }
                         .padding(VFSpacing.md)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(
-                                    selectedPreset == preset
-                                        ? VFColor.surface3.opacity(0.92)
-                                        : VFColor.surface2.opacity(0.70)
-                                )
+                            Rectangle()
+                                .fill(selectedPreset == preset ? VFColor.active : VFColor.panel)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(
-                                            selectedPreset == preset
-                                                ? VFColor.accentFallback.opacity(0.75)
-                                                : VFColor.glassBorder.opacity(0.7),
-                                            lineWidth: 0.8
-                                        )
+                                    Rectangle().stroke(
+                                        selectedPreset == preset ? VFColor.accent : VFColor.border,
+                                        lineWidth: selectedPreset == preset ? 1.5 : 1
+                                    )
                                 )
                         )
                     }
@@ -429,12 +401,9 @@ private struct ProductOnboardingOverlay: View {
             }
             .padding(VFSpacing.md)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(VFColor.surface2.opacity(0.72))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(VFColor.glassBorder.opacity(0.75), lineWidth: 0.8)
-                    )
+                Rectangle()
+                    .fill(VFColor.panel2)
+                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
             )
         }
     }
@@ -442,20 +411,21 @@ private struct ProductOnboardingOverlay: View {
     private func onboardingStepChip(label: String, title: String, isActive: Bool) -> some View {
         HStack(spacing: VFSpacing.xs) {
             Text(label)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(isActive ? VFColor.textPrimary : VFColor.textSecondary)
+                .font(VFFont.archivo(10, .bold))
+                .foregroundStyle(isActive ? Color.white : VFColor.muted)
+                .frame(width: 16, height: 16)
+                .background(Rectangle().fill(isActive ? VFColor.accent : VFColor.panel2))
             Text(title)
                 .font(VFFont.settingsCaption)
-                .foregroundStyle(isActive ? VFColor.textPrimary : VFColor.textSecondary)
+                .foregroundStyle(isActive ? VFColor.text : VFColor.muted)
         }
         .padding(.horizontal, VFSpacing.sm)
         .padding(.vertical, 5)
         .background(
-            Capsule(style: .continuous)
-                .fill((isActive ? VFColor.surface3 : VFColor.surface2).opacity(isActive ? 0.95 : 0.7))
+            Rectangle()
+                .fill(isActive ? VFColor.active : Color.clear)
                 .overlay(
-                    Capsule(style: .continuous)
-                        .stroke((isActive ? VFColor.accentFallback : VFColor.glassBorder).opacity(0.75), lineWidth: 0.7)
+                    Rectangle().stroke(isActive ? VFColor.accent : VFColor.border, lineWidth: 1)
                 )
         )
     }
@@ -464,21 +434,18 @@ private struct ProductOnboardingOverlay: View {
         HStack {
             Text(title)
                 .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textPrimary)
+                .foregroundStyle(VFColor.text)
             Spacer()
             Text(status.actionHint)
                 .font(VFFont.settingsFootnote)
-                .foregroundStyle(status.isUsable ? VFColor.success : VFColor.textSecondary)
+                .foregroundStyle(status.isUsable ? VFColor.success : VFColor.muted)
         }
         .padding(.horizontal, VFSpacing.sm)
         .padding(.vertical, VFSpacing.sm)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(VFColor.surface2.opacity(0.72))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(VFColor.glassBorder.opacity(0.72), lineWidth: 0.7)
-                )
+            Rectangle()
+                .fill(VFColor.panel2)
+                .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
         )
     }
 }
@@ -488,42 +455,35 @@ private struct SettingsSidebar: View {
     let onOpenOnboarding: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.md) {
-            VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                HStack(spacing: VFSpacing.sm) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [VFColor.accentFallback.opacity(0.35), VFColor.surface2],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(VFColor.glassBorder, lineWidth: 1)
-                            )
-                        Image(systemName: "waveform.and.mic")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(VFColor.textPrimary)
-                    }
-                    .frame(width: 32, height: 32)
+        VStack(alignment: .leading, spacing: 0) {
+            // App identity block (below the transparent titlebar).
+            HStack(spacing: 11) {
+                Rectangle()
+                    .fill(VFColor.accent)
+                    .frame(width: 40, height: 40)
+                    .overlay(
+                        Image(systemName: "waveform")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                    )
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Whisper Smart")
-                            .font(VFFont.settingsBody)
-                            .foregroundStyle(VFColor.textPrimary)
-                        Text("Preferences")
-                            .font(VFFont.settingsFootnote)
-                            .foregroundStyle(VFColor.textSecondary)
-                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Whisper Smart")
+                        .font(VFFont.archivo(15, .heavy))
+                        .foregroundStyle(VFColor.text)
+                    Text("Preferences")
+                        .font(VFFont.archivo(11.5))
+                        .foregroundStyle(VFColor.muted)
                 }
             }
+            .padding(EdgeInsets(top: 42, leading: 16, bottom: 16, trailing: 16))
 
-            NeuDivider()
+            Rectangle()
+                .fill(VFColor.border)
+                .frame(height: 2)
+                .padding(.bottom, VFSpacing.xs)
 
-            VStack(spacing: VFSpacing.xs) {
+            VStack(spacing: 0) {
                 ForEach(SettingsTab.allCases) { tab in
                     SidebarNavItem(
                         tab: tab,
@@ -539,50 +499,37 @@ private struct SettingsSidebar: View {
 
             Spacer(minLength: VFSpacing.sm)
 
-            Button(action: onOpenOnboarding) {
-                HStack(spacing: VFSpacing.xs) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("Onboarding")
-                        .font(VFFont.settingsFootnote)
+            VStack(alignment: .leading, spacing: 9) {
+                Button(action: onOpenOnboarding) {
+                    HStack(spacing: VFSpacing.xs) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(VFColor.accent)
+                        Text("Onboarding")
+                            .font(VFFont.archivo(12.5, .semibold))
+                            .foregroundStyle(VFColor.text)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .contentShape(Rectangle())
                 }
-            }
-            .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
+                .buttonStyle(.plain)
+                .background(Rectangle().stroke(VFColor.border2, lineWidth: 1))
 
-            HStack(spacing: VFSpacing.xs) {
-                Image(systemName: "applelogo")
-                    .font(.system(size: 10, weight: .medium))
-                Text("macOS native")
-                    .font(VFFont.settingsFootnote)
+                HStack(spacing: 6) {
+                    Image(systemName: "applelogo")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("macOS native")
+                        .font(VFFont.archivo(11, .semibold))
+                }
+                .foregroundStyle(VFColor.muted)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(VFColor.active)
             }
-            .foregroundStyle(VFColor.textTertiary)
-            .padding(.horizontal, VFSpacing.sm)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(VFColor.surface2.opacity(0.70))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(VFColor.glassBorder.opacity(0.8), lineWidth: 0.7)
-                    )
-            )
+            .padding(16)
         }
-        .padding(VFSpacing.md)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [VFColor.surface1.opacity(0.94), VFColor.bgElevated.opacity(0.94)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
-                        .stroke(VFColor.glassBorder.opacity(0.9), lineWidth: 1)
-                )
-        )
     }
 }
 
@@ -594,53 +541,37 @@ private struct SidebarNavItem: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: VFSpacing.sm) {
-            Image(systemName: tab.icon)
-                .font(.system(size: 12, weight: .semibold))
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
+        HStack(alignment: .top, spacing: 11) {
+            Group {
+                if tab == .hotkey {
+                    Text("⌘")
+                        .font(VFFont.archivo(15, .bold))
+                } else {
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+            }
+            .frame(width: 19, height: 19)
+            .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text(tab.label)
-                    .font(VFFont.settingsBody)
+                    .font(VFFont.archivo(13.5, .semibold))
                     .lineLimit(1)
                 Text(tab.subtitle)
-                    .font(VFFont.settingsFootnote)
+                    .font(VFFont.archivo(11))
+                    .foregroundStyle(VFColor.muted)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
         }
-        .foregroundStyle(
-            isSelected
-                ? VFColor.textPrimary
-                : (hovering ? VFColor.textPrimary.opacity(0.92) : VFColor.textSecondary)
-        )
-        .padding(.horizontal, VFSpacing.sm)
-        .padding(.vertical, VFSpacing.sm)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    isSelected
-                        ? AnyShapeStyle(
-                            LinearGradient(
-                                colors: [VFColor.surface3.opacity(0.96), VFColor.surface2.opacity(0.96)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        : AnyShapeStyle((hovering ? VFColor.interactiveHover : Color.clear))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(
-                            isSelected ? VFColor.glassBorder.opacity(0.95) : VFColor.glassBorder.opacity(hovering ? 0.5 : 0),
-                            lineWidth: isSelected ? 1 : 0.8
-                        )
-                )
-        )
+        .foregroundStyle(isSelected ? VFColor.accent : VFColor.text)
+        .padding(EdgeInsets(top: 11, leading: 13, bottom: 11, trailing: 16))
+        .background(isSelected ? VFColor.active : (hovering ? VFColor.interactiveHover : Color.clear))
         .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 999, style: .continuous)
-                .fill(VFColor.textPrimary.opacity(isSelected ? 0.36 : 0))
-                .frame(width: 2)
-                .padding(.vertical, 8)
+            Rectangle()
+                .fill(isSelected ? VFColor.accent : Color.clear)
+                .frame(width: 3)
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: action)
@@ -656,266 +587,63 @@ private struct SettingsPaneHeader: View {
     let selectedTab: SettingsTab
 
     var body: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(selectedTab.label)
                 .font(VFFont.settingsHeading)
-                .foregroundStyle(VFColor.textPrimary)
-            Text(selectedTab.subtitle)
-                .font(VFFont.settingsCaption)
-                .foregroundStyle(VFColor.textSecondary)
+                .tracking(-0.5)
+                .foregroundStyle(VFColor.text)
+            Text(selectedTab.lede)
+                .font(VFFont.archivo(13.5))
+                .foregroundStyle(VFColor.muted)
+                .frame(maxWidth: 480, alignment: .leading)
         }
-        .padding(.horizontal, VFSpacing.sm)
-        .padding(.top, VFSpacing.sm)
-    }
-}
-
-private struct SettingsHeroBanner: View {
-    let selectedTab: SettingsTab
-
-    var body: some View {
-        HStack(alignment: .center, spacing: VFSpacing.lg) {
-            VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                Text("Settings")
-                    .font(VFFont.settingsHeading)
-                    .foregroundStyle(VFColor.textPrimary)
-                Text("Configure Whisper Smart with local-first defaults and polished cloud fallback.")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
-                    .lineLimit(2)
-
-                HStack(spacing: VFSpacing.xs) {
-                    Text("Current")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(VFColor.textTertiary)
-                    Text(selectedTab.label)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(VFColor.accentFallback)
-                        .padding(.horizontal, VFSpacing.sm)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(VFColor.accentFallback.opacity(0.16))
-                                .overlay(Capsule(style: .continuous).stroke(VFColor.accentFallback.opacity(0.40), lineWidth: 0.6))
-                        )
-                }
-            }
-
-            Spacer(minLength: VFSpacing.md)
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [VFColor.surface3.opacity(0.95), VFColor.surface2.opacity(0.85)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .stroke(VFColor.glassBorder.opacity(0.9), lineWidth: 1)
-                    )
-
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(
-                        RadialGradient(
-                            colors: [VFColor.textureMeshCool.opacity(0.48), .clear],
-                            center: .topLeading,
-                            startRadius: 0,
-                            endRadius: 60
-                        )
-                    )
-                    .blendMode(.screen)
-
-                VStack(spacing: 5) {
-                    Image(systemName: "waveform.and.mic")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(VFColor.textPrimary)
-                    Text("WS")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(VFColor.textSecondary)
-                }
-            }
-            .frame(width: 56, height: 56)
-            .shadow(color: VFShadow.raisedControlColor.opacity(0.9), radius: 10, y: 4)
-        }
-        .padding(VFSpacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [VFColor.surface1.opacity(0.96), VFColor.surface2.opacity(0.88)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous)
-                        .stroke(VFColor.glassBorder, lineWidth: 1)
-                )
-                .overlay(
-                    GrainTexture(opacity: 0.010, cellSize: 2)
-                        .clipShape(RoundedRectangle(cornerRadius: VFRadius.card, style: .continuous))
-                )
-                .shadow(color: VFShadow.cardColor.opacity(0.85), radius: 12, y: 5)
-        )
-    }
-}
-
-// MARK: - Glass Segmented Control
-
-/// A custom segmented control styled as a neumorphic pill bar with
-/// a soft sliding selection indicator.
-private struct GlassSegmentedControl: View {
-    @Binding var selection: SettingsTab
-    let items: [SettingsTab]
-
-    @Namespace private var segmentNS
-    @State private var hoveredTab: SettingsTab?
-
-    var body: some View {
-        HStack(spacing: VFSpacing.xxs) {
-            ForEach(items) { item in
-                let isSelected = (selection == item)
-                let isHovered = hoveredTab == item
-                HStack(spacing: VFSpacing.sm) {
-                    Image(systemName: item.icon)
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(item.label)
-                        .font(VFFont.segmentLabel)
-                }
-                .foregroundStyle(isSelected ? VFColor.textPrimary : (isHovered ? VFColor.textPrimary.opacity(0.92) : VFColor.textSecondary))
-                .padding(.horizontal, VFSpacing.lg)
-                .padding(.vertical, VFSpacing.sm)
-                .frame(maxWidth: .infinity)
-                .background {
-                    if isSelected {
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [VFColor.surface3.opacity(0.95), VFColor.surface2.opacity(0.95)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .shadow(color: Color.black.opacity(0.35), radius: 8, y: 3)
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .stroke(VFColor.glassBorder, lineWidth: 1)
-                            )
-                            .matchedGeometryEffect(id: "segment", in: segmentNS)
-                    } else if isHovered {
-                        Capsule(style: .continuous)
-                            .fill(VFColor.interactiveHover)
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .stroke(VFColor.glassBorder.opacity(0.45), lineWidth: 0.8)
-                            )
-                    }
-                }
-                .contentShape(Capsule(style: .continuous))
-                .onTapGesture {
-                    withAnimation(VFAnimation.springSnappy) {
-                        selection = item
-                    }
-                }
-                .onHover { isHovering in
-                    hoveredTab = isHovering ? item : (hoveredTab == item ? nil : hoveredTab)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(item.label)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-            }
-        }
-        .padding(VFSpacing.xs)
-        .frame(minHeight: 44)
-        .background(
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [VFColor.surface1.opacity(0.92), VFColor.bgElevated.opacity(0.96)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(VFColor.glassBorder.opacity(0.9), lineWidth: 1)
-                )
-                .overlay(
-                    GrainTexture(opacity: 0.010, cellSize: 2)
-                        .clipShape(Capsule(style: .continuous))
-                )
-                .shadow(color: Color.black.opacity(0.25), radius: 8, y: 2)
-        )
     }
 }
 
 // MARK: - Section Container
 
-/// A titled neumorphic card section for settings content.
+/// A titled Modernist panel section: flat panel, hairline border,
+/// icon chip + heavy title over a 2px rule.
 private struct NeuSection<Content: View>: View {
     let icon: String
     let title: String
     @ViewBuilder let content: () -> Content
-    @State private var revealed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: VFSpacing.lg) {
-            VStack(alignment: .leading, spacing: VFSpacing.sm) {
-                HStack(spacing: VFSpacing.sm) {
-                    Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(VFColor.textSecondary)
-                        .frame(width: 30, height: 30)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(VFColor.surface3.opacity(0.88))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .stroke(VFColor.glassBorder.opacity(0.8), lineWidth: 1)
-                                )
-                        )
-                    Text(title)
-                        .font(VFFont.settingsTitle)
-                        .foregroundStyle(VFColor.textPrimary)
-                }
-
-                // Subtle accent underline for visual hierarchy
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 11) {
                 Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [VFColor.accentFallback.opacity(0.32), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
+                    .fill(VFColor.accentSoft)
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(VFColor.accent)
                     )
-                    .frame(height: 1)
+                Text(title)
+                    .font(VFFont.settingsTitle)
+                    .foregroundStyle(VFColor.text)
             }
+            .padding(.top, 18)
+            .padding(.bottom, 14)
 
-            content()
-        }
-        .padding(VFSpacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(cornerRadius: VFRadius.card, fill: VFColor.surface1)
-        .overlay(alignment: .topTrailing) {
-            Circle()
-                .fill(VFColor.textureMeshCool.opacity(0.18))
-                .frame(width: 96, height: 96)
-                .blur(radius: 26)
-                .offset(x: 36, y: -36)
-                .allowsHitTesting(false)
-        }
-        .opacity(revealed ? 1 : 0.0)
-        .offset(y: revealed ? 0 : 8)
-        .onAppear {
-            guard !revealed else { return }
-            withAnimation(.easeOut(duration: 0.25)) {
-                revealed = true
+            Rectangle()
+                .fill(VFColor.rule)
+                .frame(height: 2)
+
+            VStack(alignment: .leading, spacing: VFSpacing.md) {
+                content()
             }
+            .padding(.top, VFSpacing.md)
         }
+        .padding(.horizontal, VFSpacing.xl)
+        .padding(.bottom, VFSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Rectangle()
+                .fill(VFColor.panel)
+                .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
+        )
     }
 }
 
@@ -927,86 +655,50 @@ private typealias GlassSection = NeuSection
 private struct NeuDivider: View {
     var body: some View {
         Rectangle()
-            .fill(
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0.0),
-                        .init(color: VFColor.glassBorder.opacity(0.55), location: 0.22),
-                        .init(color: VFColor.accentFallback.opacity(0.16), location: 0.5),
-                        .init(color: VFColor.glassBorder.opacity(0.55), location: 0.78),
-                        .init(color: .clear, location: 1.0),
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
+            .fill(VFColor.border)
             .frame(height: 1)
     }
 }
 
 private struct GlassFieldModifier: ViewModifier {
-    var cornerRadius: CGFloat = VFRadius.field
+    var cornerRadius: CGFloat = 0
     var verticalPadding: CGFloat = VFSpacing.xs
 
     func body(content: Content) -> some View {
         content
-            .font(VFFont.settingsCaption)
-            .foregroundStyle(VFColor.textPrimary)
+            .font(VFFont.archivo(13))
+            .foregroundStyle(VFColor.text)
             .padding(.horizontal, VFSpacing.sm)
             .padding(.vertical, verticalPadding)
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [VFColor.bgElevated.opacity(0.96), VFColor.surface1.opacity(0.88)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(VFColor.glassBorder.opacity(0.88), lineWidth: 0.9)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.10), .clear],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                lineWidth: 0.5
-                            )
-                    )
+                Rectangle()
+                    .fill(VFColor.panel2)
+                    .overlay(Rectangle().stroke(VFColor.border2, lineWidth: 1))
             )
     }
 }
 
 private extension View {
-    func glassInputField(cornerRadius: CGFloat = VFRadius.field, verticalPadding: CGFloat = VFSpacing.xs) -> some View {
+    func glassInputField(cornerRadius: CGFloat = 0, verticalPadding: CGFloat = VFSpacing.xs) -> some View {
         modifier(GlassFieldModifier(cornerRadius: cornerRadius, verticalPadding: verticalPadding))
     }
 
+    /// Dropdown trigger: bordered, zero-radius, accent label + chevron.
     func glassSelectPill() -> some View {
-        self
-            .font(VFFont.pillLabel)
-            .foregroundStyle(VFColor.textPrimary)
-            .padding(.horizontal, VFSpacing.md)
-            .padding(.vertical, 7)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [VFColor.surface3, VFColor.surface2],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(VFColor.glassBorder, lineWidth: 0.9)
-                    )
-            )
+        HStack(spacing: 7) {
+            self
+                .font(VFFont.archivo(13, .semibold))
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10, weight: .bold))
+        }
+        .foregroundStyle(VFColor.accent)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .background(
+            Rectangle()
+                .stroke(VFColor.border2, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
     }
 }
 
@@ -1021,94 +713,50 @@ private struct GlassCapsuleButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.horizontal, VFSpacing.md)
+            .font(VFFont.archivo(12, .bold))
+            .foregroundStyle(labelColor)
+            .padding(.horizontal, 13)
             .padding(.vertical, 7)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(fillGradient(pressed: configuration.isPressed))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(borderColor.opacity(configuration.isPressed ? 0.9 : 1.0), lineWidth: 0.9)
-                    )
-                    .shadow(
-                        color: VFShadow.raisedControlColor.opacity(configuration.isPressed ? 0.15 : 0.30),
-                        radius: configuration.isPressed ? 2 : VFShadow.raisedControlRadius,
-                        y: configuration.isPressed ? 1 : VFShadow.raisedControlY
-                    )
-            )
-            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+            .background(background(pressed: configuration.isPressed))
             .animation(VFAnimation.fadeFast, value: configuration.isPressed)
     }
 
-    private func fillGradient(pressed: Bool) -> LinearGradient {
+    private var labelColor: Color {
         switch tone {
-        case .primary:
-            return LinearGradient(
-                colors: pressed
-                    ? [VFColor.accentDeep, VFColor.accentHover]
-                    : [VFColor.accentFallback, VFColor.accentHover],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        case .neutral:
-            return LinearGradient(
-                colors: pressed
-                    ? [VFColor.surface2, VFColor.bgElevated]
-                    : [VFColor.surface3, VFColor.surface2],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        case .danger:
-            return LinearGradient(
-                colors: pressed
-                    ? [VFColor.error.opacity(0.85), VFColor.error.opacity(0.75)]
-                    : [VFColor.error.opacity(0.95), VFColor.error.opacity(0.82)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        case .primary: return .white
+        case .neutral: return VFColor.text
+        case .danger:  return VFColor.error
         }
     }
 
-    private var borderColor: Color {
+    @ViewBuilder
+    private func background(pressed: Bool) -> some View {
         switch tone {
         case .primary:
-            return Color.white.opacity(0.25)
+            Rectangle().fill(pressed ? VFColor.accentDark : VFColor.accent)
         case .neutral:
-            return VFColor.glassBorder
+            Rectangle()
+                .fill(pressed ? VFColor.interactivePressed : Color.clear)
+                .overlay(Rectangle().stroke(VFColor.border2, lineWidth: 1))
         case .danger:
-            return VFColor.error.opacity(0.55)
+            Rectangle()
+                .fill(pressed ? VFColor.error.opacity(0.12) : Color.clear)
+                .overlay(Rectangle().stroke(VFColor.error.opacity(0.6), lineWidth: 1))
         }
     }
 }
 
 private struct GlassIconButtonStyle: ButtonStyle {
-    var cornerRadius: CGFloat = 9
+    var cornerRadius: CGFloat = 0
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(7)
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: configuration.isPressed
-                                ? [VFColor.surface2, VFColor.bgElevated]
-                                : [VFColor.surface3, VFColor.surface2],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(VFColor.glassBorder.opacity(0.85), lineWidth: 0.8)
-                    )
-                    .shadow(
-                        color: VFShadow.raisedControlColor.opacity(configuration.isPressed ? 0.12 : 0.28),
-                        radius: configuration.isPressed ? 2 : 6,
-                        y: configuration.isPressed ? 1 : 2
-                    )
+                Rectangle()
+                    .fill(configuration.isPressed ? VFColor.interactivePressed : Color.clear)
+                    .overlay(Rectangle().stroke(VFColor.border2, lineWidth: 1))
             )
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(VFAnimation.fadeFast, value: configuration.isPressed)
     }
 }
@@ -1205,7 +853,8 @@ private struct GeneralSettingsTab: View {
                         Text(selectedOverlayMode.displayName)
                             .glassSelectPill()
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
                 }
                 NeuDivider()
                 // Microphone selection
@@ -1252,7 +901,8 @@ private struct GeneralSettingsTab: View {
                             .lineLimit(1)
                             .glassSelectPill()
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
                     .frame(maxWidth: 180)
                 }
                 NeuDivider()
@@ -1314,7 +964,8 @@ private struct GeneralSettingsTab: View {
                             Text(insertionMode.displayName)
                                 .glassSelectPill()
                         }
-                        .menuStyle(.borderlessButton)
+                        .menuStyle(.button)
+                    .buttonStyle(.plain)
                     }
 
                     NeuDivider()
@@ -1368,7 +1019,8 @@ private struct GeneralSettingsTab: View {
                             Text(defaultWritingStyle.displayName)
                                 .glassSelectPill()
                         }
-                        .menuStyle(.borderlessButton)
+                        .menuStyle(.button)
+                    .buttonStyle(.plain)
                     }
 
                     NeuDivider()
@@ -1395,7 +1047,8 @@ private struct GeneralSettingsTab: View {
                             Text(defaultDomainPreset.displayName)
                                 .glassSelectPill()
                         }
-                        .menuStyle(.borderlessButton)
+                        .menuStyle(.button)
+                    .buttonStyle(.plain)
                     }
 
                     NeuDivider()
@@ -1406,23 +1059,19 @@ private struct GeneralSettingsTab: View {
                             .foregroundStyle(VFColor.textPrimary)
 
                         TextEditor(text: $customAIInstructions)
-                            .font(.system(size: 11, design: .rounded))
+                            .font(VFFont.archivo(12))
+                            .scrollContentBackground(.hidden)
                             .focused($customInstructionsFocused)
                             .frame(height: 78)
                             .padding(6)
                             .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(VFColor.glass2.opacity(0.48))
+                                Rectangle()
+                                    .fill(VFColor.panel2)
                                     .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(
-                                                customInstructionsFocused ? VFColor.focusRing : VFColor.glassBorder,
-                                                lineWidth: customInstructionsFocused ? 1.6 : 0.6
-                                            )
-                                    )
-                                    .shadow(
-                                        color: customInstructionsFocused ? VFColor.focusGlow : .clear,
-                                        radius: customInstructionsFocused ? 8 : 0
+                                        Rectangle().stroke(
+                                            customInstructionsFocused ? VFColor.accent : VFColor.border2,
+                                            lineWidth: 1
+                                        )
                                     )
                             )
                             .onChange(of: customAIInstructions) { _, newValue in
@@ -1793,16 +1442,9 @@ private struct GeneralSettingsTab: View {
         .padding(VFSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: VFRadius.field, style: .continuous)
-                .fill(VFColor.glass2.opacity(0.55))
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.field, style: .continuous)
-                        .stroke(VFColor.glassBorder.opacity(0.85), lineWidth: 0.6)
-                )
-                .overlay(
-                    GrainTexture(opacity: 0.012, cellSize: 2)
-                        .clipShape(RoundedRectangle(cornerRadius: VFRadius.field, style: .continuous))
-                )
+            Rectangle()
+                .fill(VFColor.panel2)
+                .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
         )
     }
 
@@ -1813,12 +1455,9 @@ private struct GeneralSettingsTab: View {
         }
         .padding(VFSpacing.sm)
         .background(
-            RoundedRectangle(cornerRadius: VFRadius.field - 1, style: .continuous)
-                .fill(VFColor.glass3.opacity(0.40))
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.field - 1, style: .continuous)
-                        .stroke(VFColor.glassBorder.opacity(0.75), lineWidth: 0.5)
-                )
+            Rectangle()
+                .fill(VFColor.panel)
+                .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
         )
     }
 
@@ -1839,16 +1478,13 @@ private struct GeneralSettingsTab: View {
     private func emptyStateCard(_ text: String) -> some View {
         Text(text)
             .font(VFFont.settingsCaption)
-            .foregroundStyle(VFColor.textSecondary)
+            .foregroundStyle(VFColor.muted)
             .padding(VFSpacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(VFColor.controlInset.opacity(0.8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .stroke(VFColor.glassBorder, lineWidth: 0.5)
-                    )
+                Rectangle()
+                    .fill(VFColor.panel2)
+                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
             )
     }
 
@@ -1965,28 +1601,13 @@ private struct GeneralSettingsTab: View {
 private struct ProminentAddButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(VFColor.textOnAccent)
-            .padding(.horizontal, VFSpacing.md)
+            .font(VFFont.archivo(12, .bold))
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 13)
             .padding(.vertical, 7)
             .background(
-                Capsule(style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: configuration.isPressed
-                                ? [VFColor.accentDeep, VFColor.accentHover]
-                                : [VFColor.accentFallback, VFColor.accentHover],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(Capsule(style: .continuous).stroke(Color.white.opacity(0.24), lineWidth: 0.7))
-                    .shadow(
-                        color: VFShadow.raisedControlColor.opacity(configuration.isPressed ? 0.16 : 0.34),
-                        radius: configuration.isPressed ? 2 : 8,
-                        y: configuration.isPressed ? 1 : 3
-                    )
+                Rectangle().fill(configuration.isPressed ? VFColor.accentDark : VFColor.accent)
             )
-            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .animation(VFAnimation.fadeFast, value: configuration.isPressed)
     }
 }
@@ -2023,8 +1644,6 @@ private struct PermissionRow: View {
                     }
                 } label: {
                     Text("Open")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(VFColor.textOnAccent)
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(tone: .primary))
             }
@@ -2064,25 +1683,46 @@ private struct HotkeySettingsTab: View {
                                 startRecording()
                             }
                         } label: {
-                            HStack(spacing: VFSpacing.sm) {
+                            Group {
                                 if isRecording {
-                                    Circle()
-                                        .fill(VFColor.error)
-                                        .frame(width: 6, height: 6)
-                                    Text(liveModifiers.isEmpty ? "Press shortcut…" : liveModifiers)
-                                        .font(VFFont.pillLabel)
-                                        .foregroundStyle(VFColor.textPrimary)
+                                    Text(liveModifiers.isEmpty ? "Press a combo…" : liveModifiers)
+                                        .font(VFFont.archivo(13, .semibold))
+                                        .foregroundStyle(VFColor.accent)
                                 } else {
-                                    Text(currentBinding.displayString)
-                                        .font(VFFont.pillLabel)
-                                        .foregroundStyle(VFColor.textPrimary)
+                                    HStack(spacing: 5) {
+                                        ForEach(shortcutKeycaps, id: \.self) { cap in
+                                            Text(cap)
+                                                .font(VFFont.archivo(12.5, .semibold))
+                                                .foregroundStyle(VFColor.text)
+                                                .padding(.horizontal, 6)
+                                                .frame(minWidth: 22, minHeight: 24)
+                                                .background(
+                                                    Rectangle()
+                                                        .fill(VFColor.panel)
+                                                        .overlay(Rectangle().stroke(VFColor.border2, lineWidth: 1))
+                                                )
+                                        }
+                                    }
                                 }
                             }
-                            .frame(minWidth: 110)
+                            .frame(minWidth: 120)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                Rectangle()
+                                    .fill(VFColor.panel2)
+                                    .overlay(
+                                        Rectangle().stroke(
+                                            isRecording ? VFColor.accent : VFColor.border2,
+                                            lineWidth: 1.5
+                                        )
+                                    )
+                            )
+                            .contentShape(Rectangle())
                             .animation(VFAnimation.fadeFast, value: isRecording)
                             .animation(VFAnimation.fadeFast, value: liveModifiers)
                         }
-                        .buttonStyle(GlassCapsuleButtonStyle(tone: isRecording ? .primary : .neutral))
+                        .buttonStyle(.plain)
                     }
 
                     // Hint / error row
@@ -2125,7 +1765,8 @@ private struct HotkeySettingsTab: View {
                             }
                             .glassSelectPill()
                         }
-                        .menuStyle(.borderlessButton)
+                        .menuStyle(.button)
+                    .buttonStyle(.plain)
                         .disabled(isRecording)
                         .opacity(isRecording ? 0.4 : 1.0)
                     }
@@ -2260,6 +1901,14 @@ private struct HotkeySettingsTab: View {
             return HotkeyBinding.presets[selectedPresetIndex].displayString
         }
         return "Custom"
+    }
+
+    /// The current shortcut split into keycap chunks for display.
+    private var shortcutKeycaps: [String] {
+        let parts = currentBinding.displayString
+            .split(separator: " ")
+            .map(String.init)
+        return parts.isEmpty ? [currentBinding.displayString] : parts
     }
 
     private static func initialPresetIndex() -> Int {
@@ -2448,7 +2097,8 @@ private struct ProviderSettingsTab: View {
                         Text(openAIEndpointProfile.displayName)
                             .glassSelectPill()
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
                 }
 
                 HStack(spacing: VFSpacing.sm) {
@@ -2545,123 +2195,69 @@ private struct ProviderSettingsTab: View {
             .flatMap { presetStatusMessage(for: preset, diagnostics: $0) }
         let isActive = activePreset == preset
 
-        return VStack(alignment: .leading, spacing: VFSpacing.md) {
-            HStack(alignment: .top, spacing: VFSpacing.md) {
-                presetArtwork(for: preset, isActive: isActive)
+        return HStack(alignment: .top, spacing: 15) {
+            presetArtwork(for: preset, isActive: isActive)
 
-                VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(preset.title)
-                        .font(VFFont.settingsBody)
-                        .foregroundStyle(VFColor.textPrimary)
+                        .font(VFFont.archivo(15, .bold))
+                        .foregroundStyle(VFColor.text)
                     Text(preset.subtitle)
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textSecondary)
+                        .font(VFFont.archivo(12))
+                        .foregroundStyle(VFColor.muted)
                         .lineLimit(2)
                 }
-                Spacer()
 
-                ZStack {
-                    Circle()
-                        .fill(isActive ? VFColor.accentFallback : VFColor.controlInset)
-                        .frame(width: 11, height: 11)
-                    if isActive {
-                        Circle()
-                            .stroke(VFColor.focusRing.opacity(0.75), lineWidth: 1.5)
-                            .frame(width: 17, height: 17)
-                    }
+                HStack(spacing: 9) {
+                    presetActionRow(for: preset, isActive: isActive)
+                }
+                .frame(minHeight: 26)
+                .padding(.top, 11)
+
+                if let presetStatus {
+                    statusText(presetStatus.message, severity: presetStatus.severity)
+                        .padding(.top, 8)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            presetActionRow(for: preset, isActive: isActive)
-
-            if let presetStatus {
-                statusText(presetStatus.message, severity: presetStatus.severity)
+            ZStack {
+                Circle()
+                    .stroke(isActive ? VFColor.accent : VFColor.border2, lineWidth: 1.5)
+                    .frame(width: 22, height: 22)
+                if isActive {
+                    Circle()
+                        .fill(VFColor.accent)
+                        .frame(width: 12, height: 12)
+                }
             }
+            .frame(maxHeight: .infinity, alignment: .center)
         }
-        .padding(VFSpacing.lg)
+        .padding(VFSpacing.md)
         .background(
-            RoundedRectangle(cornerRadius: VFRadius.button + 1, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: isActive
-                            ? [VFColor.surface3.opacity(0.94), VFColor.surface2.opacity(0.92)]
-                            : [VFColor.surface1.opacity(0.92), VFColor.surface2.opacity(0.88)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            Rectangle()
+                .fill(isActive ? VFColor.active : VFColor.panel)
+                .overlay(
+                    Rectangle().stroke(
+                        isActive ? VFColor.accent : VFColor.border,
+                        lineWidth: isActive ? 1.5 : 1
                     )
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.button + 1)
-                        .stroke(isActive ? VFColor.accentFallback.opacity(0.6) : VFColor.glassBorder, lineWidth: 1)
-                )
-                .overlay(
-                    GrainTexture(opacity: 0.008, cellSize: 2)
-                        .clipShape(RoundedRectangle(cornerRadius: VFRadius.button + 1, style: .continuous))
-                )
-                .shadow(color: Color.black.opacity(0.23), radius: 7, y: 2)
         )
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: VFRadius.button + 1, style: .continuous)
-                .fill((isActive ? VFColor.accentFallback : VFColor.glassBorder).opacity(isActive ? 0.66 : 0.28))
-                .frame(width: 2)
-                .padding(.vertical, 8)
-        }
     }
 
     private func presetArtwork(for preset: SmartModelPreset, isActive: Bool) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            presetTint(for: preset).opacity(0.36),
-                            VFColor.surface2.opacity(0.95),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(isActive ? presetTint(for: preset).opacity(0.56) : VFColor.glassBorder.opacity(0.75), lineWidth: 0.9)
-                )
-
-            VStack(spacing: 3) {
-                Image(systemName: presetSymbol(for: preset))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(VFColor.textPrimary)
+        Rectangle()
+            .fill(VFColor.panel2)
+            .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
+            .overlay(
                 Text(preset.shortBadge)
-                    .font(.system(size: 8, weight: .semibold, design: .rounded))
-                    .foregroundStyle(VFColor.textSecondary)
-            }
-        }
-        .frame(width: 38, height: 38)
-    }
-
-    private func presetSymbol(for preset: SmartModelPreset) -> String {
-        switch preset {
-        case .light:
-            return "hare.fill"
-        case .balanced:
-            return "bird.fill"
-        case .best:
-            return "trophy.fill"
-        case .cloud:
-            return "icloud.fill"
-        }
-    }
-
-    private func presetTint(for preset: SmartModelPreset) -> Color {
-        switch preset {
-        case .light:
-            return VFColor.success
-        case .balanced:
-            return VFColor.accentFallback
-        case .best:
-            return Color(red: 0.98, green: 0.77, blue: 0.39)
-        case .cloud:
-            return Color(red: 0.56, green: 0.69, blue: 0.97)
-        }
+                    .font(VFFont.archivo(11, .heavy))
+                    .tracking(0.6)
+                    .foregroundStyle(VFColor.accent)
+            )
+            .frame(width: 46, height: 46)
     }
 
     /// The state that drives each card's single primary action:
@@ -2810,12 +2406,9 @@ private struct ProviderSettingsTab: View {
         .padding(.horizontal, VFSpacing.sm)
         .padding(.vertical, VFSpacing.xs)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(severity.color.opacity(0.12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(severity.color.opacity(0.32), lineWidth: 0.6)
-                )
+            Rectangle()
+                .fill(severity.color.opacity(0.10))
+                .overlay(Rectangle().stroke(severity.color.opacity(0.35), lineWidth: 1))
         )
     }
 
@@ -2885,8 +2478,6 @@ private struct ProviderSettingsTab: View {
     ) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(isPrimary ? VFColor.textOnAccent : VFColor.textPrimary)
         }
         .buttonStyle(GlassCapsuleButtonStyle(tone: isPrimary ? .primary : .neutral))
         .focusable(true)
@@ -2895,24 +2486,17 @@ private struct ProviderSettingsTab: View {
     }
 
     private func installedChip(label: String, color: Color = VFColor.success) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             Circle()
                 .fill(color)
-                .frame(width: 5, height: 5)
+                .frame(width: 6, height: 6)
             Text(label)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(color)
+                .font(VFFont.archivo(11, .semibold))
+                .foregroundStyle(color == VFColor.accent ? VFColor.accentStrong : color)
         }
-        .padding(.horizontal, VFSpacing.sm)
+        .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(
-            Capsule(style: .continuous)
-                .fill(color.opacity(0.13))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(color.opacity(0.42), lineWidth: 0.7)
-                )
-        )
+        .background(Rectangle().fill(color.opacity(0.12)))
     }
 
     private func selectProvider(_ kind: STTProviderKind) {
@@ -3052,7 +2636,8 @@ private struct MLXModelDetailRow: View {
                     Text(selectedModel.displayName)
                         .glassSelectPill()
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                    .buttonStyle(.plain)
             }
 
             NeuDivider()
@@ -3097,12 +2682,9 @@ private struct MLXModelDetailRow: View {
         }
         .padding(VFSpacing.md)
         .background(
-            RoundedRectangle(cornerRadius: VFRadius.button + 2, style: .continuous)
-                .fill(VFColor.surface2.opacity(0.52))
-                .overlay(
-                    RoundedRectangle(cornerRadius: VFRadius.button + 2, style: .continuous)
-                        .stroke(VFColor.glassBorder.opacity(0.85), lineWidth: 0.8)
-                )
+            Rectangle()
+                .fill(VFColor.panel2)
+                .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
         )
         .onAppear {
             // Deferred: state writes during the initial layout pass re-enter
@@ -3198,68 +2780,78 @@ private struct TranscriptHistoryTab: View {
                         }
                     }
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: VFSpacing.sm) {
-                            metricChip(title: "Entries", value: "\(store.entries.count)")
-                            metricChip(title: "Success", value: "\(successRatePercent)%")
-                            metricChip(title: "Avg STT", value: averageLatencyLabel)
-                            metricChip(title: "Avg E2E", value: averageEndToEndLabel)
-                            metricChip(title: "P95 E2E", value: p95EndToEndLabel)
-                            metricChip(title: "Latency SLO", value: sloLabel, tint: sloTint)
-                            if !topProviderLabel.isEmpty {
-                                metricChip(title: "Top provider", value: topProviderLabel)
-                            }
-                            if !topAppLabel.isEmpty {
-                                metricChip(title: "Top app", value: topAppLabel)
-                            }
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 1), count: 4),
+                        spacing: 1
+                    ) {
+                        metricChip(title: "Entries", value: "\(store.entries.count)")
+                        metricChip(title: "Success", value: "\(successRatePercent)%")
+                        metricChip(title: "Avg STT", value: averageLatencyLabel)
+                        metricChip(title: "Avg E2E", value: averageEndToEndLabel)
+                        metricChip(title: "P95 E2E", value: p95EndToEndLabel)
+                        metricChip(title: "Latency SLO", value: sloLabel, tint: sloTint)
+                        if !topProviderLabel.isEmpty {
+                            metricChip(title: "Top provider", value: topProviderLabel)
                         }
-                        .padding(.vertical, 2)
+                        if !topAppLabel.isEmpty {
+                            metricChip(title: "Top app", value: topAppLabel)
+                        }
                     }
+                    .background(VFColor.border)
+                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
 
                     if filteredEntries.isEmpty {
-                        Text("No transcripts yet.")
+                        Text(query.isEmpty ? "No transcripts yet." : "No transcripts match your search.")
                             .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
-                            .padding(.vertical, VFSpacing.sm)
+                            .foregroundStyle(VFColor.muted)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, VFSpacing.xl)
                     } else {
-                        VStack(spacing: VFSpacing.sm) {
+                        VStack(spacing: 0) {
                             ForEach(filteredEntries.prefix(100)) { entry in
-                                HStack(alignment: .top, spacing: VFSpacing.md) {
+                                HStack(alignment: .top, spacing: 14) {
                                     Text(Self.timeFormatter.string(from: entry.timestamp))
-                                        .font(VFFont.settingsCaption)
-                                        .foregroundStyle(VFColor.textTertiary)
-                                        .frame(width: 70, alignment: .leading)
+                                        .font(VFFont.archivo(12, .semibold))
+                                        .foregroundStyle(VFColor.muted)
+                                        .frame(width: 62, alignment: .leading)
+                                        .padding(.top, 1)
 
-                                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                                    VStack(alignment: .leading, spacing: 2) {
                                         Text(entry.provider)
-                                            .font(VFFont.settingsCaption)
-                                            .foregroundStyle(VFColor.accentFallback)
+                                            .font(VFFont.archivo(12.5, .semibold))
+                                            .foregroundStyle(VFColor.accent)
                                         Text(entry.appName)
-                                            .font(.system(size: 10, weight: .regular, design: .rounded))
-                                            .foregroundStyle(VFColor.textTertiary)
+                                            .font(VFFont.archivo(11))
+                                            .foregroundStyle(VFColor.muted)
                                     }
-                                    .frame(width: 120, alignment: .leading)
+                                    .frame(width: 140, alignment: .leading)
 
-                                    VStack(alignment: .leading, spacing: VFSpacing.xxs) {
+                                    VStack(alignment: .leading, spacing: 6) {
                                         Text(entry.text)
-                                            .font(VFFont.settingsCaption)
-                                            .foregroundStyle(VFColor.textPrimary)
+                                            .font(VFFont.archivo(13))
+                                            .foregroundStyle(VFColor.text)
                                             .lineLimit(2)
 
-                                        HStack(spacing: VFSpacing.sm) {
-                                            Text(entry.status)
-                                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                                .foregroundStyle(VFColor.textSecondary)
+                                        HStack(spacing: 7) {
+                                            HStack(spacing: 5) {
+                                                Circle()
+                                                    .fill(VFColor.accent)
+                                                    .frame(width: 5, height: 5)
+                                                Text(entry.status.uppercased())
+                                                    .font(VFFont.archivo(10.5, .semibold))
+                                                    .tracking(0.4)
+                                                    .foregroundStyle(VFColor.muted)
+                                            }
                                             if let duration = entry.durationMs {
-                                                Text("\(duration)ms")
-                                                    .font(.system(size: 10, weight: .regular, design: .rounded))
-                                                    .foregroundStyle(VFColor.textTertiary)
+                                                Text("\(duration) ms")
+                                                    .font(VFFont.archivo(11))
+                                                    .foregroundStyle(VFColor.muted)
                                             }
                                         }
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                                    HStack(spacing: VFSpacing.xs) {
+                                    HStack(spacing: 6) {
                                         iconActionButton(systemName: "arrow.uturn.backward", accessibilityLabel: "Re-insert transcript") {
                                             store.requestReinsert(entry.text)
                                         }
@@ -3268,15 +2860,11 @@ private struct TranscriptHistoryTab: View {
                                         }
                                     }
                                 }
-                                .padding(VFSpacing.sm)
-                                .background(
-                                    RoundedRectangle(cornerRadius: VFRadius.field, style: .continuous)
-                                        .fill(VFColor.surface2.opacity(0.52))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: VFRadius.field, style: .continuous)
-                                                .stroke(VFColor.glassBorder.opacity(0.74), lineWidth: 0.7)
-                                        )
-                                )
+                                .padding(.vertical, 15)
+                                .padding(.horizontal, 2)
+                                .overlay(alignment: .top) {
+                                    Rectangle().fill(VFColor.border).frame(height: 1)
+                                }
                             }
                         }
                         .padding(.top, VFSpacing.xs)
@@ -3299,33 +2887,23 @@ private struct TranscriptHistoryTab: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private func metricChip(title: String, value: String, tint: Color = VFColor.textPrimary) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .foregroundStyle(VFColor.textTertiary)
+    /// Stat tile in the metrics grid: uppercase kicker over a heavy value.
+    private func metricChip(title: String, value: String, tint: Color? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(VFFont.kicker)
+                .tracking(0.8)
+                .foregroundStyle(VFColor.muted)
             Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(tint)
+                .font(value.count > 9 ? VFFont.archivo(12, .bold) : VFFont.statValue)
+                .foregroundStyle(tint ?? VFColor.text)
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(.horizontal, VFSpacing.sm)
-        .padding(.vertical, VFSpacing.xs)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [VFColor.surface3.opacity(0.95), VFColor.surface2.opacity(0.86)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(VFColor.glassBorder, lineWidth: 0.6)
-                )
-        )
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+        .background(VFColor.panel)
     }
 
     private var successRatePercent: Int {
@@ -3419,20 +2997,39 @@ private struct NeuToggleRow: View {
     }
 }
 
-// MARK: - Neumorphic Pill Toggle
+// MARK: - Modernist Square Toggle
 
-/// iOS-style toggle with neumorphic track: inset when off, raised when on.
+/// Zero-radius switch: accent-filled track with a square white knob when on,
+/// bordered track with a gray knob when off.
 private struct NeuPillToggle: View {
     @Binding var isOn: Bool
     let accessibilityLabel: String
 
     var body: some View {
-        Toggle("", isOn: $isOn)
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .tint(VFColor.accentFallback)
-            .focusable(true)
-            .accessibilityLabel(accessibilityLabel)
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isOn.toggle()
+            }
+        } label: {
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(isOn ? VFColor.accent : Color.clear)
+                    .overlay(
+                        Rectangle().stroke(isOn ? VFColor.accent : VFColor.border2, lineWidth: 1)
+                    )
+                Rectangle()
+                    .fill(isOn ? Color.white : VFColor.knobOff)
+                    .frame(width: 20, height: 20)
+                    .offset(x: isOn ? 23 : 3)
+            }
+            .frame(width: 46, height: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(true)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(isOn ? "On" : "Off")
     }
 }
 

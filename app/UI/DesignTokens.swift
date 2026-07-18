@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 
 private extension Color {
@@ -8,159 +9,239 @@ private extension Color {
         let b = Double(hex & 0xFF) / 255.0
         self = Color(red: r, green: g, blue: b, opacity: alpha)
     }
+
+    /// Adaptive color that resolves against the current appearance.
+    init(light: NSColor, dark: NSColor) {
+        self = Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        })
+    }
+
+    init(lightHex: Int, darkHex: Int, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) {
+        self.init(
+            light: NSColor(
+                srgbRed: CGFloat((lightHex >> 16) & 0xFF) / 255.0,
+                green: CGFloat((lightHex >> 8) & 0xFF) / 255.0,
+                blue: CGFloat(lightHex & 0xFF) / 255.0,
+                alpha: lightAlpha
+            ),
+            dark: NSColor(
+                srgbRed: CGFloat((darkHex >> 16) & 0xFF) / 255.0,
+                green: CGFloat((darkHex >> 8) & 0xFF) / 255.0,
+                blue: CGFloat(darkHex & 0xFF) / 255.0,
+                alpha: darkAlpha
+            )
+        )
+    }
 }
 
-// MARK: - Color Tokens
+// MARK: - Color Tokens (Modernist system)
+//
+// Archivo type, a single red accent, flush-left labels, 2px rules,
+// zero corner radius. Light = ink-on-paper; dark = warm-dark macOS surface.
 
 enum VFColor {
-    // Primary brand
-    static let accent = Color("AccentBlue", bundle: nil)
-    static let accentFallback = Color(hex: 0x7090F7)
-    static let accentHover = Color(hex: 0x6784E0)
-    static let accentDeep = Color(hex: 0x45568B)
-    static let successFallback = Color(hex: 0x71C184)
-    static let successAlt = Color(hex: 0x62A174)
+    // ── Modernist palette (adaptive light/dark) ──────────────────
+    static let bg        = Color(lightHex: 0xF3F2F2, darkHex: 0x1B1A19)
+    static let sidebar   = Color(lightHex: 0xEBEAE9, darkHex: 0x211F1E)
+    static let chrome    = Color(lightHex: 0xE4E3E3, darkHex: 0x242120)
+    static let panel     = Color(lightHex: 0xFFFFFF, darkHex: 0x262322)
+    static let panel2    = Color(lightHex: 0xF4F2F2, darkHex: 0x2F2C2B)
+    static let text      = Color(lightHex: 0x201E1D, darkHex: 0xF4F3F2)
+    static let muted     = Color(lightHex: 0x736F6F, darkHex: 0xA39E9D)
+    static let border    = Color(lightHex: 0x201E1D, darkHex: 0xF4F3F2, lightAlpha: 0.13, darkAlpha: 0.12)
+    static let border2   = Color(lightHex: 0x201E1D, darkHex: 0xF4F3F2, lightAlpha: 0.24, darkAlpha: 0.24)
+    /// Heavy 2px rule under section headers.
+    static let rule      = Color(lightHex: 0x201E1D, darkHex: 0xF4F3F2, lightAlpha: 0.85, darkAlpha: 0.55)
 
-    // ── Surface layers ───────────────────────────────────────────
-    static let bgBase = Color(hex: 0x111114)
-    static let bgElevated = Color(hex: 0x141419)
-    static let surface1 = Color(hex: 0x16161B)
-    static let surface2 = Color(hex: 0x191A22)
-    static let surface3 = Color(hex: 0x24252E)
+    static let accent       = Color(lightHex: 0xEC3013, darkHex: 0xFF563C)
+    static let accentDark   = Color(lightHex: 0xDD2B0F, darkHex: 0xFF7358)
+    static let accentStrong = Color(lightHex: 0xAE1800, darkHex: 0xFF9783)
+    /// Selected/hover wash.
+    static let active     = Color(lightHex: 0xFDEEEB, darkHex: 0xFF563C, darkAlpha: 0.13)
+    /// Soft accent chip background.
+    static let accentSoft = Color(lightHex: 0xFFE0D9, darkHex: 0xFF563C, darkAlpha: 0.16)
+    static let knobOff    = Color(lightHex: 0xA29E9E, darkHex: 0x8A8584)
 
-    // Backward-compatible aliases used across the app.
-    static let glass0NS = NSColor(srgbRed: 0x11 / 255.0, green: 0x11 / 255.0, blue: 0x14 / 255.0, alpha: 1.0)
-    static let glass0 = bgBase
-    static let glass1 = surface1
-    static let glass2 = surface2
-    static let glass3 = surface3
-    static let controlInset = bgElevated
-    static let controlTrackOff = surface2
-    static let controlKnobTop = Color(hex: 0xF4F6FB)
-    static let controlKnobBottom = Color(hex: 0xD5DBEA)
+    /// Window background as a dynamic NSColor (for NSWindow chrome).
+    static let windowBackgroundNS = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0x1B / 255.0, green: 0x1A / 255.0, blue: 0x19 / 255.0, alpha: 1)
+            : NSColor(srgbRed: 0xF3 / 255.0, green: 0xF2 / 255.0, blue: 0xF2 / 255.0, alpha: 1)
+    }
 
-    /// 1px separator between layers.
-    static let glassBorder = Color(hex: 0x3C3E4A, alpha: 0.50)
-    /// Highlight edge on top of raised surfaces.
-    static let glassHighlight = Color.white.opacity(0.08)
+    // ── Semantic ─────────────────────────────────────────────────
+    static let success = Color(lightHex: 0x2B8A3E, darkHex: 0x69DB7C)
+    static let error   = Color(lightHex: 0xC92A2A, darkHex: 0xFF6B6B)
+    static let warning = Color(lightHex: 0xB8860B, darkHex: 0xFFBD57)
 
-    // ── Neumorphic shadow pairs ─────────────────────────────────
-    /// Light edge (top-left source) for raised elements
-    static let neuLight = Color.white.opacity(0.06)
-    /// Dark edge (bottom-right) for raised elements
-    static let neuDark  = Color.black.opacity(0.40)
-    /// Inset light edge for pressed/recessed wells
-    static let neuInsetLight = Color.white.opacity(0.05)
-    /// Inset dark edge for pressed/recessed wells
-    static let neuInsetDark  = Color.black.opacity(0.35)
+    // ── Legacy aliases (settings) ────────────────────────────────
+    static let accentFallback = accent
+    static let accentHover = accentDark
+    static let accentDeep = accentStrong
+    static let successFallback = success
+    static let successAlt = success
 
-    // ── Depth background radial tints ────────────────────────────
-    static let depthRadialTop = accentFallback.opacity(0.18)
-    static let depthRadialBottom = Color(hex: 0x54618D, alpha: 0.12)
-    static let depthVignette = Color.black.opacity(0.44)
-    static let textureMeshCool = Color(hex: 0x8BA2F4, alpha: 0.17)
-    static let textureMeshNeutral = Color(hex: 0x9BA7C6, alpha: 0.10)
-    static let textureMeshInk = Color(hex: 0x07080C, alpha: 0.58)
-    static let textureStroke = Color(hex: 0xAEBBE1, alpha: 0.14)
-    static let textureHighlight = Color.white.opacity(0.10)
+    static let bgBase = bg
+    static let bgElevated = panel2
+    static let surface1 = panel
+    static let surface2 = panel2
+    static let surface3 = active
+    static let glass0NS = windowBackgroundNS
+    static let glass0 = bg
+    static let controlInset = panel2
+    static let controlTrackOff = panel2
+    static let controlKnobTop = Color.white
+    static let controlKnobBottom = Color.white
 
-    // Surface / chrome (backward compat) — fixed dark values to avoid
-    // system-appearance leaking light colors into our forced-dark UI.
-    static let surfacePrimary = bgBase
-    static let surfaceOverlay = Color.black.opacity(0.68)
-    static let surfaceElevated = bgElevated
+    static let glassBorder = border
+    static let glassHighlight = Color.clear
 
-    // ── Accent gradients ─────────────────────────────────────────
+    static let neuLight = Color.clear
+    static let neuDark  = Color.black.opacity(0.30)
+    static let neuInsetLight = Color.clear
+    static let neuInsetDark  = Color.clear
+
+    static let depthRadialTop = Color.clear
+    static let depthRadialBottom = Color.clear
+    static let depthVignette = Color.clear
+    static let textureMeshCool = Color.clear
+    static let textureMeshNeutral = Color.clear
+    static let textureMeshInk = Color.clear
+    static let textureStroke = Color.clear
+    static let textureHighlight = Color.clear
+
+    static let surfacePrimary = bg
+    static let surfaceOverlay = Color.black.opacity(0.45)
+    static let surfaceElevated = panel
+
+    // ── Overlay HUD surfaces (floating bubble / waveform bar) ────
+    // The HUD floats over arbitrary screen content, so it stays a fixed
+    // warm-dark surface in both appearances.
+    static let glass1 = Color(hex: 0x262322)
+    static let glass2 = Color(hex: 0x2F2C2B)
+    static let glass3 = Color(hex: 0x3A3736)
+
+    // ── Accent gradients (legacy API — now flat fills) ───────────
     static let accentGradient = LinearGradient(
-        colors: [accentFallback, accentHover],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-
+        colors: [accent, accent], startPoint: .top, endPoint: .bottom)
     static let listeningGradient = LinearGradient(
-        colors: [accentFallback, accentHover],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
+        colors: [accent, accent], startPoint: .top, endPoint: .bottom)
     static let transcribingGradient = LinearGradient(
-        colors: [Color(hex: 0x8198F1), Color(hex: 0x5F75C8)],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
+        colors: [accentDark, accentDark], startPoint: .top, endPoint: .bottom)
     static let successGradient = LinearGradient(
-        colors: [successFallback, successAlt],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
+        colors: [success, success], startPoint: .top, endPoint: .bottom)
     static let errorGradient = LinearGradient(
-        colors: [Color(red: 1.0, green: 0.36, blue: 0.36),
-                 Color(red: 0.85, green: 0.24, blue: 0.24)],
-        startPoint: .top,
-        endPoint: .bottom
-    )
+        colors: [error, error], startPoint: .top, endPoint: .bottom)
 
-    // Semantic (flat fallbacks)
-    static let listening    = accentFallback
-    static let transcribing = Color(hex: 0x8198F1)
-    static let success      = successFallback
-    static let error        = Color(red: 1.0,  green: 0.36, blue: 0.36)
-    static let warning      = Color(hex: 0xFFBD57)
+    // Semantic (flat)
+    static let listening    = accent
+    static let transcribing = accentDark
+    static let warningLegacy = warning
 
-    // Provider preset tints (settings preset cards)
-    static let presetBestTint  = Color(hex: 0xFAC463)
-    static let presetCloudTint = Color(hex: 0x8FB0F7)
+    // Provider preset tints
+    static let presetBestTint  = accent
+    static let presetCloudTint = accent
 
-    // Text — tuned for WCAG-AA contrast on dark surfaces
-    static let textPrimary = Color(hex: 0xE9ECF5)
-    static let textSecondary = Color(hex: 0xB7BBC7)
-    static let textTertiary = Color(hex: 0x9EA4B5)
-    static let textOnAccent = Color(hex: 0xF4F7FF)
-    static let textDisabled = Color(hex: 0xB7BBC7, alpha: 0.46)
+    // Text
+    static let textPrimary = text
+    static let textSecondary = muted
+    static let textTertiary = muted
+    static let textOnAccent = Color.white
+    static let textDisabled = muted.opacity(0.5)
     static let textOnOverlay = Color.white
-    static let focusRing = accentFallback
-    static let focusGlow = accentFallback.opacity(0.34)
-    static let interactiveHover = Color.white.opacity(0.05)
-    static let interactivePressed = Color.black.opacity(0.24)
+    static let focusRing = accent
+    static let focusGlow = accent.opacity(0.30)
+    static let interactiveHover = Color(lightHex: 0x201E1D, darkHex: 0xF4F3F2, lightAlpha: 0.05, darkAlpha: 0.06)
+    static let interactivePressed = Color(lightHex: 0x201E1D, darkHex: 0xF4F3F2, lightAlpha: 0.10, darkAlpha: 0.12)
 }
 
 // MARK: - Theme Tokens
 
 enum VFTheme {
-    static let forcedAppearanceName: NSAppearance.Name = .darkAqua
-    static let forcedColorScheme: ColorScheme = .dark
-
     static func debugAssertTokenSanity(file: StaticString = #fileID, line: UInt = #line) {
-#if DEBUG
-        VFThemeGuard.assertDarkPaletteSanity(file: file, line: line)
-#endif
+        // Palette is adaptive now; nothing to assert.
     }
 }
 
-// MARK: - Typography Tokens
+// MARK: - Typography Tokens (Archivo)
+
+/// Registers the bundled Archivo variable font with CoreText.
+/// Falls back to the system font when the resource is missing.
+enum VFFontRegistrar {
+    private(set) static var archivoAvailable = false
+    private static var didAttempt = false
+
+    static func registerIfNeeded() {
+        guard !didAttempt else { return }
+        didAttempt = true
+
+        if NSFont(name: "Archivo-Regular", size: 12) != nil {
+            archivoAvailable = true
+            return
+        }
+
+        guard let url = Bundle.module.url(
+            forResource: "Archivo-Variable", withExtension: "ttf", subdirectory: "Fonts"
+        ) else {
+            NSLog("[VFFont] Archivo font resource not found; using system font")
+            return
+        }
+
+        var errorRef: Unmanaged<CFError>?
+        CTFontManagerRegisterFontsForURL(url as CFURL, .process, &errorRef)
+        if let error = errorRef?.takeRetainedValue() {
+            NSLog("[VFFont] Archivo registration note: \(error)")
+        }
+        archivoAvailable = NSFont(name: "Archivo-Regular", size: 12) != nil
+    }
+}
 
 enum VFFont {
-    static let bubbleStatus    = Font.system(size: 11, weight: .medium)
-    static let menuItem        = Font.system(size: 13, weight: .regular)
-    static let menuItemBold    = Font.system(size: 13, weight: .semibold)
+    /// Archivo with a graceful system-font fallback.
+    static func archivo(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        VFFontRegistrar.registerIfNeeded()
+        guard VFFontRegistrar.archivoAvailable else {
+            return Font.system(size: size, weight: weight)
+        }
+        return Font.custom(postScriptName(for: weight), size: size)
+    }
+
+    private static func postScriptName(for weight: Font.Weight) -> String {
+        switch weight {
+        case .black, .heavy:  return "Archivo-ExtraBold"
+        case .bold:           return "Archivo-Bold"
+        case .semibold:       return "Archivo-SemiBold"
+        case .medium:         return "Archivo-Medium"
+        case .light, .thin, .ultraLight: return "Archivo-Light"
+        default:              return "Archivo-Regular"
+        }
+    }
+
+    static let bubbleStatus    = archivo(11, .medium)
+    static let menuItem        = archivo(13)
+    static let menuItemBold    = archivo(13, .semibold)
 
     // Settings hierarchy
-    static let settingsHeading   = Font.system(size: 28, weight: .semibold)
-    static let sheetTitle        = Font.system(size: 24, weight: .semibold)
-    static let settingsTitle     = Font.system(size: 14, weight: .semibold)
-    static let settingsBody      = Font.system(size: 13, weight: .medium)
-    static let settingsCaption   = Font.system(size: 12, weight: .regular)
-    static let settingsFootnote  = Font.system(size: 11, weight: .regular)
+    static let settingsHeading   = archivo(33, .heavy)
+    static let sheetTitle        = archivo(24, .heavy)
+    static let settingsTitle     = archivo(16, .heavy)
+    static let settingsBody      = archivo(14, .semibold)
+    static let settingsCaption   = archivo(12.5)
+    static let settingsFootnote  = archivo(11)
 
-    static let pillLabel       = Font.system(size: 11, weight: .semibold)
-    static let segmentLabel    = Font.system(size: 12, weight: .semibold)
+    static let pillLabel       = archivo(12, .bold)
+    static let segmentLabel    = archivo(12, .semibold)
+
+    /// Tiny uppercase kicker (stat tiles, badges).
+    static let kicker          = archivo(9, .bold)
+    /// Large stat value.
+    static let statValue       = archivo(20, .heavy)
 
     // Overlay / bubble
-    static let bubbleIcon      = Font.system(size: 20, weight: .semibold, design: .rounded)
-    static let overlayCaption  = Font.system(size: 11, weight: .medium, design: .rounded)
-    static let badgeLabel      = Font.system(size: 9, weight: .semibold, design: .rounded)
+    static let bubbleIcon      = archivo(20, .semibold)
+    static let overlayCaption  = archivo(11, .medium)
+    static let badgeLabel      = archivo(9, .semibold)
 }
 
 // MARK: - Spacing / Layout Tokens
@@ -176,21 +257,24 @@ enum VFSpacing {
     static let xxxl: CGFloat = 32
 }
 
+/// Modernist system: zero radius everywhere. Circles (radio dots, status
+/// dots) are drawn with `Circle()` directly, not radius tokens.
 enum VFRadius {
-    static let bubble:  CGFloat = 24
-    static let card:    CGFloat = 18
-    static let pill:    CGFloat = 999
-    static let button:  CGFloat = 12
-    static let segment: CGFloat = 16
-    static let field:   CGFloat = 12
-    static let window:  CGFloat = 14
+    static let bubble:  CGFloat = 0
+    static let card:    CGFloat = 0
+    static let pill:    CGFloat = 0
+    static let button:  CGFloat = 0
+    static let segment: CGFloat = 0
+    static let field:   CGFloat = 0
+    static let window:  CGFloat = 0
 }
 
 enum VFSize {
     static let bubbleDiameter:  CGFloat = 40
     static let menuBarIcon:     CGFloat = 18
-    static let settingsWidth:   CGFloat = 960
-    static let settingsHeight:  CGFloat = 740
+    static let settingsWidth:   CGFloat = 900
+    static let settingsHeight:  CGFloat = 700
+    static let sidebarWidth:    CGFloat = 232
 
     // Waveform bar layout
     static let waveformBarCount: Int = 5
@@ -203,38 +287,34 @@ enum VFSize {
 // MARK: - Shadow / Depth Tokens
 
 enum VFShadow {
-    /// Raised neumorphic shadow — soft outer shadow pair
-    static let neuRadius: CGFloat = 6
-    static let neuOffset: CGFloat = 2
-    /// Card ambient shadow
-    static let cardColor   = Color.black.opacity(0.28)
-    static let cardRadius: CGFloat  = 20
-    static let cardY:      CGFloat  = 10
-    static let raisedControlColor = Color.black.opacity(0.30)
-    static let raisedControlRadius: CGFloat = 10
-    static let raisedControlY: CGFloat = 4
-    static let focusOuterRadius: CGFloat = 8
+    static let neuRadius: CGFloat = 0
+    static let neuOffset: CGFloat = 0
+    static let cardColor   = Color.black.opacity(0.10)
+    static let cardRadius: CGFloat  = 12
+    static let cardY:      CGFloat  = 4
+    static let raisedControlColor = Color.black.opacity(0.12)
+    static let raisedControlRadius: CGFloat = 4
+    static let raisedControlY: CGFloat = 1
+    static let focusOuterRadius: CGFloat = 0
 
-    /// Glow shadow that matches a tint color (used on bubble)
     static func glow(color: Color, radius: CGFloat = 20) -> some View {
-        Circle().fill(color.opacity(0.30))
+        Circle().fill(color.opacity(0.28))
             .blur(radius: radius)
     }
 
-    /// Inner highlight for top edge of glass card
-    static let innerHighlightOpacity: Double = 0.08
+    static let innerHighlightOpacity: Double = 0
 }
 
 // MARK: - Animation Tokens
 
 enum VFAnimation {
-    static let springSnappy  = Animation.spring(response: 0.3, dampingFraction: 0.72)
-    static let springGentle  = Animation.spring(response: 0.5, dampingFraction: 0.8)
-    static let springBounce  = Animation.spring(response: 0.4, dampingFraction: 0.6)
+    static let springSnappy  = Animation.easeInOut(duration: 0.18)
+    static let springGentle  = Animation.easeInOut(duration: 0.25)
+    static let springBounce  = Animation.spring(response: 0.4, dampingFraction: 0.7)
     static let fadeFast      = Animation.easeInOut(duration: 0.15)
-    static let fadeMedium    = Animation.easeInOut(duration: 0.25)
+    static let fadeMedium    = Animation.easeInOut(duration: 0.22)
     static let successPulse  = Animation.easeOut(duration: 0.38)
-    static let pulseLoop     = Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true)
+    static let pulseLoop     = Animation.easeInOut(duration: 1.1).repeatForever(autoreverses: true)
     static let glowPulse     = Animation.easeInOut(duration: 1.6).repeatForever(autoreverses: true)
     static let shimmer       = Animation.linear(duration: 2.0).repeatForever(autoreverses: false)
 
@@ -249,265 +329,77 @@ enum VFAnimation {
     }
 }
 
-// MARK: - Neumorphic Card Modifier
+// MARK: - Flat Panel Modifier (legacy name: GlassCard)
 
-/// Applies a dark neumorphic card style: subtle raised appearance with
-/// dual-shadow edges (light top-left, dark bottom-right), a thin highlight
-/// stroke, and refined inner gradient.
+/// Modernist panel: flat fill with a hairline border, zero radius.
 struct GlassCard: ViewModifier {
-    var cornerRadius: CGFloat = VFRadius.card
-    var fillColor: Color = VFColor.glass1
+    var cornerRadius: CGFloat = 0
+    var fillColor: Color = VFColor.panel
 
     func body(content: Content) -> some View {
         content
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            stops: [
-                                .init(color: fillColor.opacity(0.98), location: 0.0),
-                                .init(color: VFColor.surface2.opacity(0.94), location: 1.0),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(VFColor.glassBorder, lineWidth: 1)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: Color.white.opacity(0.10), location: 0.0),
-                                        .init(color: .clear, location: 0.35),
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                lineWidth: 0.5
-                            )
-                    )
-                    .overlay(
-                        LinearGradient(
-                            colors: [VFColor.textureMeshCool.opacity(0.20), .clear],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        .blendMode(.screen)
-                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                    )
-                    .overlay(
-                        GrainTexture(opacity: 0.012, cellSize: 2)
-                            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                            .allowsHitTesting(false)
-                    )
-                    .shadow(color: VFShadow.cardColor, radius: VFShadow.cardRadius, y: VFShadow.cardY)
+                Rectangle()
+                    .fill(fillColor)
+                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
             )
     }
 }
 
 extension View {
     func glassCard(
-        cornerRadius: CGFloat = VFRadius.card,
-        fill: Color = VFColor.glass1
+        cornerRadius: CGFloat = 0,
+        fill: Color = VFColor.panel
     ) -> some View {
         modifier(GlassCard(cornerRadius: cornerRadius, fillColor: fill))
     }
 }
 
-// MARK: - Neumorphic Inset Modifier
+// MARK: - Flat Inset Modifier (legacy name: NeuInset)
 
-/// Creates a pressed/recessed appearance — the inverse of a raised card.
-/// Used for input fields, wells, and inactive control tracks.
 struct NeuInset: ViewModifier {
-    var cornerRadius: CGFloat = VFRadius.field
+    var cornerRadius: CGFloat = 0
 
     func body(content: Content) -> some View {
         content
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            stops: [
-                                .init(color: VFColor.bgElevated.opacity(0.96), location: 0.0),
-                                .init(color: VFColor.surface1.opacity(0.88), location: 1.0),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(VFColor.glassBorder.opacity(0.9), lineWidth: 1)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: Color.white.opacity(0.07), location: 0.0),
-                                        .init(color: .clear, location: 0.4),
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                lineWidth: 0.5
-                            )
-                    )
-                    .shadow(color: Color.black.opacity(0.20), radius: 4, y: 2)
+                Rectangle()
+                    .fill(VFColor.panel2)
+                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
             )
     }
 }
 
 extension View {
-    func neuInset(cornerRadius: CGFloat = VFRadius.field) -> some View {
+    func neuInset(cornerRadius: CGFloat = 0) -> some View {
         modifier(NeuInset(cornerRadius: cornerRadius))
     }
 }
 
-// MARK: - Grain Texture (procedural, no asset file)
+// MARK: - Legacy texture layers (now inert — the Modernist system is flat)
 
-/// A subtle film-grain noise overlay rendered via `Canvas`.
-/// Uses a seeded deterministic hash so the pattern is stable across
-/// redraws (no flickering).
 struct GrainTexture: View {
-    var opacity: Double = 0.035
+    var opacity: Double = 0
     var cellSize: CGFloat = 2
 
     var body: some View {
-        Canvas { context, size in
-            let cols = Int(ceil(size.width  / cellSize))
-            let rows = Int(ceil(size.height / cellSize))
-            for row in 0..<rows {
-                for col in 0..<cols {
-                    let seed = UInt64(row &* 7919 &+ col &* 6271)
-                    let hash = (seed &* 2654435761) & 0xFFFF
-                    let seed2 = UInt64(row &* 4217 &+ col &* 8923)
-                    let hash2 = (seed2 &* 2246822519) & 0xFFFF
-                    let brightness = (Double(hash) + Double(hash2) * 0.4) / (65535.0 * 1.4)
-                    let rect = CGRect(
-                        x: CGFloat(col) * cellSize,
-                        y: CGFloat(row) * cellSize,
-                        width: cellSize,
-                        height: cellSize
-                    )
-                    context.fill(
-                        Path(rect),
-                        with: .color(Color.white.opacity(brightness))
-                    )
-                }
-            }
-        }
-        .opacity(opacity)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        Color.clear
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
-// MARK: - Structured Texture System
-
-/// Decorative geometric texture layer used for the settings background.
-/// Keeps contrast low while adding form and material depth.
 struct StructuredTextureSystem: View {
     var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            let height = proxy.size.height
-            ZStack {
-                Ellipse()
-                    .fill(
-                        RadialGradient(
-                            colors: [VFColor.textureMeshCool, .clear],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: max(width, height) * 0.34
-                        )
-                    )
-                    .frame(width: width * 0.68, height: height * 0.42)
-                    .position(x: width * 0.78, y: height * 0.20)
-                    .blendMode(.screen)
-
-                RoundedRectangle(cornerRadius: 36, style: .continuous)
-                    .stroke(VFColor.textureStroke, lineWidth: 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 36, style: .continuous)
-                            .fill(VFColor.textureMeshNeutral.opacity(0.14))
-                    )
-                    .frame(width: width * 0.44, height: height * 0.26)
-                    .position(x: width * 0.80, y: height * 0.24)
-
-                RoundedRectangle(cornerRadius: 30, style: .continuous)
-                    .stroke(VFColor.textureStroke.opacity(0.70), lineWidth: 1)
-                    .frame(width: width * 0.20, height: height * 0.14)
-                    .position(x: width * 0.16, y: height * 0.14)
-
-                Capsule(style: .continuous)
-                    .fill(VFColor.textureMeshInk)
-                    .frame(width: width * 0.22, height: height * 0.08)
-                    .position(x: width * 0.87, y: height * 0.11)
-                    .blur(radius: 0.5)
-
-                LinearGradient(
-                    colors: [.clear, VFColor.textureHighlight, .clear],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .rotationEffect(.degrees(-15))
-                .frame(width: width * 0.50, height: height * 0.24)
-                .position(x: width * 0.63, y: height * 0.30)
-                .opacity(0.55)
-            }
-        }
-        .opacity(0.42)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        Color.clear
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
-// MARK: - Layered Depth Background
-
-/// Full-window background compositing:
-/// 1. Solid `glass0` base
-/// 2. Radial gradient tints for depth
-/// 3. Bottom-centre vignette
-/// 4. Subtle grain texture overlay
 struct LayeredDepthBackground: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [VFColor.bgBase, VFColor.bgElevated],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            RadialGradient(
-                colors: [VFColor.depthRadialTop, .clear],
-                center: .topLeading,
-                startRadius: 0,
-                endRadius: 620
-            )
-            RadialGradient(
-                colors: [VFColor.depthRadialBottom, .clear],
-                center: .bottomTrailing,
-                startRadius: 0,
-                endRadius: 560
-            )
-
-            RadialGradient(
-                colors: [.clear, VFColor.depthVignette],
-                center: .center,
-                startRadius: 120,
-                endRadius: 640
-            )
-
-            StructuredTextureSystem()
-
-            GrainTexture(opacity: 0.014, cellSize: 1.8)
-        }
-        .ignoresSafeArea()
+        VFColor.bg.ignoresSafeArea()
     }
 }
 
@@ -517,15 +409,14 @@ extension View {
     }
 }
 
-// MARK: - Forced Dark Theme Modifier
+// MARK: - Theme Modifier
 
-/// Apply this at settings root to keep SwiftUI controls and labels resolved in dark mode.
+/// Settings root modifier. The palette adapts to the system appearance;
+/// this just wires the accent tint. (Legacy name kept at call sites.)
 struct VFForcedDarkTheme: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .environment(\.colorScheme, VFTheme.forcedColorScheme)
-            .preferredColorScheme(VFTheme.forcedColorScheme)
-            .tint(VFColor.accentFallback)
+            .tint(VFColor.accent)
     }
 }
 
@@ -535,101 +426,18 @@ extension View {
     }
 }
 
-// MARK: - Inner Highlight Shape
+// MARK: - Inner Highlight Shape (legacy — inert)
 
-/// A top-edge inner highlight for a lit-from-above feel.
 struct InnerHighlightStroke: ViewModifier {
-    var cornerRadius: CGFloat = VFRadius.card
+    var cornerRadius: CGFloat = 0
 
     func body(content: Content) -> some View {
-        content.overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        stops: [
-                            .init(color: Color.white.opacity(0.14), location: 0.0),
-                            .init(color: Color.white.opacity(0.04), location: 0.25),
-                            .init(color: .clear, location: 0.5),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 0.5
-                )
-        )
+        content
     }
 }
 
 extension View {
-    func innerHighlight(cornerRadius: CGFloat = VFRadius.card) -> some View {
+    func innerHighlight(cornerRadius: CGFloat = 0) -> some View {
         modifier(InnerHighlightStroke(cornerRadius: cornerRadius))
     }
 }
-
-#if DEBUG
-// Lightweight visual regression guard. If token edits accidentally drift
-// toward bright surfaces or weak contrast, this assertion fails in debug.
-private enum VFThemeGuard {
-    private static var didAssert = false
-
-    static func assertDarkPaletteSanity(file: StaticString = #fileID, line: UInt = #line) {
-        guard !didAssert else { return }
-        didAssert = true
-
-        let glass0 = RGB(r: 0x11 / 255.0, g: 0x11 / 255.0, b: 0x14 / 255.0)
-        let glass1 = RGB(r: 0x16 / 255.0, g: 0x16 / 255.0, b: 0x1B / 255.0)
-        let glass2 = RGB(r: 0x19 / 255.0, g: 0x1A / 255.0, b: 0x22 / 255.0)
-        let glass3 = RGB(r: 0x24 / 255.0, g: 0x25 / 255.0, b: 0x2E / 255.0)
-        let accent = RGB(r: 0x70 / 255.0, g: 0x90 / 255.0, b: 0xF7 / 255.0)
-
-        assert(luminance(glass0) < luminance(glass1), "Expected glass0 to be darker than glass1", file: file, line: line)
-        assert(luminance(glass1) < luminance(glass2), "Expected glass1 to be darker than glass2", file: file, line: line)
-        assert(luminance(glass2) < luminance(glass3), "Expected glass2 to be darker than glass3", file: file, line: line)
-
-        let textPrimary = RGB(r: 0xE9 / 255.0, g: 0xEC / 255.0, b: 0xF5 / 255.0)
-        let textSecondary = RGB(r: 0xB7 / 255.0, g: 0xBB / 255.0, b: 0xC7 / 255.0)
-        let textTertiary = RGB(r: 0x9E / 255.0, g: 0xA4 / 255.0, b: 0xB5 / 255.0)
-
-        assert(contrastRatio(textPrimary, glass1) >= 7.0, "textPrimary contrast on glass1 must stay >= 7.0", file: file, line: line)
-        assert(contrastRatio(textSecondary, glass1) >= 4.5, "textSecondary contrast on glass1 must stay >= 4.5", file: file, line: line)
-        assert(contrastRatio(textTertiary, glass1) >= 3.0, "textTertiary contrast on glass1 must stay >= 3.0", file: file, line: line)
-        assert(contrastRatio(RGB(r: 0xF4 / 255.0, g: 0xF7 / 255.0, b: 0xFF / 255.0), accent) >= 2.5, "textOnAccent should remain readable on accent", file: file, line: line)
-    }
-
-    private struct RGB {
-        let r: Double
-        let g: Double
-        let b: Double
-    }
-
-    private static func composite(whiteWithOpacity alpha: Double, over background: RGB) -> RGB {
-        RGB(
-            r: alpha + ((1 - alpha) * background.r),
-            g: alpha + ((1 - alpha) * background.g),
-            b: alpha + ((1 - alpha) * background.b)
-        )
-    }
-
-    private static func luminance(_ rgb: RGB) -> Double {
-        let r = linearize(rgb.r)
-        let g = linearize(rgb.g)
-        let b = linearize(rgb.b)
-        return (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
-    }
-
-    private static func contrastRatio(_ a: RGB, _ b: RGB) -> Double {
-        let l1 = luminance(a)
-        let l2 = luminance(b)
-        let lighter = max(l1, l2)
-        let darker = min(l1, l2)
-        return (lighter + 0.05) / (darker + 0.05)
-    }
-
-    private static func linearize(_ channel: Double) -> Double {
-        if channel <= 0.03928 {
-            return channel / 12.92
-        }
-        return pow((channel + 0.055) / 1.055, 2.4)
-    }
-}
-#endif
