@@ -12,6 +12,8 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
     private var sessionActive = false
     private var requestInFlight = false
     private var capturedSamples: [Float] = []
+    /// Bumped by `cancelSession()`; responses from an older session are dropped.
+    private var generation = 0
 
     func feedAudio(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
         guard currentSessionActive else { return }
@@ -56,10 +58,23 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
         updateSessionActive(true)
     }
 
+    func cancelSession() {
+        stateLock.lock()
+        sessionActive = false
+        requestInFlight = false
+        generation += 1
+        stateLock.unlock()
+
+        samplesLock.lock()
+        capturedSamples.removeAll(keepingCapacity: true)
+        samplesLock.unlock()
+    }
+
     func endSession() {
         guard currentSessionActive else { return }
         updateSessionActive(false)
         updateRequestInFlight(true)
+        let gen = currentGeneration
 
         let samples = snapshotAndClearSamples()
         guard !samples.isEmpty else {
@@ -71,6 +86,7 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
         Task {
             let result = await transcribe(samples: samples)
             await MainActor.run {
+                guard gen == self.currentGeneration else { return }
                 self.updateRequestInFlight(false)
                 switch result {
                 case .success(let text):
@@ -186,6 +202,11 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
     private var currentRequestInFlight: Bool {
         stateLock.lock(); defer { stateLock.unlock() }
         return requestInFlight
+    }
+
+    private var currentGeneration: Int {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return generation
     }
 
     private func updateSessionActive(_ value: Bool) {

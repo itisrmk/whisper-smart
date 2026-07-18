@@ -23,6 +23,10 @@ final class MLXSTTProvider: STTProvider {
     private var sessionActive = false
     private var inferenceInFlight = false
     private var capturedSamples: [Float] = []
+    /// Bumped by `cancelSession()`; results from an older generation are dropped.
+    private var generation = 0
+    /// The runner process for the in-flight inference, so cancel can kill it.
+    private var activeProcess: Process?
 
     init(model: MLXModel) {
         self.model = model
@@ -81,6 +85,7 @@ final class MLXSTTProvider: STTProvider {
 
         updateSessionActive(false)
         updateInferenceInFlight(true)
+        let gen = currentGeneration
 
         let samples = snapshotAndClearCapturedSamples()
         guard !samples.isEmpty else {
@@ -95,7 +100,7 @@ final class MLXSTTProvider: STTProvider {
 
             let result: Result<String, STTError>
             do {
-                result = .success(try self.runInference(samples: samples, model: model))
+                result = .success(try self.runInference(samples: samples, model: model, generation: gen))
             } catch let err as STTError {
                 result = .failure(err)
             } catch {
@@ -104,6 +109,12 @@ final class MLXSTTProvider: STTProvider {
 
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                // Cancelled sessions must stay silent — a newer session may
+                // already be recording or transcribing.
+                guard gen == self.currentGeneration else {
+                    logger.info("Dropping MLX result from cancelled session (gen=\(gen))")
+                    return
+                }
                 self.updateInferenceInFlight(false)
                 switch result {
                 case .success(let text):
@@ -120,9 +131,33 @@ final class MLXSTTProvider: STTProvider {
         }
     }
 
+    func cancelSession() {
+        stateLock.lock()
+        sessionActive = false
+        inferenceInFlight = false
+        generation += 1
+        let process = activeProcess
+        activeProcess = nil
+        stateLock.unlock()
+
+        samplesLock.lock()
+        capturedSamples.removeAll(keepingCapacity: true)
+        samplesLock.unlock()
+
+        if let process {
+            logger.info("Cancelling MLX session — terminating runner pid=\(process.processIdentifier)")
+            process.terminate()
+        } else {
+            logger.info("Cancelling MLX session (no runner in flight)")
+        }
+    }
+
     // MARK: - Inference
 
-    private func runInference(samples: [Float], model: MLXModel) throws -> String {
+    private func runInference(samples: [Float], model: MLXModel, generation gen: Int) throws -> String {
+        guard gen == currentGeneration else {
+            throw STTError.providerError(message: "Transcription was cancelled.")
+        }
         let scriptURL = try MLXRunnerScript.resolveURL()
         let pythonCommand = try MLXRuntimeBootstrapManager.shared.ensureRuntimeReady()
 
@@ -174,6 +209,22 @@ final class MLXSTTProvider: STTProvider {
             throw STTError.providerError(message: "Failed to launch MLX runner: \(error.localizedDescription)")
         }
 
+        // Register the running process so cancelSession() can terminate it.
+        // If a cancel raced the launch, kill it now instead of registering.
+        stateLock.lock()
+        let cancelledDuringLaunch = (generation != gen)
+        if !cancelledDuringLaunch { activeProcess = process }
+        stateLock.unlock()
+        if cancelledDuringLaunch {
+            process.terminate()
+            throw STTError.providerError(message: "Transcription was cancelled.")
+        }
+        defer {
+            stateLock.lock()
+            if activeProcess === process { activeProcess = nil }
+            stateLock.unlock()
+        }
+
         if completion.wait(timeout: .now() + runnerTimeout) == .timedOut {
             logger.error("MLX runner exceeded \(self.runnerTimeout)s; terminating")
             process.terminate()
@@ -211,6 +262,11 @@ final class MLXSTTProvider: STTProvider {
     private var currentInferenceInFlight: Bool {
         stateLock.lock(); defer { stateLock.unlock() }
         return inferenceInFlight
+    }
+
+    private var currentGeneration: Int {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return generation
     }
 
     private func updateSessionActive(_ value: Bool) {

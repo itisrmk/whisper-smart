@@ -82,6 +82,10 @@ final class DictationStateMachine {
     private var successResetWork: DispatchWorkItem?
     private var oneShotModePendingStart = false
     private var oneShotModeActive = false
+    /// True while the first-run microphone permission dialog is up. If the
+    /// user releases the hotkey (or cancels) before answering, the granted
+    /// callback must not start a recording nobody can stop.
+    private var pendingPermissionRecordingStart = false
     private var silenceAutoStopWork: DispatchWorkItem?
     private var lastDetectedSpeechAt: Date?
     private var detectedSpeechInCurrentRecording = false
@@ -227,6 +231,7 @@ final class DictationStateMachine {
         onAudioLevelChange?(0)
         onTranscriptChange?("")
         detectedSpeechInCurrentRecording = false
+        pendingPermissionRecordingStart = false
         sessionStartedAt = nil
         transcribingStartedAt = nil
         transition(to: .idle)
@@ -258,6 +263,7 @@ final class DictationStateMachine {
         cancelSilenceAutoStopWatchdog()
         oneShotModeActive = false
         oneShotModePendingStart = false
+        pendingPermissionRecordingStart = false
         detectedSpeechInCurrentRecording = false
 
         if priorState == .recording {
@@ -315,25 +321,53 @@ final class DictationStateMachine {
             logger.info("Hold-start received in error state — recovering to idle before recording")
             transition(to: .idle)
         }
+        if state == .transcribing {
+            // A new hold while the previous transcription is still running
+            // means the user wants to dictate again NOW. Cancel the in-flight
+            // session instead of silently swallowing the hotkey press.
+            logger.info("Hold-start during transcribing — cancelling in-flight transcription")
+            cancelInFlightTranscription()
+        }
         guard state == .idle else { return }
 
         // Pre-flight: check microphone permission before attempting capture.
         let micStatus = microphoneAuthorizationStatus()
         if micStatus == .notDetermined {
             logger.info("Microphone permission not yet determined — requesting")
+            pendingPermissionRecordingStart = true
             requestMicrophoneAccess { [weak self] granted in
+                guard let self else { return }
+                // Released the hotkey (or session was reset) while the dialog
+                // was up — do not start a recording nothing will stop.
+                guard self.pendingPermissionRecordingStart else {
+                    logger.info("Microphone permission resolved after hold ended — not starting recording")
+                    return
+                }
+                self.pendingPermissionRecordingStart = false
                 if granted {
                     logger.info("Microphone permission granted")
-                    self?.beginRecordingSession()
+                    self.beginRecordingSession()
                 } else {
                     logger.error("Microphone permission denied by user")
-                    self?.transition(to: .error(AudioCaptureError.microphonePermissionDenied.localizedDescription))
+                    self.oneShotModePendingStart = false
+                    self.transition(to: .error(AudioCaptureError.microphonePermissionDenied.localizedDescription))
                 }
             }
             return
         }
 
         beginRecordingSession()
+    }
+
+    /// Aborts a transcription that is still waiting on the STT provider and
+    /// returns the machine to `.idle` so a new recording can start.
+    private func cancelInFlightTranscription() {
+        cancelTranscribingTimeout()
+        sttProvider.cancelSession()
+        sessionStartedAt = nil
+        transcribingStartedAt = nil
+        onTranscriptChange?("")
+        transition(to: .idle)
     }
 
     private func beginRecordingSession() {
@@ -369,12 +403,25 @@ final class DictationStateMachine {
             // audioCapture.start() can fail partway (tap installed, input
             // device switched); stop() reverts that partial state.
             audioCapture.stop()
+            // A failed one-shot start must not leak its pending flag into the
+            // next hotkey hold (which would silently become one-shot mode and
+            // auto-stop mid-hold on silence).
+            oneShotModePendingStart = false
             logger.error("Failed to start recording with provider \(providerName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             transition(to: .error(error.localizedDescription))
         }
     }
 
     private func handleHoldEnded() {
+        // Hold released while the mic permission dialog was still open:
+        // cancel the deferred start instead of leaving it to fire later.
+        if pendingPermissionRecordingStart {
+            logger.info("Hold ended while awaiting microphone permission — cancelling deferred start")
+            pendingPermissionRecordingStart = false
+            oneShotModePendingStart = false
+            return
+        }
+
         guard state == .recording else { return }
 
         cancelSilenceAutoStopWatchdog()
@@ -420,6 +467,15 @@ final class DictationStateMachine {
         onTranscriptChange?(processed)
 
         if !result.isPartial {
+            // A provider can finalize while we are still in .recording (e.g.
+            // Apple Speech hitting its recognition limit). Shut capture down
+            // so the mic doesn't stay hot after we transition to success.
+            if state == .recording {
+                cancelSilenceAutoStopWatchdog()
+                oneShotModeActive = false
+                detectedSpeechInCurrentRecording = false
+                audioCapture.stop()
+            }
             cancelTranscribingTimeout()
             let finalAt = Date()
             if let transcribingStartedAt {
@@ -510,6 +566,7 @@ final class DictationStateMachine {
         cancelSilenceAutoStopWatchdog()
         oneShotModeActive = false
         oneShotModePendingStart = false
+        pendingPermissionRecordingStart = false
         detectedSpeechInCurrentRecording = false
         sessionStartedAt = nil
         transcribingStartedAt = nil

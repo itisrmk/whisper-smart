@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 import CoreAudio
 import os.log
 
@@ -46,8 +47,12 @@ final class AudioCaptureService {
     private var defaultInputDeviceListenerInstalled = false
     private var defaultInputDeviceListenerBlock: AudioObjectPropertyListenerBlock?
     private let listenerQueue = DispatchQueue(label: "com.visperflow.audio-listeners", qos: .utility)
-    /// Saved original default device UID to restore after capture
-    private var originalDefaultDeviceUID: String?
+    /// True while the current session is pinned to an explicitly selected
+    /// device (so system default-device changes don't concern us).
+    private var usingExplicitInputDevice = false
+    /// Once we pin any device on the engine's input unit, the pin persists on
+    /// the reused engine instance — later default-device sessions must re-pin.
+    private var didPinInputDevice = false
 
     // MARK: - Lifecycle
 
@@ -75,44 +80,50 @@ final class AudioCaptureService {
         }
         logger.info("Microphone authorized, starting capture")
 
-        // Resolve input node and format
         let inputNode = engine.inputNode
-        let hardwareFormat = inputNode.outputFormat(forBus: 0)
 
-        // If a specific device is selected, try to configure the engine to use it
+        // Pin the requested device on the engine's own input unit rather than
+        // rewriting the system-wide default input device. Changing the system
+        // default (a) affects every other app and (b) fires our own
+        // default-device-change listener, which would immediately interrupt
+        // the session we are starting.
+        usingExplicitInputDevice = false
+        var deviceToPin: AudioDeviceID?
         if let deviceUID = inputDeviceUID, !deviceUID.isEmpty {
             if let deviceID = findAudioDeviceID(byUID: deviceUID) {
-                // Save the current default device to restore later
-                originalDefaultDeviceUID = getDefaultInputDeviceUID()
-
-                // Configure the input node to use the specific device
-                var deviceIDValue = deviceID
-
-                // Set the default input device for the system (temporarily)
-                var propertyAddress = AudioObjectPropertyAddress(
-                    mSelector: kAudioHardwarePropertyDefaultInputDevice,
-                    mScope: kAudioObjectPropertyScopeGlobal,
-                    mElement: kAudioObjectPropertyElementMain
-                )
-
-                let status = AudioObjectSetPropertyData(
-                    AudioObjectID(kAudioObjectSystemObject),
-                    &propertyAddress,
-                    0,
-                    nil,
-                    UInt32(MemoryLayout<AudioDeviceID>.size),
-                    &deviceIDValue
-                )
-
-                if status == noErr {
-                    logger.info("Successfully set input device to: \(deviceUID, privacy: .public)")
-                } else {
-                    logger.warning("Failed to set input device, using system default: \(status)")
-                }
+                deviceToPin = deviceID
+                usingExplicitInputDevice = true
             } else {
                 logger.warning("Selected device UID not found: \(deviceUID, privacy: .public), using system default")
             }
+        } else if didPinInputDevice {
+            // A previous session pinned a specific device; re-pin the current
+            // system default so this session follows the user's default again.
+            deviceToPin = defaultInputDeviceID()
         }
+
+        if let deviceID = deviceToPin, let audioUnit = inputNode.audioUnit {
+            var deviceIDValue = deviceID
+            let status = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &deviceIDValue,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+            if status == noErr {
+                didPinInputDevice = true
+                logger.info("Pinned engine input device (explicit=\(self.usingExplicitInputDevice)) id=\(deviceID)")
+            } else {
+                usingExplicitInputDevice = false
+                logger.warning("Failed to pin input device (status=\(status)), using engine default")
+            }
+        }
+
+        // Read the hardware format only after the device is pinned so the tap
+        // and converter match the device that will actually feed the engine.
+        let hardwareFormat = inputNode.outputFormat(forBus: 0)
 
         guard let captureFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -123,7 +134,7 @@ final class AudioCaptureService {
             throw AudioCaptureError.unsupportedFormat
         }
 
-        guard hardwareFormat.channelCount > 0 else {
+        guard hardwareFormat.channelCount > 0, hardwareFormat.sampleRate > 0 else {
             throw AudioCaptureError.noInputDevice
         }
 
@@ -193,27 +204,6 @@ final class AudioCaptureService {
         converter = nil
         isRunning = false
 
-        // Restore the original default input device if we changed it
-        if let originalUID = originalDefaultDeviceUID,
-           let deviceID = findAudioDeviceID(byUID: originalUID) {
-            var deviceIDValue = deviceID
-            var propertyAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDefaultInputDevice,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-
-            AudioObjectSetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject),
-                &propertyAddress,
-                0,
-                nil,
-                UInt32(MemoryLayout<AudioDeviceID>.size),
-                &deviceIDValue
-            )
-            originalDefaultDeviceUID = nil
-        }
-
         unregisterInterruptionObservers()
     }
 
@@ -241,14 +231,26 @@ final class AudioCaptureService {
         removeDefaultInputDeviceListenerIfNeeded()
     }
 
+    /// Must be called on the main queue — tears down the engine and reports
+    /// the interruption to the state machine.
     private func handleInterruption(_ reason: InterruptionReason) {
         guard isRunning else { return }
 
         logger.warning("Audio interruption detected: \(reason.rawValue, privacy: .public)")
         stop()
-        DispatchQueue.main.async { [onInterruption] in
-            onInterruption?(reason)
+        onInterruption?(reason)
+    }
+
+    private func handleDefaultInputDeviceChanged() {
+        guard isRunning else { return }
+        // When the user picked a specific mic, the session is pinned to it —
+        // a system default-device change is irrelevant and must not kill the
+        // recording.
+        if usingExplicitInputDevice {
+            logger.info("System default input changed, but session is pinned to an explicit device — continuing")
+            return
         }
+        handleInterruption(.defaultInputDeviceChanged)
     }
 
     private func installDefaultInputDeviceListenerIfNeeded() {
@@ -260,8 +262,12 @@ final class AudioCaptureService {
             mElement: kAudioObjectPropertyElementMain
         )
 
+        // CoreAudio invokes this on `listenerQueue`; hop to main so engine
+        // teardown never races the main-thread start()/stop() paths.
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.handleInterruption(.defaultInputDeviceChanged)
+            DispatchQueue.main.async {
+                self?.handleDefaultInputDeviceChanged()
+            }
         }
         defaultInputDeviceListenerBlock = listener
 
@@ -363,29 +369,27 @@ final class AudioCaptureService {
         return nil
     }
 
-    private func getDefaultInputDeviceUID() -> String? {
+    private func defaultInputDeviceID() -> AudioDeviceID? {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
 
-        var deviceUID: CFString?
-        var dataSize = UInt32(MemoryLayout<CFString?>.size)
+        var deviceID = AudioDeviceID(0)
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
 
-        let status = withUnsafeMutablePointer(to: &deviceUID) { pointer in
-            AudioObjectGetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject),
-                &propertyAddress,
-                0,
-                nil,
-                &dataSize,
-                pointer
-            )
-        }
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        )
 
-        guard status == noErr, let deviceUID else { return nil }
-        return deviceUID as String
+        guard status == noErr, deviceID != kAudioObjectUnknown else { return nil }
+        return deviceID
     }
 
     private static func normalizedLevel(from buffer: AVAudioPCMBuffer) -> Float? {
