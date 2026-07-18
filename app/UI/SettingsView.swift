@@ -458,14 +458,26 @@ private struct SettingsSidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             // App identity block (below the transparent titlebar).
             HStack(spacing: 11) {
-                Rectangle()
-                    .fill(VFColor.accent)
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Image(systemName: "waveform")
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(Color.white)
-                    )
+                if let logo = VFBrand.logo {
+                    Image(nsImage: logo)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            // Keeps the dark logo plate legible on the dark sidebar.
+                            RoundedRectangle(cornerRadius: 9)
+                                .stroke(VFColor.border2, lineWidth: 1)
+                        )
+                } else {
+                    Rectangle()
+                        .fill(VFColor.accent)
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "waveform")
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(Color.white)
+                        )
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Whisper Smart")
