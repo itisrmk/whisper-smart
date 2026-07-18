@@ -1,0 +1,99 @@
+name: Repair Appcast Signatures
+
+# Re-signs already-published release DMGs with the Sparkle private key and
+# injects the missing sparkle:edSignature into the appcast on main (and the
+# legacy master mirror). Needed when a release was published manually without
+# running the Release DMG workflow — clients with SUPublicEDKey reject
+# unsigned appcast entries with "The update is improperly signed".
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: "Space-separated versions to re-sign (e.g. 0.2.24 0.2.25 0.2.26)"
+        required: true
+        default: "0.2.24 0.2.25 0.2.26"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Sparkle Tools
+        run: |
+          set -euo pipefail
+          SPARKLE_VERSION="2.8.1"
+          curl -fL -o /tmp/sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p /tmp/sparkle-tools
+          tar -xJf /tmp/sparkle.tar.xz -C /tmp/sparkle-tools
+          test -x /tmp/sparkle-tools/bin/sign_update
+
+      - name: Sign DMGs and Patch Appcast on main
+        env:
+          VERSIONS: ${{ inputs.versions }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SPARKLE_PRIVATE_KEY:-}" ]]; then
+            echo "Missing required secret: SPARKLE_PRIVATE_KEY"
+            exit 1
+          fi
+
+          # Patch the appcast as it exists on main, regardless of which ref
+          # this workflow file was dispatched from.
+          git fetch origin main
+          git worktree add /tmp/main-wt origin/main
+
+          for VERSION in $VERSIONS; do
+            echo "==> Repairing v${VERSION}"
+            DMG_DIR="/tmp/dmg/${VERSION}"
+            mkdir -p "$DMG_DIR"
+            gh release download "v${VERSION}" \
+              --repo "$REPOSITORY" \
+              --pattern "*.dmg" \
+              --dir "$DMG_DIR"
+            DMG_PATH="$(ls "$DMG_DIR"/*.dmg | head -n 1)"
+            ED_SIGNATURE="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | /tmp/sparkle-tools/bin/sign_update --ed-key-file - -p "$DMG_PATH" | tr -d '\n')"
+            if [[ -z "$ED_SIGNATURE" ]]; then
+              echo "Failed to generate Sparkle edSignature for $DMG_PATH"
+              exit 1
+            fi
+            DMG_LENGTH="$(stat -f%z "$DMG_PATH")"
+            bash scripts/set_appcast_signature.sh \
+              --version "$VERSION" \
+              --ed-signature "$ED_SIGNATURE" \
+              --dmg-length "$DMG_LENGTH" \
+              --output /tmp/main-wt/appcast.xml
+          done
+
+          bash scripts/verify_appcast.sh /tmp/main-wt/appcast.xml
+
+      - name: Commit + Push Appcast
+        env:
+          VERSIONS: ${{ inputs.versions }}
+        run: |
+          set -euo pipefail
+          cd /tmp/main-wt
+          if git diff --quiet -- appcast.xml; then
+            echo "No appcast change to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add appcast.xml
+          git commit -m "chore(release): add missing Sparkle signatures for ${VERSIONS}"
+          # Keep legacy Sparkle clients (old SUFeedURL -> master) receiving updates.
+          git push origin HEAD:main HEAD:master

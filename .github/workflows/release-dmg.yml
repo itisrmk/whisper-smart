@@ -205,6 +205,9 @@ jobs:
             --pub-date "$PUB_DATE" \
             --output "appcast.xml"
 
+      - name: Verify Appcast
+        run: bash scripts/verify_appcast.sh appcast.xml
+
       - name: Commit + Push Appcast
         env:
           VERSION: ${{ inputs.version }}

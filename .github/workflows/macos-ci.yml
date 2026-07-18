@@ -18,6 +18,9 @@ jobs:
       - name: Swift Version
         run: swift --version
 
+      - name: Verify Appcast
+        run: bash scripts/verify_appcast.sh appcast.xml
+
       - name: Typecheck
         run: bash scripts/typecheck.sh
 
