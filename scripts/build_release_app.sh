@@ -8,7 +8,12 @@ VERSION="${VERSION:-0.2.14}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
 LOGO_PATH="${LOGO_PATH:-$REPO_ROOT/logo.png}"
 MLX_RUNNER_SOURCE="$REPO_ROOT/scripts/mlx_stt_infer.py"
-SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-2OzsmMn7xg17Iasd5fvc98QIM5ycXEIYzrQT/X5WET0=}"
+# Key rotated 2026-07-17: the original private key was unrecoverable (only
+# copy on Rahuls-Mac-mini, never exported), so a new pair was generated.
+# Private counterpart: release MacBook login keychain (account
+# "WhisperSmart") and the SPARKLE_PRIVATE_KEY repo Actions secret.
+# Clients built before v0.2.29 pin the old key and must reinstall manually.
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-Mv5eYpcOvsnI5sqVuJm7SNd21Pb2byLj8i9Hj/yxTiQ=}"
 EXPECTED_BUNDLE_ID="com.whispersmart.desktop"
 ALLOW_ADHOC_SIGNING="${ALLOW_ADHOC_SIGNING:-0}"
 

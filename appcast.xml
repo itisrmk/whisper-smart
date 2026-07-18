@@ -6,12 +6,20 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.29</title>
+      <description>- New Sparkle update signing key: this release resets the update trust chain after the previous private key was lost. Install this version manually once; in-app updates work automatically from here on.
+- Includes everything in v0.2.28 (instant dictation start, resident MLX engine with ~85ms warm transcription).</description>
+      <pubDate>Sat, 18 Jul 2026 05:19:32 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.29/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.29" sparkle:version="202607172218" sparkle:edSignature="oPWmiYsQsbDc9KPi67JAvfS96veLKdvfcC3G2FOGV7iEPGmJ7EXNrHOlxziWMpjA2mRGSGyVftfyANEtXyZMAQ==" length="2932331" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.28</title>
       <description>- Fixed the first dictation attempt failing silently: starting a session no longer freezes the app while the local MLX runtime is probed, so recording begins the instant you click or press the hotkey.
 - Local MLX transcription is dramatically faster: the model now stays loaded in a resident engine, cutting per-dictation latency from several seconds to under 100ms (Parakeet TDT 0.6B).
 - Dictation no longer requires a network round-trip to Hugging Face on every transcription.</description>
       <pubDate>Sat, 18 Jul 2026 05:13:11 +0000</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.28/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.28" sparkle:version="202607172212" length="2932310" type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.28/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.28" sparkle:version="202607172212" length="2932310" type="application/octet-stream" sparkle:edSignature="L8xBqAeNfOphEL8TK2OeMzyYgkm7yAlrSMg5YT+yQaLkHs/9WwUwB/Ofx7OFU/39JIJs2MinA9Bv7p/pyX2JCQ=="/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
@@ -21,7 +29,7 @@
 - Fixed a race where releasing the hotkey during the first-run microphone permission dialog could leave the mic recording with no way to stop it.
 - Fixed a leaked one-shot flag that made the next hotkey hold auto-stop itself during pauses in speech.</description>
       <pubDate>Sat, 18 Jul 2026 04:37:15 +0000</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.27/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.27" sparkle:version="202607172136" length="2920791" type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.27/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.27" sparkle:version="202607172136" length="2920791" type="application/octet-stream" sparkle:edSignature="p1xeoNEs4WVyHdZtvxMXiBxTn5gvSdc/CmrQ+2IcFc3IvSvczglh+2YTpzr1cgD5wfFiCj67azqaV0A8sBjhAA=="/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
@@ -29,17 +37,17 @@
       <description>- Updated app icon to new sound-wave logo design.
 - New icon appears in menu bar, app bundle, DMG installer, and README.</description>
       <pubDate>Sat, 15 Mar 2026 02:30:00 +0000</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.26/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.26" sparkle:version="202603150230" length="3103311" type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.26/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.26" sparkle:version="202603150230" length="3103311" type="application/octet-stream" sparkle:edSignature="pXLeHLuluGchExPXbwT2SmQIMAENeOHj30g5n20Ks02jYVXuQ+MII52WKmjoN52lBoj2ZoVBrjzdGvH0hcnwCQ=="/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
       <title>Version 0.2.25</title>
       <description>- Left and right modifier keys are now distinct: setting Right ⌘ no longer triggers on Left ⌘.
-- Hotkey presets and recorder now label which side (e.g. "Right ⌘ Hold" instead of "⌘ Hold").
+- Hotkey presets and recorder now label which side (e.g. &quot;Right ⌘ Hold&quot; instead of &quot;⌘ Hold&quot;).
 - Silent recordings skip transcription instantly instead of spinning for 30 seconds.
 - Terminal-aware text injection with longer paste delays for Terminal.app, iTerm2, Kitty, Warp, Ghostty, and more.</description>
       <pubDate>Sat, 15 Mar 2026 02:13:00 +0000</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.25/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.25" sparkle:version="202603150213" length="4795078" type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.25/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.25" sparkle:version="202603150213" length="4795078" type="application/octet-stream" sparkle:edSignature="BF9hsh37g+09yCQTT03SBXl0zmgx109Qq/GLjWQZEhttF7tJyE680rr59gG+CqjMrhrkRp2JztzKX5QYiTfXCg=="/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
@@ -50,7 +58,7 @@
 - Fixed hotkey monitor binding change: event tap failure after shortcut change now triggers self-healing recovery.
 - Fixed key recorder missing Fn key display in live modifier preview.</description>
       <pubDate>Sat, 15 Mar 2026 01:47:00 +0000</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.24/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.24" sparkle:version="202603150146" length="4798044" type="application/octet-stream"/>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.24/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.24" sparkle:version="202603150146" length="4798044" type="application/octet-stream" sparkle:edSignature="oMdXuc5B75nK6LEasfgfLOR2cUQiaS8bmAaxM8S4XPlmUTCIoBC4L/T3i6210EkTZEv089k34OeEbIHh4YwqDg=="/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
