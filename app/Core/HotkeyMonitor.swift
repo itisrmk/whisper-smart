@@ -77,7 +77,16 @@ final class HotkeyMonitor {
 
         logger.info("Updating binding: \(self.binding.displayString) → \(newBinding.displayString)")
         let wasRunning = isRunning
+        let wasHeld = holdFired
         if wasRunning { stop() }
+
+        // stop() clears hold tracking without firing the release callback.
+        // If the old key was mid-hold, end it now so an active recording
+        // finishes instead of running forever with no key to release.
+        if wasHeld {
+            logger.info("Binding changed while key held — ending active hold")
+            onHoldEnded?()
+        }
 
         binding = newBinding
         matchingKeyCodes = Self.pairedKeyCodes(for: newBinding.keyCode)

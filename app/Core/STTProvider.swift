@@ -73,6 +73,11 @@ protocol STTProvider: AnyObject {
     /// the last result via ``onResult``.
     func endSession()
 
+    /// Aborts the current session and any in-flight transcription.
+    /// After this call the provider must not deliver results or errors for
+    /// the cancelled session, and must accept a fresh `beginSession()`.
+    func cancelSession()
+
     /// Callback delivering incremental or final transcription results.
     var onResult: ((STTResult) -> Void)? { get set }
 
@@ -86,6 +91,10 @@ protocol STTProvider: AnyObject {
 
 extension STTProvider {
     var transcriptionTimeout: TimeInterval { 30 }
+
+    /// Default: fall back to a normal session end. Providers that transcribe
+    /// asynchronously should override this to suppress late results.
+    func cancelSession() { endSession() }
 }
 
 // MARK: - Stub (testing only — never emits fake transcription text)

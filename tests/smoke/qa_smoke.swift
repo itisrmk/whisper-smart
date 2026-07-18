@@ -129,8 +129,57 @@ private func runStateMachineSmoke() throws {
     stt.emitFinal("stale result")
     try expect(injector.injectedTexts.count == 1, "stale provider callbacks must be ignored after replaceProvider")
 
+    // A new hold while transcribing cancels the in-flight session and
+    // starts a fresh recording instead of swallowing the hotkey press.
+    hotkey.triggerHoldStart()
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    hotkey.triggerHoldEnd()
+    try expect(machine.state == .transcribing, "second session should enter transcribing")
+
+    hotkey.triggerHoldStart()
+    try expect(machine.state == .recording, "hold during transcribing should cancel and start a new recording")
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    hotkey.triggerHoldEnd()
+    secondProvider.emitFinal("Take two")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    try expect(machine.state == .success, "restarted session should complete normally")
+    try expect(injector.injectedTexts.last == "Take two", "restarted session should inject its own transcript")
+
     print("✓ DictationStateMachine smoke passed")
     print("  states: \(observedStates)")
+}
+
+private func runPermissionRaceSmoke() throws {
+    let hotkey = MockHotkeyMonitor()
+    let audio = MockAudioCapture()
+    let stt = MockSTTProvider()
+    let injector = MockInjector()
+
+    var pendingCompletion: ((Bool) -> Void)?
+    let machine = DictationStateMachine(
+        hotkeyMonitor: hotkey,
+        audioCapture: audio,
+        sttProvider: stt,
+        injector: injector,
+        postProcessingPipeline: TranscriptPostProcessingPipeline(processors: []),
+        commandModeRouter: FeatureFlaggedCommandModeRouter(isEnabled: { false }),
+        microphoneAuthorizationStatus: { .notDetermined },
+        requestMicrophoneAccess: { completion in pendingCompletion = completion }
+    )
+
+    machine.activate()
+    hotkey.triggerHoldStart()
+    try expect(machine.state == .idle, "recording must not start while the permission dialog is open")
+
+    // Hotkey released before the user answered the dialog.
+    hotkey.triggerHoldEnd()
+    pendingCompletion?(true)
+    try expect(machine.state == .idle, "granting permission after the hold ended must not start an unstoppable recording")
+    try expect(audio.startCallCount == 0, "audio capture must not start after a cancelled permission flow")
+
+    print("✓ Microphone permission race smoke passed")
 }
 
 private func runResolverSmoke() throws {
@@ -503,6 +552,7 @@ struct QASmokeMain {
     static func main() {
         do {
             try runStateMachineSmoke()
+            try runPermissionRaceSmoke()
             try runResolverSmoke()
             try runParakeetNoSilentFallbackSmoke()
             try runMLXCatalogSmoke()

@@ -19,6 +19,8 @@ final class AppleSpeechSTTProvider: STTProvider {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var sessionActive = false
+    /// Bumped on begin/cancel; async results from an older session are dropped.
+    private var generation = 0
 
     init(locale: Locale = .current) {
         self.recognizer = SFSpeechRecognizer(locale: locale)
@@ -62,8 +64,11 @@ final class AppleSpeechSTTProvider: STTProvider {
         }
         request.shouldReportPartialResults = true
 
+        generation += 1
+        let gen = generation
+
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self = self else { return }
+            guard let self = self, gen == self.generation else { return }
 
             if let error = error {
                 // Ignore cancellation errors when we intentionally stopped.
@@ -77,6 +82,7 @@ final class AppleSpeechSTTProvider: STTProvider {
                 }
                 logger.error("Recognition error: \(error.localizedDescription)")
                 DispatchQueue.main.async {
+                    guard gen == self.generation else { return }
                     self.onError?(.providerError(message: error.localizedDescription))
                 }
                 return
@@ -93,6 +99,7 @@ final class AppleSpeechSTTProvider: STTProvider {
             logger.info("Recognition result (final=\(isFinal), len=\(text.count))")
 
             DispatchQueue.main.async {
+                guard gen == self.generation else { return }
                 self.onResult?(STTResult(
                     text: text,
                     isPartial: !isFinal,
@@ -120,5 +127,14 @@ final class AppleSpeechSTTProvider: STTProvider {
         // Signal end of audio; the recognition task will deliver a final result.
         recognitionRequest?.endAudio()
         logger.info("Apple Speech session ended, waiting for final result")
+    }
+
+    func cancelSession() {
+        sessionActive = false
+        generation += 1
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        logger.info("Apple Speech session cancelled")
     }
 }
