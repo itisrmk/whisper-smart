@@ -16,16 +16,6 @@ Rollback reference: https://github.com/itisrmk/whisper-smart/releases/tag/v0.3.0
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
     <item>
-      <title>Version 0.3.0</title>
-      <description>Automated DMG release for v0.3.0.
-Release channel: **beta**
-Release artifact: `.build/release/Whisper-Smart-mac.dmg`
-Rollback reference: https://github.com/itisrmk/whisper-smart/releases/tag/v0.2.31</description>
-      <pubDate>Sat, 18 Jul 2026 08:20:19 +0000</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.3.0/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.3.0" sparkle:version="202607180820" sparkle:edSignature="cCWGfG8l6lmG8SecIZt5575N2OGb5+KJLCqeWKfwb27rFzxyEX0fT7msY134ySD13qQbEnHVg2Bvn9eDAoQhAg==" length="2488404" type="application/octet-stream"/>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-    </item>
-    <item>
       <title>Version 0.2.31</title>
       <description>Fixes microphone access in certificate-signed builds: v0.2.30 shipped with the hardened runtime but without the audio-input entitlement, so recording was impossible regardless of permission grants.
 Release channel: **beta**
