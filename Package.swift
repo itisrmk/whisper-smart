@@ -16,7 +16,8 @@ let package = Package(
             dependencies: ["Sparkle"],
             path: "app",
             exclude: [],
-            sources: ["App", "Core", "UI"]
+            sources: ["App", "Core", "UI"],
+            resources: [.copy("Resources/Fonts")]
         )
     ]
 )

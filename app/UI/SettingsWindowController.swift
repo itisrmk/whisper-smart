@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 
 /// Manages a single, reusable settings window.
-/// Window chrome is configured for a seamless dark neumorphic appearance:
-/// transparent titlebar, dark background matching the depth layer,
-/// and no miniaturize/zoom to keep the panel feel.
+/// Window chrome is configured for the Modernist appearance: transparent
+/// titlebar over the sidebar surface, adaptive light/dark background, and
+/// no miniaturize/zoom to keep the panel feel.
 final class SettingsWindowController {
 
     private var windowController: NSWindowController?
@@ -15,7 +15,6 @@ final class SettingsWindowController {
 
         if let wc = windowController {
             if let window = wc.window {
-                applyForcedDarkAppearance(to: window)
                 enforceScrollChromePolicy(for: window)
             }
             if forceOnboarding {
@@ -39,16 +38,10 @@ final class SettingsWindowController {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        // Force dark appearance on window and content so SwiftUI resolves
-        // all adaptive colors against the dark palette.
-        applyForcedDarkAppearance(to: window)
         window.isOpaque = true
-        window.backgroundColor = VFColor.glass0NS
+        window.backgroundColor = VFColor.windowBackgroundNS
         window.setContentSize(NSSize(width: VFSize.settingsWidth, height: VFSize.settingsHeight))
 
-        // Disable any accidental vibrancy/appearance blending in the hosting view.
-        hostingController.view.wantsLayer = true
-        hostingController.view.layer?.backgroundColor = VFColor.glass0NS.cgColor
         window.center()
         enforceScrollChromePolicy(for: window)
 
@@ -71,17 +64,6 @@ final class SettingsWindowController {
         }
 
         self.windowController = wc
-    }
-
-    private func applyForcedDarkAppearance(to window: NSWindow) {
-        guard let darkAppearance = NSAppearance(named: VFTheme.forcedAppearanceName) else {
-            return
-        }
-        window.appearance = darkAppearance
-        window.contentView?.appearance = darkAppearance
-        window.contentViewController?.view.appearance = darkAppearance
-        window.contentViewController?.view.wantsLayer = true
-        window.contentViewController?.view.layer?.backgroundColor = VFColor.glass0NS.cgColor
     }
 
     /// Forces an overlay/no-chrome scroll style for every NSScrollView in the

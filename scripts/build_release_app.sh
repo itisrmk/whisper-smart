@@ -48,6 +48,14 @@ cp "$REPO_ROOT/.build/arm64-apple-macosx/release/$APP_NAME" "$EXECUTABLE_PATH"
 mkdir -p "$CONTENTS_DIR/Frameworks"
 cp -R "$REPO_ROOT/.build/arm64-apple-macosx/release/Sparkle.framework" "$CONTENTS_DIR/Frameworks/"
 
+# Copy SwiftPM resource bundle (bundled Archivo fonts); Bundle.module
+# resolves it from Contents/Resources at runtime.
+if [ -d "$REPO_ROOT/.build/arm64-apple-macosx/release/WhisperSmart_App.bundle" ]; then
+  cp -R "$REPO_ROOT/.build/arm64-apple-macosx/release/WhisperSmart_App.bundle" "$RESOURCES_DIR/"
+else
+  echo "Warning: WhisperSmart_App.bundle not found; bundled fonts will be missing." >&2
+fi
+
 # Ensure runtime can find embedded frameworks
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH" 2>/dev/null || true
 
