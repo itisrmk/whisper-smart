@@ -230,7 +230,7 @@ private struct ProductOnboardingOverlay: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: VFSpacing.xxs) {
                         Text("Welcome to Whisper Smart")
-                            .font(.system(size: 24, weight: .semibold))
+                            .font(VFFont.sheetTitle)
                             .foregroundStyle(VFColor.textPrimary)
                         Text("Set your default dictation mode and verify permissions in under a minute.")
                             .font(VFFont.settingsCaption)
@@ -1549,26 +1549,17 @@ private struct GeneralSettingsTab: View {
                         .foregroundStyle(VFColor.textSecondary)
                 }
 
-                ForEach(Array(perAppProfiles.indices), id: \.self) { index in
+                ForEach($perAppProfiles) { $profile in
                     editorRowContainer {
                         HStack(spacing: VFSpacing.sm) {
                             TextField(
                                 "Bundle ID (e.g. com.apple.mail)",
-                                text: Binding(
-                                    get: { perAppProfiles[index].bundleID },
-                                    set: { perAppProfiles[index].bundleID = $0 }
-                                )
+                                text: $profile.bundleID
                             )
                             .textFieldStyle(.plain)
                             .glassInputField()
 
-                            Picker(
-                                "Style",
-                                selection: Binding(
-                                    get: { perAppProfiles[index].style },
-                                    set: { perAppProfiles[index].style = $0 }
-                                )
-                            ) {
+                            Picker("Style", selection: $profile.style) {
                                 ForEach(profileStyles, id: \.self) { style in
                                     Text(style.capitalized).tag(style)
                                 }
@@ -1576,7 +1567,7 @@ private struct GeneralSettingsTab: View {
                             .pickerStyle(.menu)
 
                             Button(role: .destructive) {
-                                perAppProfiles.remove(at: index)
+                                perAppProfiles.removeAll { $0.id == profile.id }
                             } label: {
                                 Image(systemName: "trash")
                                     .font(.system(size: 11, weight: .semibold))
@@ -1589,20 +1580,14 @@ private struct GeneralSettingsTab: View {
                         HStack(spacing: VFSpacing.sm) {
                             TextField(
                                 "Optional prefix",
-                                text: Binding(
-                                    get: { perAppProfiles[index].prefix },
-                                    set: { perAppProfiles[index].prefix = $0 }
-                                )
+                                text: $profile.prefix
                             )
                             .textFieldStyle(.plain)
                             .glassInputField()
 
                             TextField(
                                 "Optional suffix",
-                                text: Binding(
-                                    get: { perAppProfiles[index].suffix },
-                                    set: { perAppProfiles[index].suffix = $0 }
-                                )
+                                text: $profile.suffix
                             )
                             .textFieldStyle(.plain)
                             .glassInputField()
@@ -1653,31 +1638,25 @@ private struct GeneralSettingsTab: View {
                         .foregroundStyle(VFColor.textSecondary)
                 }
 
-                ForEach(Array(snippetRows.indices), id: \.self) { index in
+                ForEach($snippetRows) { $row in
                     editorRowContainer {
                         HStack(spacing: VFSpacing.sm) {
                             TextField(
                                 "Spoken phrase",
-                                text: Binding(
-                                    get: { snippetRows[index].key },
-                                    set: { snippetRows[index].key = $0 }
-                                )
+                                text: $row.key
                             )
                             .textFieldStyle(.plain)
                             .glassInputField()
 
                             TextField(
                                 "Expansion text",
-                                text: Binding(
-                                    get: { snippetRows[index].value },
-                                    set: { snippetRows[index].value = $0 }
-                                )
+                                text: $row.value
                             )
                             .textFieldStyle(.plain)
                             .glassInputField()
 
                             Button(role: .destructive) {
-                                snippetRows.remove(at: index)
+                                snippetRows.removeAll { $0.id == row.id }
                             } label: {
                                 Image(systemName: "trash")
                                     .font(.system(size: 11, weight: .semibold))
@@ -1714,31 +1693,25 @@ private struct GeneralSettingsTab: View {
                         .foregroundStyle(VFColor.textSecondary)
                 }
 
-                ForEach(Array(correctionRows.indices), id: \.self) { index in
+                ForEach($correctionRows) { $row in
                     editorRowContainer {
                         HStack(spacing: VFSpacing.sm) {
                             TextField(
                                 "From",
-                                text: Binding(
-                                    get: { correctionRows[index].key },
-                                    set: { correctionRows[index].key = $0 }
-                                )
+                                text: $row.key
                             )
                             .textFieldStyle(.plain)
                             .glassInputField()
 
                             TextField(
                                 "To",
-                                text: Binding(
-                                    get: { correctionRows[index].value },
-                                    set: { correctionRows[index].value = $0 }
-                                )
+                                text: $row.value
                             )
                             .textFieldStyle(.plain)
                             .glassInputField()
 
                             Button(role: .destructive) {
-                                correctionRows.remove(at: index)
+                                correctionRows.removeAll { $0.id == row.id }
                             } label: {
                                 Image(systemName: "trash")
                                     .font(.system(size: 11, weight: .semibold))
@@ -2339,7 +2312,7 @@ private struct ProviderSettingsTab: View {
             case .info:
                 return VFColor.textSecondary
             case .warning:
-                return Color(red: 1.0, green: 0.74, blue: 0.34)
+                return VFColor.warning
             case .error:
                 return VFColor.error
             }
@@ -2384,15 +2357,21 @@ private struct ProviderSettingsTab: View {
             // TTS preview section removed.
         }
         .onAppear {
-            syncDownloadState(for: selectedKind)
-            DictationProviderPolicy.cloudFallbackEnabled = true
-            openAIAPIKey = DictationProviderPolicy.openAIAPIKey
-            openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
-            openAIBaseURL = DictationProviderPolicy.openAIBaseURL
-            openAIModel = DictationProviderPolicy.openAIModel
-            openAIAPIKeyStatusMessage = nil
-            whisperRuntimeInstaller.refreshState()
-            whisperInstaller.refreshState()
+            // Deferred one runloop tick: syncDownloadState/refreshState publish
+            // on shared ObservableObjects this view subscribes to. Doing that
+            // synchronously while the first render pass is still in flight
+            // trips AttributeGraph's modify-during-update precondition (abort).
+            DispatchQueue.main.async {
+                syncDownloadState(for: selectedKind)
+                DictationProviderPolicy.cloudFallbackEnabled = true
+                openAIAPIKey = DictationProviderPolicy.openAIAPIKey
+                openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
+                openAIBaseURL = DictationProviderPolicy.openAIBaseURL
+                openAIModel = DictationProviderPolicy.openAIModel
+                openAIAPIKeyStatusMessage = nil
+                whisperRuntimeInstaller.refreshState()
+                whisperInstaller.refreshState()
+            }
         }
     }
 
@@ -2677,9 +2656,9 @@ private struct ProviderSettingsTab: View {
         case .balanced:
             return VFColor.accentFallback
         case .best:
-            return Color(red: 0.98, green: 0.77, blue: 0.39)
+            return VFColor.presetBestTint
         case .cloud:
-            return Color(red: 0.56, green: 0.69, blue: 0.97)
+            return VFColor.presetCloudTint
         }
     }
 

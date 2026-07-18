@@ -135,7 +135,7 @@ struct FloatingBubbleView: View {
                 .transition(.scale.combined(with: .opacity))
             } else {
                 Image(systemName: state.sfSymbol)
-                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .font(VFFont.bubbleIcon)
                     .foregroundStyle(VFColor.textOnOverlay)
                     .contentTransition(.symbolEffect(.replace))
                     .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
@@ -150,7 +150,7 @@ struct FloatingBubbleView: View {
             guard state == .success else { return }
             successPulseScale = 0.9
             successPulseOpacity = 0.8
-            withAnimation(.easeOut(duration: 0.38)) {
+            withAnimation(VFAnimation.successPulse) {
                 successPulseScale = 1.4
                 successPulseOpacity = 0
             }
@@ -217,7 +217,7 @@ struct FloatingBubbleWithLabel: View {
 
                 if !stateSubject.liveTranscript.isEmpty && stateSubject.state != .idle {
                     Text(stateSubject.liveTranscript)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(VFFont.overlayCaption)
                         .foregroundStyle(VFColor.textSecondary)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
@@ -243,7 +243,7 @@ struct FloatingBubbleWithLabel: View {
     @ViewBuilder
     private func statusBadge(_ text: String, tint: Color) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .semibold, design: .rounded))
+            .font(VFFont.badgeLabel)
             .foregroundStyle(VFColor.textPrimary)
             .padding(.horizontal, VFSpacing.sm)
             .padding(.vertical, 3)

@@ -16,19 +16,35 @@ final class BubblePanelController {
     // MARK: - Public
 
     func show() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.show() }
+            return
+        }
         if panel == nil { createPanel() }
         panel?.orderFrontRegardless()
     }
 
     func hide() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.hide() }
+            return
+        }
         panel?.orderOut(nil)
     }
 
     func toggle() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.toggle() }
+            return
+        }
         if panel?.isVisible == true { hide() } else { show() }
     }
 
     func reposition(near point: NSPoint) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.reposition(near: point) }
+            return
+        }
         panel?.setFrameOrigin(point)
     }
 
@@ -41,8 +57,12 @@ final class BubblePanelController {
         )
         .environmentObject(stateSubject)
 
+        // Side length must fit the bubble content (bubbleDiameter + 48) plus the
+        // outer glow, which blurs well past the content frame. Undersizing the
+        // panel clips the glow and pulse rings at the window edge.
+        let side = VFSize.bubbleDiameter + 88
         let hostingView = NSHostingView(rootView: content)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 84, height: 84)
+        hostingView.frame = NSRect(x: 0, y: 0, width: side, height: side)
 
         let p = NSPanel(
             contentRect: hostingView.frame,

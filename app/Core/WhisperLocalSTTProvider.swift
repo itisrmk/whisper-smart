@@ -198,9 +198,15 @@ enum WhisperLocalRuntime {
         which.arguments = ["which", "whisper-cli"]
         let out = Pipe()
         which.standardOutput = out
+        // waitUntilExit() pumps the main runloop while blocking; when this is
+        // reached from a SwiftUI render pass (e.g. lazy singleton init inside
+        // a @StateObject), that re-enters the view update and aborts in
+        // AttributeGraph. A semaphore blocks without servicing the runloop.
+        let done = DispatchSemaphore(value: 0)
+        which.terminationHandler = { _ in done.signal() }
         do {
             try which.run()
-            which.waitUntilExit()
+            done.wait()
             if which.terminationStatus == 0,
                let line = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
