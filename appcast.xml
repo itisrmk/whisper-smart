@@ -6,6 +6,16 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.30</title>
+      <description>First fully automated CI release: certificate-signed build (stable signing identity — macOS permission grants now persist across updates), Sparkle-signed appcast entry. Includes the v0.2.28 dictation-latency work: instant dictation start and resident MLX engine (~85ms warm transcription).
+Release channel: **beta**
+Release artifact: `.build/release/Whisper-Smart-mac.dmg`
+Rollback reference: https://github.com/itisrmk/whisper-smart/releases/tag/v0.2.29</description>
+      <pubDate>Sat, 18 Jul 2026 05:33:37 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.30/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.30" sparkle:version="202607180533" sparkle:edSignature="QUIG4c4jxq0Esepv8lrHe1tI2z7/uAwV+kmXr5A+gQx5GL3n60B733ErG8jFRDClg/Z3juTJb+sdRAcAwH5wDQ==" length="2972052" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.29</title>
       <description>- New Sparkle update signing key: this release resets the update trust chain after the previous private key was lost. Install this version manually once; in-app updates work automatically from here on.
 - Includes everything in v0.2.28 (instant dictation start, resident MLX engine with ~85ms warm transcription).</description>
