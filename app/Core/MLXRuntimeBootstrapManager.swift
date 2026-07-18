@@ -49,7 +49,23 @@ final class MLXRuntimeBootstrapManager {
         timestamp: Date()
     )
 
+    /// Python command that already passed the import probe this app run.
+    /// Lets repeat `ensureRuntimeReady` calls skip the multi-second
+    /// `python -c "import …"` subprocess. Accessed only on `queue`.
+    private var verifiedPythonCommand: String?
+
     private init() {}
+
+    /// Fast, non-probing check for an installed runtime: file existence only,
+    /// no subprocess launch. Safe to call from the main thread.
+    func hasInstalledRuntimeArtifacts() -> Bool {
+        if pythonOverrideCommand() != nil { return true }
+        guard let runtimeRoot = try? resolveRuntimeRootDirectory() else { return false }
+        let venvPython = runtimeRoot.appendingPathComponent("venv/bin/python3")
+        let shimPython = runtimeRoot.appendingPathComponent("bin/python3")
+        return fileManager.isExecutableFile(atPath: venvPython.path)
+            || fileManager.isExecutableFile(atPath: shimPython.path)
+    }
 
     func statusSnapshot() -> MLXRuntimeBootstrapStatus {
         statusLock.lock()
@@ -138,6 +154,14 @@ private extension MLXRuntimeBootstrapManager {
     }
 
     func bootstrapLocked(forceRepair: Bool, allowInstall: Bool) throws -> String {
+        if forceRepair {
+            verifiedPythonCommand = nil
+        } else if let verified = verifiedPythonCommand,
+                  verified.contains("/") == false || fileManager.isExecutableFile(atPath: verified) {
+            // Already probe-verified this app run — skip the import subprocess.
+            return verified
+        }
+
         let runtimeRoot = try resolveRuntimeRootDirectory()
         let venvDirectory = runtimeRoot.appendingPathComponent("venv", isDirectory: true)
         let venvPythonURL = venvDirectory.appendingPathComponent("bin/python3")
@@ -153,6 +177,7 @@ private extension MLXRuntimeBootstrapManager {
                 runtimeDirectory: runtimeRoot,
                 pythonCommand: venvPythonURL.path
             )
+            verifiedPythonCommand = venvPythonURL.path
             return venvPythonURL.path
         }
 
@@ -163,6 +188,7 @@ private extension MLXRuntimeBootstrapManager {
                 runtimeDirectory: runtimeRoot,
                 pythonCommand: shimPythonURL.path
             )
+            verifiedPythonCommand = shimPythonURL.path
             return shimPythonURL.path
         }
 
@@ -241,22 +267,25 @@ private extension MLXRuntimeBootstrapManager {
             )
 
             do {
+                let readyCommand: String
                 if supportsVenv(pythonCommand: pythonCommand) {
-                    return try setupManagedVenvRuntime(
+                    readyCommand = try setupManagedVenvRuntime(
                         runtimeRoot: runtimeRoot,
                         venvDirectory: venvDirectory,
                         venvPythonURL: venvPythonURL,
                         pythonCommand: pythonCommand
                     )
+                } else {
+                    bootstrapLogger.warning("Python venv support unavailable for \(pythonCommand, privacy: .public); using managed PYTHONPATH runtime mode")
+                    readyCommand = try setupManagedSitePackagesRuntime(
+                        runtimeRoot: runtimeRoot,
+                        sitePackagesDirectory: sitePackagesDirectory,
+                        shimPythonURL: shimPythonURL,
+                        pythonCommand: pythonCommand
+                    )
                 }
-
-                bootstrapLogger.warning("Python venv support unavailable for \(pythonCommand, privacy: .public); using managed PYTHONPATH runtime mode")
-                return try setupManagedSitePackagesRuntime(
-                    runtimeRoot: runtimeRoot,
-                    sitePackagesDirectory: sitePackagesDirectory,
-                    shimPythonURL: shimPythonURL,
-                    pythonCommand: pythonCommand
-                )
+                verifiedPythonCommand = readyCommand
+                return readyCommand
             } catch {
                 attemptFailures.append("\(pythonCommand): \(error.localizedDescription)")
                 bootstrapLogger.warning("Parakeet runtime bootstrap attempt failed for \(pythonCommand, privacy: .public): \(error.localizedDescription, privacy: .public)")

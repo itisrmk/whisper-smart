@@ -65,7 +65,7 @@ protocol STTProvider: AnyObject {
 }
 ```
 
-Implementations: `AppleSpeechSTTProvider` (built-in fallback), `MLXSTTProvider` (local Parakeet + Whisper via MLX — spawns `scripts/mlx_stt_infer.py` in an app-managed Python venv), `OpenAIWhisperAPISTTProvider` (cloud). Model catalog and selection live in `MLXModelCatalog.swift`; model installs in `MLXModelInstaller.swift`; the Python runtime bootstrap (venv + pip install parakeet-mlx/mlx-whisper) in `MLXRuntimeBootstrapManager.swift`. Provider selection and fallback logic lives in `STTProviderKind.swift` / `STTProviderDiagnostics.swift`. Local MLX providers require Apple Silicon.
+Implementations: `AppleSpeechSTTProvider` (built-in fallback), `MLXSTTProvider` (local Parakeet + Whisper via MLX — keeps a resident `scripts/mlx_stt_infer.py --serve` daemon in an app-managed Python venv; the model loads once, requests go over stdin/stdout JSONL, and the daemon is prewarmed at provider init), `OpenAIWhisperAPISTTProvider` (cloud). Model catalog and selection live in `MLXModelCatalog.swift`; model installs in `MLXModelInstaller.swift`; the Python runtime bootstrap (venv + pip install parakeet-mlx/mlx-whisper) in `MLXRuntimeBootstrapManager.swift`. Provider selection and fallback logic lives in `STTProviderKind.swift` / `STTProviderDiagnostics.swift`. Local MLX providers require Apple Silicon.
 
 ### Text Injection
 
