@@ -6,6 +6,16 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.3.1</title>
+      <description>Automated DMG release for v0.3.1.
+Release channel: **beta**
+Release artifact: `.build/release/Whisper-Smart-mac.dmg`
+Rollback reference: https://github.com/itisrmk/whisper-smart/releases/tag/v0.3.0</description>
+      <pubDate>Sat, 18 Jul 2026 08:32:48 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.3.1/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.3.1" sparkle:version="202607180832" sparkle:edSignature="/UfC1yAjjBnTNqf7KLixdGwrDmWFnEEK0FR+PvV4g1h89UeNAikFP/1ohcyTEbUcKMX5MTNMR3yELYfUALajDg==" length="2488148" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.3.0</title>
       <description>Automated DMG release for v0.3.0.
 Release channel: **beta**
