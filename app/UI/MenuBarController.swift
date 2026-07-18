@@ -38,18 +38,73 @@ final class MenuBarController {
         self.stateSubject = stateSubject
     }
 
+    // MARK: - Logo
+
+    /// The Whisper Smart logo rendered as a menu-bar template image, or nil
+    /// if the bundled resource cannot be found (falls back to SF Symbols).
+    private static let logoImage: NSImage? = {
+        guard let url = logoResourceURL(), let image = NSImage(contentsOf: url) else {
+            NSLog("[MenuBar] Logo resource not found; using mic symbol")
+            return nil
+        }
+        image.isTemplate = true
+        image.size = NSSize(width: VFSize.menuBarIcon, height: VFSize.menuBarIcon)
+        return image
+    }()
+
+    /// Locates the bundled logo without SwiftPM's `Bundle.module` accessor —
+    /// that accessor traps at launch in the packaged .app and does not exist
+    /// for the raw-swiftc QA harness builds. Mirrors `VFFontRegistrar`.
+    private static func logoResourceURL() -> URL? {
+        let bundleName = "WhisperSmart_App.bundle"
+
+        var candidates: [URL] = []
+        if let resourceURL = Bundle.main.resourceURL {
+            candidates.append(resourceURL.appendingPathComponent(bundleName))
+        }
+        if let executableURL = Bundle.main.executableURL {
+            candidates.append(
+                executableURL.deletingLastPathComponent().appendingPathComponent(bundleName)
+            )
+        }
+        candidates.append(Bundle.main.bundleURL.appendingPathComponent(bundleName))
+
+        for candidate in candidates {
+            if let bundle = Bundle(url: candidate),
+               let url = bundle.url(
+                   forResource: "MenuBarIcon", withExtension: "png", subdirectory: "Icons"
+               ) {
+                return url
+            }
+        }
+
+        return Bundle.main.url(
+            forResource: "MenuBarIcon", withExtension: "png", subdirectory: "Icons"
+        )
+    }
+
+    /// Applies the idle icon (custom logo when available, mic symbol otherwise).
+    private func applyIdleImage(to button: NSStatusBarButton, description: String) {
+        if let logo = Self.logoImage {
+            button.image = logo
+            button.image?.accessibilityDescription = description
+        } else {
+            button.image = NSImage(
+                systemSymbolName: "mic.fill",
+                accessibilityDescription: description
+            )
+            button.image?.size = NSSize(width: VFSize.menuBarIcon, height: VFSize.menuBarIcon)
+            button.image?.isTemplate = true
+        }
+    }
+
     // MARK: - Setup
 
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = item.button {
-            button.image = NSImage(
-                systemSymbolName: "mic.fill",
-                accessibilityDescription: "Whisper Smart Dictation"
-            )
-            button.image?.size = NSSize(width: VFSize.menuBarIcon, height: VFSize.menuBarIcon)
-            button.image?.isTemplate = true
+            applyIdleImage(to: button, description: "Whisper Smart Dictation")
         }
 
         item.menu = buildMenu()
@@ -60,20 +115,25 @@ final class MenuBarController {
     func updateIcon(for state: BubbleState) {
         guard let button = statusItem?.button else { return }
         currentBubbleState = state
-        let symbolName: String
         switch state {
-        case .idle:         symbolName = "mic.fill"
-        case .listening:    symbolName = "mic.badge.plus"
-        case .transcribing: symbolName = "text.cursor"
-        case .success:      symbolName = "checkmark.circle.fill"
-        case .error:        symbolName = "exclamationmark.triangle.fill"
+        case .idle:
+            applyIdleImage(to: button, description: state.label)
+        case .listening, .transcribing, .success, .error:
+            let symbolName: String
+            switch state {
+            case .listening:    symbolName = "mic.badge.plus"
+            case .transcribing: symbolName = "text.cursor"
+            case .success:      symbolName = "checkmark.circle.fill"
+            case .error:        symbolName = "exclamationmark.triangle.fill"
+            default:            symbolName = "mic.fill"
+            }
+            button.image = NSImage(
+                systemSymbolName: symbolName,
+                accessibilityDescription: state.label
+            )
+            button.image?.size = NSSize(width: VFSize.menuBarIcon, height: VFSize.menuBarIcon)
+            button.image?.isTemplate = true
         }
-        button.image = NSImage(
-            systemSymbolName: symbolName,
-            accessibilityDescription: state.label
-        )
-        button.image?.size = NSSize(width: VFSize.menuBarIcon, height: VFSize.menuBarIcon)
-        button.image?.isTemplate = true
 
         // Show/hide recovery items based on error state. Hotkey recovery is
         // only shown when the current error is actually hotkey-related.
