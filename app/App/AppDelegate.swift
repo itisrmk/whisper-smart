@@ -409,15 +409,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            if self.deferProviderRefreshIfSessionActive(reason: "Provider changed in settings") {
-                return
-            }
-            self.refreshProviderResolution(logReason: "Provider changed in settings")
+            // Defer past the current run-loop turn: posts can originate from
+            // inside a SwiftUI view update, and replaceProvider()'s UI cascade
+            // must never run while a view graph is mid-update (AttributeGraph
+            // precondition crash).
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if self.deferProviderRefreshIfSessionActive(reason: "Provider changed in settings") {
+                    return
+                }
+                self.refreshProviderResolution(logReason: "Provider changed in settings")
 
-            if STTProviderKind.loadSelection() != .parakeet {
-                Task {
-                    await ParakeetProvisioningCoordinator.shared.cancelRetries()
+                if STTProviderKind.loadSelection() != .parakeet {
+                    Task {
+                        await ParakeetProvisioningCoordinator.shared.cancelRetries()
+                    }
                 }
             }
         }
@@ -439,11 +445,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            if self.deferProviderRefreshIfSessionActive(reason: "Parakeet model source changed") {
-                return
+            // Deferred for the same reason as the provider-change observer.
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if self.deferProviderRefreshIfSessionActive(reason: "Parakeet model source changed") {
+                    return
+                }
+                self.refreshProviderResolution(logReason: "Parakeet model source changed")
             }
-            self.refreshProviderResolution(logReason: "Parakeet model source changed")
         }
     }
 
@@ -490,8 +499,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            self.updateBubbleVisibility(for: self.stateMachine.state)
+            // UserDefaults posts this synchronously from every defaults write,
+            // including writes made during SwiftUI view updates in Settings.
+            // Panel show/hide forces layout of other hosting views, so it must
+            // run after the current view update completes.
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.updateBubbleVisibility(for: self.stateMachine.state)
+            }
         }
     }
 

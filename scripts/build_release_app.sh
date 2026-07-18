@@ -27,11 +27,14 @@ if [[ "$BUNDLE_ID" != "$EXPECTED_BUNDLE_ID" ]]; then
   exit 1
 fi
 
-rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-
 echo "Building release binary for ${APP_NAME}..."
 swift build -c release --package-path "$REPO_ROOT"
+
+# Create the bundle AFTER swift build: SwiftPM prunes unknown directories
+# inside its product folder during the build, which used to delete the
+# freshly created bundle skeleton and fail the copy step below.
+rm -rf "$APP_BUNDLE"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 # Copy the built executable
 cp "$REPO_ROOT/.build/arm64-apple-macosx/release/$APP_NAME" "$EXECUTABLE_PATH"

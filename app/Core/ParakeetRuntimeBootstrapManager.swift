@@ -43,7 +43,7 @@ final class ParakeetRuntimeBootstrapManager {
 
     private var status = ParakeetRuntimeBootstrapStatus(
         phase: .idle,
-        detail: "Runtime not bootstrapped yet. It will auto-install in the background.",
+        detail: "Runtime not installed. Install it from Settings -> Provider.",
         runtimeDirectory: nil,
         pythonCommand: nil,
         timestamp: Date()
@@ -57,7 +57,11 @@ final class ParakeetRuntimeBootstrapManager {
         return status
     }
 
-    func ensureRuntimeReady(forceRepair: Bool = false) throws -> String {
+    /// - Parameter allowInstall: when false (the default), only verifies an
+    ///   already-installed runtime and throws if none exists. Installation
+    ///   (venv creation, pip installs, toolchain downloads) requires the
+    ///   user-initiated setup path in Settings -> Provider to pass true.
+    func ensureRuntimeReady(forceRepair: Bool = false, allowInstall: Bool = false) throws -> String {
         if let override = pythonOverrideCommand() {
             // Never trust override blindly. Validate required imports first.
             do {
@@ -79,14 +83,14 @@ final class ParakeetRuntimeBootstrapManager {
         }
 
         return try queue.sync {
-            try bootstrapLocked(forceRepair: forceRepair)
+            try bootstrapLocked(forceRepair: forceRepair, allowInstall: allowInstall)
         }
     }
 
     func repairRuntimeInBackground() {
         queue.async {
             do {
-                _ = try self.bootstrapLocked(forceRepair: true)
+                _ = try self.bootstrapLocked(forceRepair: true, allowInstall: true)
             } catch {
                 bootstrapLogger.error("Background Parakeet runtime repair failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -133,7 +137,7 @@ private extension ParakeetRuntimeBootstrapManager {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    func bootstrapLocked(forceRepair: Bool) throws -> String {
+    func bootstrapLocked(forceRepair: Bool, allowInstall: Bool) throws -> String {
         let runtimeRoot = try resolveRuntimeRootDirectory()
         let venvDirectory = runtimeRoot.appendingPathComponent("venv", isDirectory: true)
         let venvPythonURL = venvDirectory.appendingPathComponent("bin/python3")
@@ -160,6 +164,18 @@ private extension ParakeetRuntimeBootstrapManager {
                 pythonCommand: shimPythonURL.path
             )
             return shimPythonURL.path
+        }
+
+        guard allowInstall else {
+            updateStatus(
+                phase: .idle,
+                detail: "Runtime not installed. Install it from Settings -> Provider.",
+                runtimeDirectory: runtimeRoot,
+                pythonCommand: nil
+            )
+            throw ParakeetRuntimeBootstrapError(
+                message: "Parakeet runtime is not installed. Open Settings -> Provider and click Install Parakeet."
+            )
         }
 
         updateStatus(
@@ -926,7 +942,11 @@ private extension ParakeetRuntimeBootstrapManager {
         statusLock.unlock()
 
         bootstrapLogger.info("Parakeet runtime status: \(phase.rawValue, privacy: .public) - \(detail, privacy: .public)")
-        NotificationCenter.default.post(name: .parakeetRuntimeBootstrapDidChange, object: nil)
+        // Post on main: NotificationCenter.publisher delivers on the posting
+        // thread, and SwiftUI observers must not mutate state off-main.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .parakeetRuntimeBootstrapDidChange, object: nil)
+        }
     }
 }
 

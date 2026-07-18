@@ -30,6 +30,11 @@ actor ParakeetProvisioningCoordinator {
             cancelRetryTasks()
             return
         }
+        guard ParakeetSetupPolicy.setupConsentGranted else {
+            provisioningLogger.info("Skipping Parakeet setup (reason=\(reason, privacy: .public)): user has not initiated setup")
+            cancelRetryTasks()
+            return
+        }
 
         ensureRecommendedSource()
 
@@ -44,7 +49,7 @@ actor ParakeetProvisioningCoordinator {
 
         Task.detached(priority: .utility) { [runtimeBootstrap] in
             do {
-                _ = try runtimeBootstrap.ensureRuntimeReady(forceRepair: forceRuntimeRepair)
+                _ = try runtimeBootstrap.ensureRuntimeReady(forceRepair: forceRuntimeRepair, allowInstall: true)
             } catch {
                 provisioningLogger.warning("Background runtime bootstrap attempt failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -52,7 +57,8 @@ actor ParakeetProvisioningCoordinator {
     }
 
     func handleModelDownloadEvent(isReady: Bool) async {
-        guard STTProviderKind.loadSelection() == .parakeet else { return }
+        guard STTProviderKind.loadSelection() == .parakeet,
+              ParakeetSetupPolicy.setupConsentGranted else { return }
 
         if isReady {
             modelRetryCount = 0
@@ -65,7 +71,8 @@ actor ParakeetProvisioningCoordinator {
     }
 
     func handleRuntimeBootstrapStatusChange(_ status: ParakeetRuntimeBootstrapStatus) async {
-        guard STTProviderKind.loadSelection() == .parakeet else { return }
+        guard STTProviderKind.loadSelection() == .parakeet,
+              ParakeetSetupPolicy.setupConsentGranted else { return }
 
         switch status.phase {
         case .ready:

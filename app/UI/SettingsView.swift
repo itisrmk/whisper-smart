@@ -1485,6 +1485,10 @@ private struct GeneralSettingsTab: View {
             }
         }
         .onAppear {
+            // Deferred: this runs during the settings window's initial layout
+            // pass; the overlay-mode getter can write UserDefaults (legacy-key
+            // migration), which re-enters the view graph mid-update.
+            DispatchQueue.main.async {
             // Ensure old `showBubble` users get migrated to the new mode key.
             overlayModeRaw = DictationOverlaySettings.overlayMode.rawValue
             recordingSoundsEnabled = DictationOverlaySettings.recordingSoundsEnabled
@@ -1507,9 +1511,15 @@ private struct GeneralSettingsTab: View {
             perAppProfiles = parsePerAppProfiles(from: perAppDefaultsJSON)
             snippetRows = parsePhraseMap(from: snippetsJSON)
             correctionRows = parsePhraseMap(from: correctionDictionaryJSON)
+            }
         }
         .onChange(of: overlayModeRaw) { _, newValue in
-            DictationOverlaySettings.overlayMode = DictationOverlayMode(rawValue: newValue) ?? .topCenterWaveform
+            // Write-if-different: an unconditional write here echoes back into
+            // this same @AppStorage key mid-update via synchronous KVO.
+            let mode = DictationOverlayMode(rawValue: newValue) ?? .topCenterWaveform
+            if DictationOverlaySettings.overlayMode != mode {
+                DictationOverlaySettings.overlayMode = mode
+            }
         }
         .onChange(of: perAppProfiles) { _, newValue in
             persistPerAppProfiles(newValue)
@@ -2318,6 +2328,7 @@ private struct ProviderSettingsTab: View {
     @State private var openAIModel = DictationProviderPolicy.openAIModel
     @State private var openAIAPIKeyStatusMessage: String?
     @State private var openAIAPIKeyStatusSeverity: ProviderMessageSeverity = .info
+    @State private var presetDiagnostics: [STTProviderKind: ProviderRuntimeDiagnostics] = [:]
 
     private enum ProviderMessageSeverity {
         case info
@@ -2351,7 +2362,7 @@ private struct ProviderSettingsTab: View {
         VStack(spacing: VFSpacing.lg) {
             NeuSection(icon: "waveform.and.mic", title: "Smart Model Selection") {
                 VStack(alignment: .leading, spacing: VFSpacing.lg) {
-                    Text("Choose a one-click STT preset. Parakeet setup is user-initiated from this tab; Whisper local runtime still requires host build tools (Apple Command Line Tools + make).")
+                    Text("Choose a one-click STT preset. Model downloads and runtime installs only start when you click Install; Whisper local requires Apple Command Line Tools and cmake on the host.")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
 
@@ -2374,15 +2385,43 @@ private struct ProviderSettingsTab: View {
             // TTS preview section removed.
         }
         .onAppear {
-            syncDownloadState(for: selectedKind)
-            DictationProviderPolicy.cloudFallbackEnabled = true
-            openAIAPIKey = DictationProviderPolicy.openAIAPIKey
-            openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
-            openAIBaseURL = DictationProviderPolicy.openAIBaseURL
-            openAIModel = DictationProviderPolicy.openAIModel
-            openAIAPIKeyStatusMessage = nil
-            whisperRuntimeInstaller.refreshState()
-            whisperInstaller.refreshState()
+            // Deferred: onAppear runs inside the tab's first layout pass, and
+            // this block writes UserDefaults and mutates @StateObject phases —
+            // both of which re-enter the view graph mid-update and crash
+            // (AttributeGraph precondition failure).
+            DispatchQueue.main.async {
+                syncDownloadState(for: selectedKind)
+                DictationProviderPolicy.cloudFallbackEnabled = true
+                openAIAPIKey = DictationProviderPolicy.openAIAPIKey
+                openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
+                openAIBaseURL = DictationProviderPolicy.openAIBaseURL
+                openAIModel = DictationProviderPolicy.openAIModel
+                openAIAPIKeyStatusMessage = nil
+                whisperRuntimeInstaller.refreshState()
+                whisperInstaller.refreshState()
+                refreshPresetDiagnostics()
+            }
+        }
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .sttProviderDidChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            refreshPresetDiagnostics()
+        }
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .parakeetRuntimeBootstrapDidChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            refreshPresetDiagnostics()
+        }
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .modelDownloadDidChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            refreshPresetDiagnostics()
         }
     }
 
@@ -2487,12 +2526,17 @@ private struct ProviderSettingsTab: View {
                     .font(VFFont.settingsCaption)
                     .foregroundStyle(VFColor.textSecondary)
             }
-            .onDisappear {
+            .onDisappear { [openAIAPIKey] in
                 // Save an edited API key even if the user never pressed
                 // Return or the save button before leaving the tab.
-                let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(openAIAPIKey)
-                if normalized != DictationProviderPolicy.openAIAPIKey {
-                    persistOpenAIAPIKey()
+                // Deferred: onDisappear runs during the view update that
+                // removes this tab; persisting posts .sttProviderDidChange
+                // whose cascade must not run mid-update.
+                DispatchQueue.main.async {
+                    let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(openAIAPIKey)
+                    if normalized != DictationProviderPolicy.openAIAPIKey {
+                        persistOpenAIAPIKey(normalized)
+                    }
                 }
             }
         } else if selectedKind == .whisper {
@@ -2505,9 +2549,9 @@ private struct ProviderSettingsTab: View {
                     switch whisperRuntimeInstaller.phase {
                     case .notInstalled:
                         profileActionButton(title: "Install runtime", enabled: true) {
-                            whisperRuntimeInstaller.installRuntime()
+                            installWhisperRuntimeThenDownloadModel()
                         }
-                        Text("Builds and installs whisper-cli in app-managed runtime storage. Requires Apple Command Line Tools (xcode-select) and make on host.")
+                        Text("Builds and installs whisper-cli in app-managed runtime storage. Requires Apple Command Line Tools (xcode-select) and cmake on host.")
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.textSecondary)
                     case .installing:
@@ -2518,6 +2562,9 @@ private struct ProviderSettingsTab: View {
                     case .ready:
                         installedChip(label: "Runtime Ready")
                     case .failed(let message):
+                        profileActionButton(title: "Retry install", enabled: true) {
+                            installWhisperRuntimeThenDownloadModel()
+                        }
                         statusText(sanitizedStatusMessage(message, fallback: "Couldn’t install runtime. Install required tools, then try again."), severity: runtimeFailureSeverity(for: message))
                     }
                 }
@@ -2550,6 +2597,9 @@ private struct ProviderSettingsTab: View {
                     case .ready:
                         installedChip(label: "Model Ready")
                     case .failed(let message):
+                        profileActionButton(title: "Retry download", enabled: true) {
+                            whisperInstaller.downloadSelectedModel()
+                        }
                         statusText(sanitizedStatusMessage(message, fallback: "Couldn’t download the model. Please retry."), severity: .error)
                     }
                 }
@@ -2558,8 +2608,11 @@ private struct ProviderSettingsTab: View {
     }
 
     private func presetCard(_ preset: SmartModelPreset) -> some View {
-        let diagnostics = STTProviderResolver.diagnostics(for: preset.provider)
-        let presetStatus = presetStatusMessage(for: preset, diagnostics: diagnostics)
+        // Diagnostics are cached in @State and refreshed outside view updates.
+        // Computing them here ran SFSpeechRecognizer/TCC/Keychain work inside
+        // body on every render — the source of an AttributeGraph crash.
+        let presetStatus = presetDiagnostics[preset.provider]
+            .flatMap { presetStatusMessage(for: preset, diagnostics: $0) }
         let isActive = activePreset == preset
 
         return VStack(alignment: .leading, spacing: VFSpacing.md) {
@@ -2697,9 +2750,12 @@ private struct ProviderSettingsTab: View {
             if !ModelVariant.parakeetCTC06B.isDownloaded {
                 switch downloadState.phase {
                 case .downloading(let progress):
-                    installedChip(label: "Preparing \(Int(progress * 100))%", color: VFColor.accentFallback)
+                    installedChip(label: "Installing \(Int(progress * 100))%", color: VFColor.accentFallback)
+                case .failed:
+                    installedChip(label: "Install failed", color: VFColor.error)
                 default:
-                    installedChip(label: "Preparing…", color: VFColor.accentFallback)
+                    // Nothing runs until the user clicks Install below.
+                    installedChip(label: "Not installed", color: VFColor.textTertiary)
                 }
             } else {
                 installedChip(label: "Installed")
@@ -2734,7 +2790,10 @@ private struct ProviderSettingsTab: View {
             selectProvider(.whisper)
             whisperInstaller.refreshState()
         case .balanced:
-            downloadParakeetProfile()
+            // Select only. The 650 MB model download and Python runtime
+            // install start when the user clicks Install Parakeet.
+            selectProvider(.parakeet)
+            syncDownloadState(for: .parakeet)
         case .best:
             whisperInstaller.setTier(.largeV3Turbo)
             selectProvider(.whisper)
@@ -2744,35 +2803,30 @@ private struct ProviderSettingsTab: View {
         }
     }
 
-    private func downloadParakeetProfile() {
-        _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
-            id: "hf_parakeet_tdt06b_v3_onnx",
-            for: ModelVariant.parakeetCTC06B.id
-        )
-        selectProvider(.parakeet)
-        syncDownloadState(for: .parakeet)
-        downloadState.reset()
-        ModelDownloaderService.shared.download(variant: .parakeetCTC06B, state: downloadState)
-    }
-
     private func downloadWhisperLightProfile() {
         whisperInstaller.setTier(whisperModelInstalled([.tinyEn]) ? .tinyEn : .baseEn)
         selectProvider(.whisper)
-        if !whisperRuntimeIsReady {
-            whisperRuntimeInstaller.installRuntime()
-            return
-        }
-        whisperInstaller.downloadSelectedModel()
+        installWhisperRuntimeThenDownloadModel()
     }
 
     private func downloadWhisperLargeProfile() {
         whisperInstaller.setTier(.largeV3Turbo)
         selectProvider(.whisper)
-        if !whisperRuntimeIsReady {
-            whisperRuntimeInstaller.installRuntime()
+        installWhisperRuntimeThenDownloadModel()
+    }
+
+    /// One click installs everything: runtime first if needed, then the model
+    /// download chains automatically instead of requiring a second click.
+    private func installWhisperRuntimeThenDownloadModel() {
+        if whisperRuntimeIsReady {
+            whisperInstaller.downloadSelectedModel()
             return
         }
-        whisperInstaller.downloadSelectedModel()
+        whisperRuntimeInstaller.installRuntime { success in
+            if success {
+                whisperInstaller.downloadSelectedModel()
+            }
+        }
     }
 
     private var whisperRuntimeIsReady: Bool {
@@ -2912,13 +2966,16 @@ private struct ProviderSettingsTab: View {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return fallback }
 
+        // Only hide messages that are pure plumbing noise. Installer errors
+        // legitimately contain "exit N" or tool output — blanking them left
+        // users with a generic message and no way to fix the real problem.
         let lower = trimmed.lowercased()
-        if lower.contains("http") || lower.contains("nsurl") || lower.contains("domain=") || lower.contains("code=") || lower.contains("exit ") {
+        if lower.contains("nsurl") || lower.contains("domain=") {
             return fallback
         }
 
         let firstLine = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
-        return firstLine.count > 140 ? fallback : firstLine
+        return firstLine.count > 220 ? String(firstLine.prefix(217)) + "…" : firstLine
     }
 
     private func profileActionButton(
@@ -3034,6 +3091,17 @@ private struct ProviderSettingsTab: View {
             downloadState.rebind(to: variant)
         }
     }
+
+    /// Recomputes provider diagnostics for every preset card. Must only run
+    /// outside a view update (deferred onAppear, notification delivery) —
+    /// diagnostics touch TCC, Keychain, and the filesystem.
+    private func refreshPresetDiagnostics() {
+        var map: [STTProviderKind: ProviderRuntimeDiagnostics] = [:]
+        for preset in SmartModelPreset.allCases {
+            map[preset.provider] = STTProviderResolver.diagnostics(for: preset.provider)
+        }
+        presetDiagnostics = map
+    }
 }
 
 private struct ProviderDiagnosticsView: View {
@@ -3092,6 +3160,7 @@ private struct ProviderDiagnosticsView: View {
             if shouldShowParakeetRepairAction {
                 HStack(spacing: VFSpacing.sm) {
                     Button {
+                        ParakeetSetupPolicy.setupConsentGranted = true
                         ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
                     } label: {
                         HStack(spacing: VFSpacing.xs) {
@@ -3241,6 +3310,7 @@ private struct DiagnosticLine: View {
 private struct ModelDownloadRow: View {
     let kind: STTProviderKind
     @ObservedObject var downloadState: ModelDownloadState
+    @State private var runtimeStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
 
     var body: some View {
         VStack(alignment: .leading, spacing: VFSpacing.sm) {
@@ -3270,11 +3340,34 @@ private struct ModelDownloadRow: View {
             NeuDivider()
 
             DiagnosticLine(label: "Status", value: downloadStatusDetail)
+            if kind == .parakeet {
+                DiagnosticLine(label: "Runtime", value: runtimeStatusLine)
+            }
             DiagnosticLine(label: "Source", value: downloadState.variant.configuredSourceDisplayName)
             DiagnosticLine(label: "Files", value: "encoder-model.int8.onnx + decoder_joint-model.int8.onnx + config.json + nemo128.onnx + vocab.txt")
             Text("Installation is manual. Click Install when you want to set up Parakeet.")
                 .font(VFFont.settingsCaption)
                 .foregroundStyle(VFColor.textSecondary)
+
+            if kind == .parakeet, runtimeStatus.phase == .failed {
+                HStack(alignment: .top, spacing: VFSpacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(VFColor.error)
+                    Text(runtimeStatus.detail)
+                        .font(VFFont.settingsCaption)
+                        .foregroundStyle(VFColor.error)
+                }
+                Button {
+                    ParakeetSetupPolicy.setupConsentGranted = true
+                    ParakeetRuntimeBootstrapManager.shared.repairRuntimeInBackground()
+                } label: {
+                    Text("Retry runtime setup")
+                        .font(VFFont.pillLabel)
+                        .foregroundStyle(VFColor.textPrimary)
+                }
+                .buttonStyle(GlassCapsuleButtonStyle(tone: .neutral))
+            }
 
             if let modelCardURL = URL(string: "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3") {
                 Link(destination: modelCardURL) {
@@ -3340,6 +3433,26 @@ private struct ModelDownloadRow: View {
                         .stroke(VFColor.glassBorder.opacity(0.85), lineWidth: 0.8)
                 )
         )
+        .onReceive(
+            NotificationCenter.default
+                .publisher(for: .parakeetRuntimeBootstrapDidChange)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            runtimeStatus = ParakeetRuntimeBootstrapManager.shared.statusSnapshot()
+        }
+    }
+
+    private var runtimeStatusLine: String {
+        switch runtimeStatus.phase {
+        case .idle:
+            return "Not installed"
+        case .bootstrapping:
+            return "Installing… \(runtimeStatus.detail)"
+        case .ready:
+            return "Ready"
+        case .failed:
+            return "Failed"
+        }
     }
 
     private var modelArtwork: some View {
@@ -3481,6 +3594,10 @@ private struct ModelDownloadRow: View {
 
     private func triggerSetup(forceRuntimeRepair: Bool = false) {
         guard kind == .parakeet else { return }
+
+        // The user clicked Install/Retry — this is the consent that unlocks
+        // model downloads and runtime installs everywhere else.
+        ParakeetSetupPolicy.setupConsentGranted = true
 
         let sourceStore = ParakeetModelSourceConfigurationStore.shared
         if sourceStore.selectedSourceID(for: downloadState.variant.id) != "hf_parakeet_tdt06b_v3_onnx" {

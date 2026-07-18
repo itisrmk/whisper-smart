@@ -33,24 +33,38 @@ final class WhisperRuntimeInstaller: ObservableObject {
         }
     }
 
-    func installRuntime() {
-        guard !isInstalling else { return }
+    /// - Parameter completion: called on the main queue with `true` when the
+    ///   runtime became ready, so callers can chain the model download for a
+    ///   true one-click install.
+    func installRuntime(completion: ((Bool) -> Void)? = nil) {
+        guard !isInstalling else {
+            completion?(false)
+            return
+        }
         phase = .installing
         installCancelled = false
 
         queue.async {
             do {
                 let cliPath = try self.installManagedRuntime()
-                guard !self.installCancelled else { return }
+                guard !self.installCancelled else {
+                    DispatchQueue.main.async { completion?(false) }
+                    return
+                }
                 DictationProviderPolicy.whisperCLIPath = cliPath
                 DispatchQueue.main.async {
                     self.phase = .ready(path: cliPath)
+                    completion?(true)
                 }
                 whisperRuntimeLogger.info("Managed Whisper runtime install completed: \(cliPath, privacy: .public)")
             } catch {
-                guard !self.installCancelled else { return }
+                guard !self.installCancelled else {
+                    DispatchQueue.main.async { completion?(false) }
+                    return
+                }
                 DispatchQueue.main.async {
                     self.phase = .failed(message: error.localizedDescription)
+                    completion?(false)
                 }
             }
         }
@@ -116,8 +130,22 @@ private extension WhisperRuntimeInstaller {
             ])
         }
 
+        // whisper.cpp's Makefile is a deprecated cmake wrapper with no
+        // `whisper-cli` target — building via make fails on every machine.
+        // Drive cmake directly.
         let jobs = max(ProcessInfo.processInfo.processorCount / 2, 1)
-        try runCommand("/usr/bin/env", ["make", "-j\(jobs)", "whisper-cli"], cwd: extractedDir, step: "build whisper-cli")
+        try runCommand(
+            "/usr/bin/env",
+            ["cmake", "-B", "build", "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_SHARED_LIBS=OFF"],
+            cwd: extractedDir,
+            step: "configure whisper-cli build"
+        )
+        try runCommand(
+            "/usr/bin/env",
+            ["cmake", "--build", "build", "-j", "\(jobs)", "--target", "whisper-cli"],
+            cwd: extractedDir,
+            step: "build whisper-cli"
+        )
 
         let builtCandidates = [
             extractedDir.appendingPathComponent("build/bin/whisper-cli"),
@@ -159,9 +187,9 @@ private extension WhisperRuntimeInstaller {
             ])
         }
 
-        guard commandExists("make") else {
+        guard commandExists("cmake") else {
             throw NSError(domain: "WhisperRuntimeInstaller", code: 11, userInfo: [
-                NSLocalizedDescriptionKey: "Missing 'make' build tool. Install Apple Command Line Tools with 'xcode-select --install', then retry."
+                NSLocalizedDescriptionKey: "Missing 'cmake' build tool (it is not part of Apple Command Line Tools). Install it with 'brew install cmake' or from cmake.org, then retry."
             ])
         }
 
@@ -268,7 +296,7 @@ private extension WhisperRuntimeInstaller {
         }
     }
 
-    func runCommand(_ executable: String, _ arguments: [String], cwd: URL? = nil, step: String) throws {
+    func runCommand(_ executable: String, _ arguments: [String], cwd: URL? = nil, step: String, timeout: TimeInterval = 30 * 60) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -280,27 +308,54 @@ private extension WhisperRuntimeInstaller {
         process.standardError = stderr
         installProcess = process
 
+        // Stream pipes as the process runs: reading only after exit deadlocks
+        // once the child fills the ~64 KB pipe buffer (make/cmake easily do).
+        let stdoutData = NSMutableData()
+        let stderrData = NSMutableData()
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty { stdoutData.append(chunk) }
+        }
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty { stderrData.append(chunk) }
+        }
+
+        let completion = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in completion.signal() }
+
+        defer {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            installProcess = nil
+        }
+
         do {
             try process.run()
         } catch {
-            installProcess = nil
             throw NSError(domain: "WhisperRuntimeInstaller", code: 8, userInfo: [
                 NSLocalizedDescriptionKey: "Failed to \(step): \(error.localizedDescription)"
             ])
         }
 
-        process.waitUntilExit()
-        installProcess = nil
+        if completion.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            if completion.wait(timeout: .now() + 2) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = completion.wait(timeout: .now() + 2)
+            }
+            throw NSError(domain: "WhisperRuntimeInstaller", code: 13, userInfo: [
+                NSLocalizedDescriptionKey: "Timed out while trying to \(step) (\(Int(timeout / 60)) min). Check your network and free disk space, then retry."
+            ])
+        }
 
-        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let output = String(data: stderrData as Data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? String(data: stdoutData as Data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? ""
 
         guard process.terminationStatus == 0 else {
             throw NSError(domain: "WhisperRuntimeInstaller", code: 9, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to \(step) (exit \(process.terminationStatus)). \(output)"
+                NSLocalizedDescriptionKey: "Failed to \(step) (exit \(process.terminationStatus)). \(output.suffix(400))"
             ])
         }
     }

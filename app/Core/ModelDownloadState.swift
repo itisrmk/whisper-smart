@@ -113,10 +113,16 @@ final class ModelDownloadState: ObservableObject {
 
     private func setPhase(_ newPhase: Phase) {
         if Thread.isMainThread {
-            phase = newPhase
+            // Equality guard: setPhase can be reached from view-update
+            // contexts (onAppear → rebind), and publishing an unchanged value
+            // still re-enters the view graph mid-update.
+            if phase != newPhase {
+                phase = newPhase
+            }
         } else {
             DispatchQueue.main.async { [weak self] in
-                self?.phase = newPhase
+                guard let self, self.phase != newPhase else { return }
+                self.phase = newPhase
             }
         }
     }
