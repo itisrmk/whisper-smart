@@ -28,7 +28,12 @@ final class TranscriptLogStore: ObservableObject {
             .appendingPathComponent("logs", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("transcripts.json")
-        load()
+
+        // Visual-regression snapshots must render deterministic empty state,
+        // never the developer's real transcript history.
+        if ProcessInfo.processInfo.environment["VISPERFLOW_UI_SNAPSHOT"] != "1" {
+            load()
+        }
     }
 
     func append(provider: String, appName: String, durationMs: Int?, text: String, status: String) {
