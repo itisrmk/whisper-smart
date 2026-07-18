@@ -90,13 +90,28 @@ jobs:
       - name: Build Signed DMG
         env:
           VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
-          SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep 'Developer ID Application' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+          IDENTITIES="$(security find-identity -v -p codesigning | grep -v 'CSSMERR' || true)"
+          SIGNING_IDENTITY="$(printf '%s\n' "$IDENTITIES" | grep 'Developer ID Application' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
           if [[ -z "$SIGNING_IDENTITY" ]]; then
-            echo "Developer ID Application signing identity not found after certificate import."
+            # Fallback: an Apple Development certificate still provides a
+            # stable signing identity (macOS TCC permission grants persist
+            # across updates), unlike ad-hoc signing. It cannot be notarized,
+            # so it is only allowed for the beta channel until a Developer ID
+            # Application certificate is provisioned.
+            SIGNING_IDENTITY="$(printf '%s\n' "$IDENTITIES" | grep 'Apple Development' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+            if [[ -n "$SIGNING_IDENTITY" && "$CHANNEL" == "production" ]]; then
+              echo "Production channel requires a Developer ID Application certificate; only an Apple Development identity is available."
+              exit 1
+            fi
+          fi
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "No usable codesigning identity found after certificate import."
             exit 1
           fi
+          echo "Signing with identity: $SIGNING_IDENTITY"
           CODESIGN_IDENTITY="$SIGNING_IDENTITY" VERSION="$VERSION" bash scripts/package_dmg.sh
 
       - name: Notarize Production DMG
