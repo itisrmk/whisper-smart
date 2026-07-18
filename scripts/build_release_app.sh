@@ -143,8 +143,23 @@ if command -v codesign >/dev/null 2>&1; then
     echo "Applying ad-hoc code signature..."
     codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
   else
+    # Hardened runtime (--options runtime) blocks microphone access unless the
+    # audio-input entitlement is granted — without it the app cannot record at
+    # all, regardless of the user's TCC permission grant.
+    ENTITLEMENTS_FILE="$BUILD_DIR/whisper-smart-entitlements.plist"
+    cat > "$ENTITLEMENTS_FILE" <<'ENTITLEMENTS'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>
+ENTITLEMENTS
     echo "Applying Developer ID signature: ${SIGNING_IDENTITY}"
-    codesign --force --deep --timestamp --options runtime --sign "$SIGNING_IDENTITY" "$APP_BUNDLE" >/dev/null
+    codesign --force --deep --timestamp --options runtime \
+      --entitlements "$ENTITLEMENTS_FILE" --sign "$SIGNING_IDENTITY" "$APP_BUNDLE" >/dev/null
   fi
 
   SIGNATURE_INFO="$(codesign -dv --verbose=4 "$APP_BUNDLE" 2>&1 || true)"
