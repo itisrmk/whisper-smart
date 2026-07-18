@@ -53,7 +53,12 @@ final class DictationSessionMetricsStore: ObservableObject {
             .appendingPathComponent("metrics", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("dictation-sessions.json")
-        load()
+
+        // Visual-regression snapshots must render deterministic empty state,
+        // never the developer's real session metrics.
+        if ProcessInfo.processInfo.environment["VISPERFLOW_UI_SNAPSHOT"] != "1" {
+            load()
+        }
     }
 
     func append(

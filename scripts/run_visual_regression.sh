@@ -20,4 +20,9 @@ swiftc \
   "$REPO_ROOT/tests/visual/settings_visual_regression.swift" \
   -o "$VISUAL_BIN"
 
-VISPERFLOW_UI_SNAPSHOT=1 "$VISUAL_BIN"
+# Hermetic render: point HOME at a scratch dir so the developer's real
+# transcript history, session metrics, and defaults never leak into
+# snapshots — CI renders clean state and must match baselines.
+SNAPSHOT_HOME="$(mktemp -d)"
+trap 'rm -rf "$SNAPSHOT_HOME"' EXIT
+HOME="$SNAPSHOT_HOME" VISPERFLOW_UI_SNAPSHOT=1 "$VISUAL_BIN"
