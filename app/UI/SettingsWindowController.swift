@@ -8,6 +8,7 @@ import SwiftUI
 final class SettingsWindowController {
 
     private var windowController: NSWindowController?
+    private var windowCloseObserver: NSObjectProtocol?
 
     func showSettings(initialTabRawValue: String? = nil, forceOnboarding: Bool = false) {
         VFTheme.debugAssertTokenSanity()
@@ -30,6 +31,9 @@ final class SettingsWindowController {
         let hostingController = NSHostingController(rootView: settingsView)
 
         let window = NSWindow(contentViewController: hostingController)
+        // The controller keeps the window alive; releasing on close while we
+        // still hold a reference would leave a dangling window on reopen.
+        window.isReleasedWhenClosed = false
         window.title = "Whisper Smart Settings"
         window.styleMask = [.titled, .closable, .fullSizeContentView]
         window.titlebarAppearsTransparent = true
@@ -51,6 +55,20 @@ final class SettingsWindowController {
         let wc = NSWindowController(window: window)
         wc.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        // Drop the controller once the window closes so the next
+        // showSettings() builds a fresh window instead of trying to
+        // resurrect a closed one.
+        if let observer = windowCloseObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.windowController = nil
+        }
 
         self.windowController = wc
     }

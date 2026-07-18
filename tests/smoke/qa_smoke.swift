@@ -105,6 +105,10 @@ private func runStateMachineSmoke() throws {
     hotkey.triggerHoldStart()
     try expect(machine.state == .recording, "hold start should enter recording")
 
+    // Simulate speech above the 0.08 detection threshold — silent recordings
+    // intentionally skip transcription and return to idle.
+    audio.onAudioLevel?(0.5)
+
     hotkey.triggerHoldEnd()
     try expect(machine.state == .transcribing, "hold end should enter transcribing")
 

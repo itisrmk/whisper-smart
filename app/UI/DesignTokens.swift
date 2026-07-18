@@ -107,6 +107,11 @@ enum VFColor {
     static let transcribing = Color(hex: 0x8198F1)
     static let success      = successFallback
     static let error        = Color(red: 1.0,  green: 0.36, blue: 0.36)
+    static let warning      = Color(hex: 0xFFBD57)
+
+    // Provider preset tints (settings preset cards)
+    static let presetBestTint  = Color(hex: 0xFAC463)
+    static let presetCloudTint = Color(hex: 0x8FB0F7)
 
     // Text — tuned for WCAG-AA contrast on dark surfaces
     static let textPrimary = Color(hex: 0xE9ECF5)
@@ -143,6 +148,7 @@ enum VFFont {
 
     // Settings hierarchy
     static let settingsHeading   = Font.system(size: 28, weight: .semibold)
+    static let sheetTitle        = Font.system(size: 24, weight: .semibold)
     static let settingsTitle     = Font.system(size: 14, weight: .semibold)
     static let settingsBody      = Font.system(size: 13, weight: .medium)
     static let settingsCaption   = Font.system(size: 12, weight: .regular)
@@ -150,6 +156,11 @@ enum VFFont {
 
     static let pillLabel       = Font.system(size: 11, weight: .semibold)
     static let segmentLabel    = Font.system(size: 12, weight: .semibold)
+
+    // Overlay / bubble
+    static let bubbleIcon      = Font.system(size: 20, weight: .semibold, design: .rounded)
+    static let overlayCaption  = Font.system(size: 11, weight: .medium, design: .rounded)
+    static let badgeLabel      = Font.system(size: 9, weight: .semibold, design: .rounded)
 }
 
 // MARK: - Spacing / Layout Tokens
@@ -161,7 +172,7 @@ enum VFSpacing {
     static let md:  CGFloat = 16
     static let lg:  CGFloat = 20
     static let xl:  CGFloat = 24
-    static let xxl: CGFloat = 24
+    static let xxl: CGFloat = 28
     static let xxxl: CGFloat = 32
 }
 
@@ -222,6 +233,7 @@ enum VFAnimation {
     static let springBounce  = Animation.spring(response: 0.4, dampingFraction: 0.6)
     static let fadeFast      = Animation.easeInOut(duration: 0.15)
     static let fadeMedium    = Animation.easeInOut(duration: 0.25)
+    static let successPulse  = Animation.easeOut(duration: 0.38)
     static let pulseLoop     = Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true)
     static let glowPulse     = Animation.easeInOut(duration: 1.6).repeatForever(autoreverses: true)
     static let shimmer       = Animation.linear(duration: 2.0).repeatForever(autoreverses: false)

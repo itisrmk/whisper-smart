@@ -21,7 +21,11 @@ final class WhisperRuntimeInstaller: ObservableObject {
     private var installCancelled = false
 
     private init() {
-        refreshState()
+        // Lazily created (often mid-render via @StateObject); defer the CLI
+        // detection so no subprocess runs during view construction.
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshState()
+        }
     }
 
     func refreshState() {
