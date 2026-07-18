@@ -40,6 +40,7 @@ final class AudioCaptureService {
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private var isRunning = false
+    private var tapInstalled = false
 
     private var engineConfigObserver: NSObjectProtocol?
     private var defaultInputDeviceListenerInstalled = false
@@ -165,19 +166,30 @@ final class AudioCaptureService {
             }
             self.onBuffer?(convertedBuffer, time)
         }
+        tapInstalled = true
 
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            // Clean up the partially-started session (tap, device switch,
+            // observers) so a failed start doesn't leak state.
+            stop()
+            throw error
+        }
         isRunning = true
     }
 
     func stop() {
-        guard isRunning else {
-            unregisterInterruptionObservers()
-            return
+        // Full cleanup runs even when start() failed partway (tap installed
+        // or input device switched but isRunning never set).
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
         }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        if engine.isRunning {
+            engine.stop()
+        }
         converter = nil
         isRunning = false
 

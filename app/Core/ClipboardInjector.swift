@@ -180,8 +180,10 @@ final class ClipboardInjector {
         let effectivePasteDelay = isTerminal ? terminalPasteDelay : pasteDelay
         let effectiveRestoreDelay = isTerminal ? terminalRestoreDelay : restoreDelay
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + effectivePasteDelay) { [weak self] in
-            self?.synthesisePaste()
+        // Capture self strongly: the paste must fire even if the injector is
+        // being replaced, otherwise the clipboard is clobbered with no paste.
+        DispatchQueue.main.asyncAfter(deadline: .now() + effectivePasteDelay) {
+            self.synthesisePaste()
             logger.info("Paste synthesised (terminal=\(isTerminal), pasteDelay=\(effectivePasteDelay)s, restoreDelay=\(effectiveRestoreDelay)s)")
 
             DispatchQueue.main.asyncAfter(deadline: .now() + effectiveRestoreDelay) {

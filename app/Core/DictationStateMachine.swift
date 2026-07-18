@@ -142,9 +142,15 @@ final class DictationStateMachine {
             self?.sttProvider.feedAudio(buffer: buffer, time: time)
         }
 
+        // Audio levels arrive on the audio engine thread; hop to main so
+        // speech-detection state and UI observers are only touched from the
+        // same queue as the rest of the state machine.
         audioCapture.onAudioLevel = { [weak self] level in
-            self?.onAudioLevelChange?(CGFloat(level))
-            self?.handleAudioLevel(level)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.onAudioLevelChange?(CGFloat(level))
+                self.handleAudioLevel(level)
+            }
         }
 
         // Audio error → surface
@@ -360,6 +366,9 @@ final class DictationStateMachine {
             if didBeginSTTSession {
                 sttProvider.endSession()
             }
+            // audioCapture.start() can fail partway (tap installed, input
+            // device switched); stop() reverts that partial state.
+            audioCapture.stop()
             logger.error("Failed to start recording with provider \(providerName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             transition(to: .error(error.localizedDescription))
         }
@@ -370,7 +379,6 @@ final class DictationStateMachine {
 
         cancelSilenceAutoStopWatchdog()
         let hadSpeech = detectedSpeechInCurrentRecording
-        let wasOneShot = oneShotModeActive
         oneShotModeActive = false
         detectedSpeechInCurrentRecording = false
 

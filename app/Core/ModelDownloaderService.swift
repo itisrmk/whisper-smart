@@ -933,6 +933,10 @@ private extension ModelDownloaderService {
 
         if timeoutResult.wait(timeout: .now() + preflightTimeoutSeconds) == .timedOut {
             process.terminate()
+            if timeoutResult.wait(timeout: .now() + 2) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = timeoutResult.wait(timeout: .now() + 2)
+            }
             return "ONNX preflight timed out while validating the downloaded model. Retry download or switch to the recommended Parakeet ONNX source."
         }
 

@@ -314,8 +314,11 @@ private extension ParakeetSTTProvider {
             process.terminate()
             _ = completion.wait(timeout: .now() + 2)
             if process.isRunning {
-                process.interrupt()
+                kill(process.processIdentifier, SIGKILL)
+                _ = completion.wait(timeout: .now() + 2)
             }
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
             throw STTError.providerError(
                 message: "Parakeet local inference timed out. Verify runtime/model setup in Settings -> Provider, then retry."
             )

@@ -178,7 +178,7 @@ extension WhisperModelInstaller: URLSessionDownloadDelegate {
             DictationProviderPolicy.whisperModelTier = tier.rawValue
             DispatchQueue.main.async {
                 self.phase = .ready(tier: tier)
-                NotificationCenter.default.post(name: Notification.Name("sttProviderDidChange"), object: nil)
+                NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
             }
             whisperInstallerLogger.info("Whisper model download completed tier=\(tier.rawValue, privacy: .public)")
         } catch {

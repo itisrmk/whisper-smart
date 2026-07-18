@@ -37,6 +37,8 @@ private final class MockAudioCapture: AudioCapturing {
 
     func start() throws { startCallCount += 1 }
     func stop() { stopCallCount += 1 }
+
+    func simulateSpeech(level: Float = 0.5) { onAudioLevel?(level) }
 }
 
 private final class MockInjector: TextInjecting {
@@ -104,6 +106,12 @@ private func runStateMachineSmoke() throws {
 
     hotkey.triggerHoldStart()
     try expect(machine.state == .recording, "hold start should enter recording")
+
+    // Silent recordings skip transcription entirely, so simulate speech
+    // before releasing the hotkey. Level delivery hops to the main queue,
+    // so spin the run loop to let it land.
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
 
     hotkey.triggerHoldEnd()
     try expect(machine.state == .transcribing, "hold end should enter transcribing")

@@ -2258,18 +2258,8 @@ private struct HotkeySettingsTab: View {
     }
 }
 
-// MARK: - Notification name for binding changes
-
-extension Notification.Name {
-    static let hotkeyBindingDidChange = Notification.Name("hotkeyBindingDidChange")
-    static let productOnboardingRequested = Notification.Name("productOnboardingRequested")
-}
-
-// MARK: - Notification for provider changes
-
-extension Notification.Name {
-    static let sttProviderDidChange = Notification.Name("sttProviderDidChange")
-}
+// Notification names for binding/provider changes live in
+// app/Core/AppNotifications.swift so Core code can post them.
 
 // MARK: - Provider Settings
 
@@ -2410,12 +2400,13 @@ private struct ProviderSettingsTab: View {
                             Button(profile.displayName) {
                                 openAIEndpointProfile = profile
                                 DictationProviderPolicy.openAIEndpointProfile = profile
-                                if profile == .openAIOfficial {
-                                    openAIBaseURL = profile.defaultBaseURL
-                                    openAIModel = profile.defaultModel
-                                    DictationProviderPolicy.openAIBaseURL = openAIBaseURL
-                                    DictationProviderPolicy.openAIModel = openAIModel
-                                }
+                                // Load the profile's defaults so the form never
+                                // shows the previous profile's stale values.
+                                openAIBaseURL = profile.defaultBaseURL
+                                openAIModel = profile.defaultModel
+                                DictationProviderPolicy.openAIBaseURL = openAIBaseURL
+                                DictationProviderPolicy.openAIModel = openAIModel
+                                NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
                                 openAIAPIKeyStatusMessage = nil
                             }
                         }
@@ -2434,6 +2425,11 @@ private struct ProviderSettingsTab: View {
                         TextField(openAIEndpointProfile.defaultBaseURL, text: $openAIBaseURL)
                             .textFieldStyle(.plain)
                             .glassInputField()
+                            .onChange(of: openAIBaseURL) { _, newValue in
+                                // Persist as-typed so switching tabs doesn't
+                                // discard edits; normalization happens on save.
+                                DictationProviderPolicy.openAIBaseURL = newValue
+                            }
                             .onSubmit {
                                 persistOpenAIEndpointConfiguration()
                             }
@@ -2446,6 +2442,9 @@ private struct ProviderSettingsTab: View {
                         TextField(openAIEndpointProfile.defaultModel, text: $openAIModel)
                             .textFieldStyle(.plain)
                             .glassInputField()
+                            .onChange(of: openAIModel) { _, newValue in
+                                DictationProviderPolicy.openAIModel = newValue
+                            }
                             .onSubmit {
                                 persistOpenAIEndpointConfiguration()
                             }
@@ -2487,6 +2486,14 @@ private struct ProviderSettingsTab: View {
                 Text("Supports official OpenAI and compatible self-hosted gateways that expose `/v1/audio/transcriptions`.")
                     .font(VFFont.settingsCaption)
                     .foregroundStyle(VFColor.textSecondary)
+            }
+            .onDisappear {
+                // Save an edited API key even if the user never pressed
+                // Return or the save button before leaving the tab.
+                let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(openAIAPIKey)
+                if normalized != DictationProviderPolicy.openAIAPIKey {
+                    persistOpenAIAPIKey()
+                }
             }
         } else if selectedKind == .whisper {
             VStack(alignment: .leading, spacing: VFSpacing.sm) {

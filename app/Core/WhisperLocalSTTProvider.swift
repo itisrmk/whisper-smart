@@ -4,6 +4,12 @@ import Foundation
 final class WhisperLocalSTTProvider: STTProvider {
     let displayName = "Whisper (local)"
 
+    /// Hard cap on a single whisper-cli run. Must stay below
+    /// `transcriptionTimeout` so the process is reaped (and the inference
+    /// queue freed) before the state machine gives up on the session.
+    private static let inferenceProcessTimeout: TimeInterval = 60
+    let transcriptionTimeout: TimeInterval = 75
+
     var onResult: ((STTResult) -> Void)?
     var onError: ((STTError) -> Void)?
 
@@ -126,7 +132,15 @@ final class WhisperLocalSTTProvider: STTProvider {
             throw STTError.providerError(message: "Failed to launch whisper-cli: \(error.localizedDescription)")
         }
 
-        process.waitUntilExit()
+        let exited = Self.waitForExit(process, timeout: inferenceProcessTimeout)
+        if !exited {
+            process.terminate()
+            if !Self.waitForExit(process, timeout: 2) {
+                kill(process.processIdentifier, SIGKILL)
+                _ = Self.waitForExit(process, timeout: 2)
+            }
+            throw STTError.providerError(message: "whisper-cli timed out after \(Int(inferenceProcessTimeout))s and was terminated.")
+        }
 
         let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
         let stderr = String(data: stderrData, encoding: .utf8) ?? ""
@@ -141,6 +155,17 @@ final class WhisperLocalSTTProvider: STTProvider {
         }
 
         return try String(contentsOf: outputTXT, encoding: .utf8)
+    }
+
+    /// Waits for the process to exit without blocking indefinitely.
+    /// Returns false if the deadline passes while the process is still running.
+    private static func waitForExit(_ process: Process, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning {
+            if Date() >= deadline { return false }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return true
     }
 
     private var currentSessionActive: Bool {
