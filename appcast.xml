@@ -6,6 +6,25 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.28</title>
+      <description>- Fixed the first dictation attempt failing silently: starting a session no longer freezes the app while the local MLX runtime is probed, so recording begins the instant you click or press the hotkey.
+- Local MLX transcription is dramatically faster: the model now stays loaded in a resident engine, cutting per-dictation latency from several seconds to under 100ms (Parakeet TDT 0.6B).
+- Dictation no longer requires a network round-trip to Hugging Face on every transcription.</description>
+      <pubDate>Sat, 18 Jul 2026 05:13:11 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.28/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.28" sparkle:version="202607172212" length="2932310" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
+      <title>Version 0.2.27</title>
+      <description>- Selecting a specific microphone no longer kills the recording instantly; the mic is pinned to the app's audio engine instead of rewriting the system-wide default input device.
+- Pressing the hotkey while a previous transcription is still running now cancels it and starts a new recording immediately.
+- Fixed a race where releasing the hotkey during the first-run microphone permission dialog could leave the mic recording with no way to stop it.
+- Fixed a leaked one-shot flag that made the next hotkey hold auto-stop itself during pauses in speech.</description>
+      <pubDate>Sat, 18 Jul 2026 04:37:15 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.27/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.27" sparkle:version="202607172136" length="2920791" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.26</title>
       <description>- Updated app icon to new sound-wave logo design.
 - New icon appears in menu bar, app bundle, DMG installer, and README.</description>
