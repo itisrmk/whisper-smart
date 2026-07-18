@@ -9,12 +9,22 @@ Modes:
   --check                                  verify imports work (exit 0/1)
   --download --engine E --model REPO       prefetch model into the HF cache
   --engine E --model REPO --audio F.wav    transcribe; plain text on stdout
+  --serve --engine E --model REPO          long-lived daemon: load the model
+                                           once, then serve JSONL requests
+
+Serve protocol (newline-delimited JSON):
+  stdout after model load + warmup:  {"event": "ready"}
+  stdin request:                     {"id": 1, "audio": "/path/to.wav"}
+  stdout response:                   {"id": 1, "text": "..."}
+                                     {"id": 1, "error": "..."}
+  EOF on stdin terminates the daemon.
 
 Engines: parakeet (parakeet-mlx), whisper (mlx-whisper).
-Diagnostics go to stderr; stdout carries only the transcript.
+Diagnostics go to stderr; stdout carries only the transcript / protocol JSON.
 """
 
 import argparse
+import json
 import sys
 import wave
 
@@ -78,32 +88,89 @@ def run_download(engine: str, model: str) -> None:
     print("downloaded")
 
 
-def transcribe_parakeet(model_repo: str, audio_path: str) -> str:
-    import mlx.core as mx
-    from parakeet_mlx import from_pretrained
-    from parakeet_mlx.audio import get_logmel
+def load_transcriber(engine: str, model_repo: str):
+    """Load the model once and return a samples -> text callable."""
+    if engine == "parakeet":
+        import mlx.core as mx
+        from parakeet_mlx import from_pretrained
+        from parakeet_mlx.audio import get_logmel
 
-    samples = read_wav_float32(audio_path)
-    model = from_pretrained(model_repo)
-    mel = get_logmel(mx.array(samples), model.preprocessor_config)
-    results = model.generate(mel)
-    if not results:
-        return ""
-    return results[0].text.strip()
+        model = from_pretrained(model_repo)
+
+        def transcribe(samples) -> str:
+            mel = get_logmel(mx.array(samples), model.preprocessor_config)
+            results = model.generate(mel)
+            if not results:
+                return ""
+            return results[0].text.strip()
+
+        return transcribe
+
+    import mlx_whisper
+
+    def transcribe(samples) -> str:
+        # mlx_whisper caches the loaded model per repo internally, so only
+        # the first call pays the weight-loading cost.
+        result = mlx_whisper.transcribe(samples, path_or_hf_repo=model_repo, verbose=None)
+        return str(result.get("text", "")).strip()
+
+    return transcribe
+
+
+def transcribe_parakeet(model_repo: str, audio_path: str) -> str:
+    return load_transcriber("parakeet", model_repo)(read_wav_float32(audio_path))
 
 
 def transcribe_whisper(model_repo: str, audio_path: str) -> str:
-    import mlx_whisper
+    return load_transcriber("whisper", model_repo)(read_wav_float32(audio_path))
 
-    samples = read_wav_float32(audio_path)
-    result = mlx_whisper.transcribe(samples, path_or_hf_repo=model_repo)
-    return str(result.get("text", "")).strip()
+
+def emit(payload: dict) -> None:
+    sys.stdout.write(json.dumps(payload) + "\n")
+    sys.stdout.flush()
+
+
+def run_serve(engine: str, model_repo: str) -> None:
+    import numpy as np
+
+    transcribe = load_transcriber(engine, model_repo)
+
+    # Warm up: triggers weight loading (whisper) and Metal kernel compilation
+    # so the first real request runs at steady-state speed.
+    try:
+        transcribe(np.zeros(8000, dtype=np.float32))
+    except Exception as exc:  # pragma: no cover - warmup is best-effort
+        print(f"warmup failed: {exc}", file=sys.stderr)
+
+    emit({"event": "ready"})
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError as exc:
+            emit({"error": f"malformed request: {exc}"})
+            continue
+
+        request_id = request.get("id")
+        audio_path = request.get("audio")
+        if not audio_path:
+            emit({"id": request_id, "error": "missing 'audio' path"})
+            continue
+
+        try:
+            emit({"id": request_id, "text": transcribe(read_wav_float32(audio_path))})
+        except Exception as exc:
+            emit({"id": request_id, "error": str(exc)})
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MLX STT runner")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--download", action="store_true")
+    parser.add_argument("--serve", action="store_true")
     parser.add_argument("--engine", choices=["parakeet", "whisper"])
     parser.add_argument("--model")
     parser.add_argument("--audio")
@@ -118,6 +185,10 @@ def main() -> None:
 
     if args.download:
         run_download(args.engine, args.model)
+        return
+
+    if args.serve:
+        run_serve(args.engine, args.model)
         return
 
     if not args.audio:
