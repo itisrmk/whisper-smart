@@ -6,6 +6,16 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.31</title>
+      <description>Fixes microphone access in certificate-signed builds: v0.2.30 shipped with the hardened runtime but without the audio-input entitlement, so recording was impossible regardless of permission grants.
+Release channel: **beta**
+Release artifact: `.build/release/Whisper-Smart-mac.dmg`
+Rollback reference: https://github.com/itisrmk/whisper-smart/releases/tag/v0.2.30</description>
+      <pubDate>Sat, 18 Jul 2026 06:00:50 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.31/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.2.31" sparkle:version="202607180600" sparkle:edSignature="rpbs5Rr/ZhQpp2+snt58RfZ9gAuPoFp/YS6DZ6pumrw3Hhd1U89sNNIoLdGIj0JVDBb7t8TepZYUJ8PUFY73Dw==" length="2973250" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.2.30</title>
       <description>First fully automated CI release: certificate-signed build (stable signing identity — macOS permission grants now persist across updates), Sparkle-signed appcast entry. Includes the v0.2.28 dictation-latency work: instant dictation start and resident MLX engine (~85ms warm transcription).
 Release channel: **beta**
