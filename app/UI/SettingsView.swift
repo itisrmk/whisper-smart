@@ -2362,7 +2362,7 @@ private struct ProviderSettingsTab: View {
         VStack(spacing: VFSpacing.lg) {
             NeuSection(icon: "waveform.and.mic", title: "Smart Model Selection") {
                 VStack(alignment: .leading, spacing: VFSpacing.lg) {
-                    Text("Choose a one-click STT preset. Model downloads and runtime installs only start when you click Install; Whisper local requires Apple Command Line Tools and cmake on the host.")
+                    Text("Pick a model, click Download, then click Use. Nothing installs until you ask. Cloud needs an OpenAI API key.")
                         .font(VFFont.settingsCaption)
                         .foregroundStyle(VFColor.textSecondary)
 
@@ -2376,7 +2376,7 @@ private struct ProviderSettingsTab: View {
                         ModelDownloadRow(kind: .parakeet, downloadState: downloadState)
                     }
 
-                    if selectedKind == .whisper || selectedKind == .openaiAPI {
+                    if selectedKind == .openaiAPI {
                         providerConfigurationSection
                     }
                 }
@@ -2539,71 +2539,6 @@ private struct ProviderSettingsTab: View {
                     }
                 }
             }
-        } else if selectedKind == .whisper {
-            VStack(alignment: .leading, spacing: VFSpacing.sm) {
-                Text("Whisper Local setup")
-                    .font(VFFont.settingsBody)
-                    .foregroundStyle(VFColor.textPrimary)
-
-                HStack(spacing: VFSpacing.sm) {
-                    switch whisperRuntimeInstaller.phase {
-                    case .notInstalled:
-                        profileActionButton(title: "Install runtime", enabled: true) {
-                            installWhisperRuntimeThenDownloadModel()
-                        }
-                        Text("Builds and installs whisper-cli in app-managed runtime storage. Requires Apple Command Line Tools (xcode-select) and cmake on host.")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
-                    case .installing:
-                        profileActionButton(title: "Cancel", enabled: true) {
-                            whisperRuntimeInstaller.cancelInstall()
-                        }
-                        statusText("Installing runtime…", severity: .info)
-                    case .ready:
-                        installedChip(label: "Runtime Ready")
-                    case .failed(let message):
-                        profileActionButton(title: "Retry install", enabled: true) {
-                            installWhisperRuntimeThenDownloadModel()
-                        }
-                        statusText(sanitizedStatusMessage(message, fallback: "Couldn’t install runtime. Install required tools, then try again."), severity: runtimeFailureSeverity(for: message))
-                    }
-                }
-
-                HStack(spacing: VFSpacing.sm) {
-                    Menu {
-                        ForEach(WhisperModelTier.allCases) { tier in
-                            Button("\(tier.displayName) · \(tier.qualityBand) · \(tier.approxSizeLabel)") {
-                                whisperInstaller.setTier(tier)
-                            }
-                        }
-                    } label: {
-                        Text("\(whisperInstaller.selectedTier.displayName) · \(whisperInstaller.selectedTier.qualityBand)")
-                            .glassSelectPill()
-                    }
-                    .menuStyle(.borderlessButton)
-
-                    switch whisperInstaller.phase {
-                    case .notInstalled:
-                        profileActionButton(title: "Download model", enabled: true) {
-                            whisperInstaller.downloadSelectedModel()
-                        }
-                    case .downloading(_, let progress):
-                        profileActionButton(title: "Cancel", enabled: true) {
-                            whisperInstaller.cancel()
-                        }
-                        Text("\(Int(progress * 100))%")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
-                    case .ready:
-                        installedChip(label: "Model Ready")
-                    case .failed(let message):
-                        profileActionButton(title: "Retry download", enabled: true) {
-                            whisperInstaller.downloadSelectedModel()
-                        }
-                        statusText(sanitizedStatusMessage(message, fallback: "Couldn’t download the model. Please retry."), severity: .error)
-                    }
-                }
-            }
         }
     }
 
@@ -2642,16 +2577,7 @@ private struct ProviderSettingsTab: View {
                 }
             }
 
-            HStack(spacing: VFSpacing.sm) {
-                if isActive {
-                    installedChip(label: "Selected", color: VFColor.accentFallback)
-                } else {
-                    profileActionButton(title: "Use", isPrimary: true, enabled: true) {
-                        applyPreset(preset)
-                    }
-                }
-                setupActionButton(for: preset)
-            }
+            presetActionRow(for: preset, isActive: isActive)
 
             if let presetStatus {
                 statusText(presetStatus.message, severity: presetStatus.severity)
@@ -2743,43 +2669,126 @@ private struct ProviderSettingsTab: View {
         }
     }
 
-    @ViewBuilder
-    private func setupActionButton(for preset: SmartModelPreset) -> some View {
+    /// The state that drives each card's single primary action:
+    /// Download → (progress) → Use → In use, with Retry on failure.
+    private enum PresetInstallState {
+        case installed
+        case notInstalled
+        case working(String)
+        case failed(String)
+    }
+
+    private func presetInstallState(for preset: SmartModelPreset) -> PresetInstallState {
         switch preset {
+        case .light, .best:
+            let tiers: [WhisperModelTier] = preset == .light ? [.tinyEn, .baseEn] : [.largeV3Turbo]
+            if case .installing = whisperRuntimeInstaller.phase {
+                return .working("Installing runtime…")
+            }
+            if case .failed(let message) = whisperRuntimeInstaller.phase {
+                return .failed(sanitizedStatusMessage(message, fallback: "Runtime install failed."))
+            }
+            if case .downloading(let tier, let progress) = whisperInstaller.phase, tiers.contains(tier) {
+                return .working("Downloading \(Int(progress * 100))%")
+            }
+            if case .failed(let message) = whisperInstaller.phase {
+                return .failed(sanitizedStatusMessage(message, fallback: "Model download failed."))
+            }
+            return whisperRuntimeIsReady && whisperModelInstalled(tiers) ? .installed : .notInstalled
         case .balanced:
-            if !ModelVariant.parakeetCTC06B.isDownloaded {
-                switch downloadState.phase {
-                case .downloading(let progress):
-                    installedChip(label: "Installing \(Int(progress * 100))%", color: VFColor.accentFallback)
-                case .failed:
-                    installedChip(label: "Install failed", color: VFColor.error)
-                default:
-                    // Nothing runs until the user clicks Install below.
-                    installedChip(label: "Not installed", color: VFColor.textTertiary)
-                }
-            } else {
-                installedChip(label: "Installed")
+            if ModelVariant.parakeetCTC06B.isDownloaded {
+                return .installed
             }
-        case .light:
-            if !whisperModelInstalled([.tinyEn, .baseEn]) {
-                profileActionButton(title: "Download", enabled: true) {
-                    downloadWhisperLightProfile()
-                }
-            } else {
-                installedChip(label: "Installed")
-            }
-        case .best:
-            if !whisperModelInstalled([.largeV3Turbo]) {
-                profileActionButton(title: "Download", enabled: true) {
-                    downloadWhisperLargeProfile()
-                }
-            } else {
-                installedChip(label: "Installed")
+            switch downloadState.phase {
+            case .downloading(let progress):
+                return .working("Downloading \(Int(progress * 100))%")
+            case .failed(let message):
+                return .failed(sanitizedStatusMessage(message, fallback: "Parakeet install failed."))
+            default:
+                return .notInstalled
             }
         case .cloud:
-            profileActionButton(title: "API Key", enabled: true) {
-                selectProvider(.openaiAPI)
+            // Use the cached key (loaded onAppear) — reading the Keychain
+            // from body would reintroduce side effects during view updates.
+            return openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .notInstalled
+                : .installed
+        }
+    }
+
+    @ViewBuilder
+    private func presetActionRow(for preset: SmartModelPreset, isActive: Bool) -> some View {
+        HStack(spacing: VFSpacing.sm) {
+            switch presetInstallState(for: preset) {
+            case .installed:
+                if isActive {
+                    installedChip(label: "In use", color: VFColor.accentFallback)
+                } else {
+                    profileActionButton(title: "Use", isPrimary: true, enabled: true) {
+                        applyPreset(preset)
+                    }
+                }
+            case .notInstalled:
+                profileActionButton(
+                    title: preset == .cloud ? "Add API Key" : "Download",
+                    isPrimary: true,
+                    enabled: true
+                ) {
+                    startPresetInstall(preset)
+                }
+            case .working(let label):
+                installedChip(label: label, color: VFColor.accentFallback)
+                profileActionButton(title: "Cancel", enabled: true) {
+                    cancelPresetInstall(preset)
+                }
+            case .failed(let message):
+                profileActionButton(title: "Retry", isPrimary: true, enabled: true) {
+                    startPresetInstall(preset)
+                }
+                statusText(message, severity: .error)
             }
+        }
+    }
+
+    private func startPresetInstall(_ preset: SmartModelPreset) {
+        switch preset {
+        case .light:
+            whisperInstaller.setTier(whisperModelInstalled([.tinyEn]) ? .tinyEn : .baseEn)
+            installWhisperRuntimeThenDownloadModel()
+        case .best:
+            whisperInstaller.setTier(.largeV3Turbo)
+            installWhisperRuntimeThenDownloadModel()
+        case .balanced:
+            // The click is the consent for the 650 MB model + runtime install.
+            ParakeetSetupPolicy.setupConsentGranted = true
+            _ = ParakeetModelSourceConfigurationStore.shared.selectSource(
+                id: "hf_parakeet_tdt06b_v3_onnx",
+                for: ModelVariant.parakeetCTC06B.id
+            )
+            syncDownloadState(for: .parakeet)
+            downloadState.reset()
+            ModelDownloaderService.shared.download(variant: .parakeetCTC06B, state: downloadState)
+            Task.detached(priority: .utility) {
+                _ = try? ParakeetRuntimeBootstrapManager.shared.ensureRuntimeReady(allowInstall: true)
+            }
+        case .cloud:
+            // Selecting Cloud reveals the API key form below the cards.
+            applyPreset(.cloud)
+        }
+    }
+
+    private func cancelPresetInstall(_ preset: SmartModelPreset) {
+        switch preset {
+        case .light, .best:
+            if case .installing = whisperRuntimeInstaller.phase {
+                whisperRuntimeInstaller.cancelInstall()
+            } else {
+                whisperInstaller.cancel()
+            }
+        case .balanced:
+            ModelDownloaderService.shared.cancel(variant: .parakeetCTC06B, state: downloadState)
+        case .cloud:
+            break
         }
     }
 
@@ -2801,18 +2810,6 @@ private struct ProviderSettingsTab: View {
         case .cloud:
             selectProvider(.openaiAPI)
         }
-    }
-
-    private func downloadWhisperLightProfile() {
-        whisperInstaller.setTier(whisperModelInstalled([.tinyEn]) ? .tinyEn : .baseEn)
-        selectProvider(.whisper)
-        installWhisperRuntimeThenDownloadModel()
-    }
-
-    private func downloadWhisperLargeProfile() {
-        whisperInstaller.setTier(.largeV3Turbo)
-        selectProvider(.whisper)
-        installWhisperRuntimeThenDownloadModel()
     }
 
     /// One click installs everything: runtime first if needed, then the model
@@ -2865,32 +2862,9 @@ private struct ProviderSettingsTab: View {
     }
 
     private func presetStatusMessage(for preset: SmartModelPreset, diagnostics: ProviderRuntimeDiagnostics) -> PresetStatus? {
-        switch preset {
-        case .light:
-            if !whisperRuntimeIsReady {
-                return PresetStatus(message: "Install Whisper runtime to enable Light.", severity: .warning)
-            }
-            if !whisperModelInstalled([.tinyEn, .baseEn]) {
-                return PresetStatus(message: "Download Tiny or Base model to enable Light.", severity: .warning)
-            }
-        case .balanced:
-            if !ModelVariant.parakeetCTC06B.isDownloaded {
-                return PresetStatus(message: "Parakeet is selected, but model/runtime are not installed yet.", severity: .warning)
-            }
-        case .best:
-            if !whisperRuntimeIsReady {
-                return PresetStatus(message: "Install Whisper runtime to enable Best.", severity: .warning)
-            }
-            if !whisperModelInstalled([.largeV3Turbo]) {
-                return PresetStatus(message: "Download Large-v3 Turbo model to enable Best.", severity: .warning)
-            }
-        case .cloud:
-            let hasAPIKey = !DictationProviderPolicy.openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if !hasAPIKey {
-                return PresetStatus(message: "Add API key to enable Cloud.", severity: .warning)
-            }
-        }
-
+        // Install-state prompts live on the card's action button now; the only
+        // status worth a banner is the active provider silently falling back.
+        guard preset == activePreset else { return nil }
         if diagnostics.usesFallback, let reason = diagnostics.fallbackReason {
             return PresetStatus(message: friendlyFallbackMessage(reason), severity: fallbackSeverity(for: reason))
         }
