@@ -6,6 +6,16 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.3.5</title>
+      <description>Dictation latency overhaul: streaming PCM to the MLX daemon, warm batch finalize at key-release (80ms typical), speculative mic start recovers the first 300ms of speech, double-press hotkey bug fixed.
+Release channel: **beta**
+Release artifact: `.build/release/Whisper-Smart-mac.dmg`
+Rollback reference: https://github.com/itisrmk/whisper-smart/releases/tag/v0.3.4</description>
+      <pubDate>Sun, 19 Jul 2026 01:51:14 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.3.5/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.3.5" sparkle:version="202607190151" sparkle:edSignature="pTfpTEabTjMrPPcAy5xacCBQ81+b1WZeE23SIaOj9mZKDL2bpxfBzI5wZ+3xsenH1bumEY6AIbNojryn31XADQ==" length="2622514" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.3.4</title>
       <description>Hotkey and audio-capture reliability: recovers from stale key state after idle/sleep, event-tap watchdog with wake reinstall, in-place audio engine restart on AirPods/mic reconfiguration (fixes first-press dictation dying instantly), visible error overlay, persisted diagnostics logs.
 Release channel: **beta**
@@ -252,18 +262,6 @@ New in this release:
 - Improved prerequisite guidance and one-click recovery messaging for managed runtimes</description>
       <pubDate>Sat, 14 Feb 2026 12:57:00 -0700</pubDate>
       <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.1/Whisper-Smart-0.2.1.dmg" sparkle:shortVersionString="0.2.1" sparkle:version="202602141257" length="4447538" type="application/octet-stream"/>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-    </item>
-    <item>
-      <title>Version 0.2.0</title>
-      <description>v0.2.0 - Smart Whisper model-selection overhaul
-New in this release:
-- Added Smart presets (Light/Balanced/Best/Cloud) with clearer setup flows
-- Fixed provider fallback resolution so unavailable Parakeet degrades correctly
-- Added Whisper tiny_en tier for lightweight local use
-- Stabilized keyboard UI test across simulator keyboard-control variance</description>
-      <pubDate>Sat, 14 Feb 2026 12:26:42 -0700</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.0/Whisper-Smart-0.2.0.dmg" sparkle:shortVersionString="0.2.0" sparkle:version="202602141226" length="4423728" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
   </channel>
