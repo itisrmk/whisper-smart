@@ -18,6 +18,15 @@ final class HotkeyMonitor {
 
     // MARK: - Public callbacks
 
+    /// Fired immediately on key-down, before the hold threshold is met.
+    /// Lets audio capture start speculatively so the first ~300ms of speech
+    /// isn't lost while waiting for the hold to be confirmed.
+    var onPressBegan: (() -> Void)?
+
+    /// Fired when a press is released (or lost) before the hold threshold —
+    /// the counterpart to `onPressBegan` for taps that never become holds.
+    var onPressAbandoned: (() -> Void)?
+
     /// Fired once when the monitored key transitions to held state.
     var onHoldStarted: (() -> Void)?
 
@@ -81,16 +90,11 @@ final class HotkeyMonitor {
 
         logger.info("Updating binding: \(self.binding.displayString) → \(newBinding.displayString)")
         let wasRunning = isRunning
-        let wasHeld = holdFired
+        // If the old key was mid-press/hold, end it now so an active
+        // recording finishes instead of running forever with no key to
+        // release (stop() clears tracking without firing callbacks).
+        endActiveTracking()
         if wasRunning { stop() }
-
-        // stop() clears hold tracking without firing the release callback.
-        // If the old key was mid-hold, end it now so an active recording
-        // finishes instead of running forever with no key to release.
-        if wasHeld {
-            logger.info("Binding changed while key held — ending active hold")
-            onHoldEnded?()
-        }
 
         binding = newBinding
         matchingKeyCodes = Self.pairedKeyCodes(for: newBinding.keyCode)
@@ -198,14 +202,15 @@ final class HotkeyMonitor {
         guard !CGEvent.tapIsEnabled(tap: tap) else { return }
 
         logger.warning("Event tap found disabled by watchdog — re-enabling")
+        // A disabled tap swallowed events, so any tracked key state is
+        // unreliable. End an active hold (the release was likely lost) so the
+        // state machine doesn't stay stuck in .recording, then drop tracking.
+        endActiveTracking()
         CGEvent.tapEnable(tap: tap, enable: true)
         if !CGEvent.tapIsEnabled(tap: tap) {
             logger.error("Event tap could not be re-enabled — reinstalling")
             reinstall()
         }
-        // A disabled tap swallowed events, so any tracked key state is
-        // unreliable. Drop it rather than block the next press.
-        resetState()
     }
 
     private func observeSystemWake() {
@@ -222,6 +227,10 @@ final class HotkeyMonitor {
 
     private func reinstall() {
         guard isRunning else { return }
+        // stop() clears tracking without firing callbacks; end an active
+        // press/hold first so a mid-dictation reinstall (sleep/wake) doesn't
+        // orphan the state machine in .recording.
+        endActiveTracking()
         stop()
         start()
         if !isRunning {
@@ -304,11 +313,11 @@ final class HotkeyMonitor {
             // was lost (tap disabled mid-hold, sleep, secure input). Recover
             // and treat this as a new press instead of swallowing it.
             logger.warning("Key-down with stale tracking state (holdFired=\(self.holdFired)) — recovering")
-            if holdFired { onHoldEnded?() }
-            resetState()
+            endActiveTracking()
         }
         keyDownTimestamp = Date()
         holdFired = false
+        onPressBegan?()
 
         let work = DispatchWorkItem { [weak self] in
             self?.checkHoldThreshold()
@@ -321,6 +330,21 @@ final class HotkeyMonitor {
         if holdFired {
             logger.log("Hold ended (\(self.binding.displayString))")
             onHoldEnded?()
+        } else if keyDownTimestamp != nil {
+            onPressAbandoned?()
+        }
+        resetState()
+    }
+
+    /// Ends whatever press/hold is currently tracked, firing the matching
+    /// release callback so the state machine can never be left stuck in
+    /// `.recording` with no release coming (the "press twice" bug).
+    private func endActiveTracking() {
+        if holdFired {
+            logger.warning("Ending active hold during recovery")
+            onHoldEnded?()
+        } else if keyDownTimestamp != nil {
+            onPressAbandoned?()
         }
         resetState()
     }

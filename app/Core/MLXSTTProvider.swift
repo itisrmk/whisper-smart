@@ -31,10 +31,16 @@ final class MLXSTTProvider: STTProvider {
     private var sessionActive = false
     private var inferenceInFlight = false
     private var capturedSamples: [Float] = []
+    /// Samples already streamed to the daemon this session (guarded by `samplesLock`).
+    private var streamedSampleCount = 0
     /// Bumped by `cancelSession()`; results from an older generation are dropped.
     private var generation = 0
     /// The resident runner daemon, so sessions reuse the loaded model.
     private var daemon: MLXInferenceDaemon?
+    /// Daemon with an open streaming session (guarded by `stateLock`).
+    /// While set, captured audio is forwarded incrementally so most of the
+    /// inference is done by the time the user releases the hotkey.
+    private var streamingDaemon: MLXInferenceDaemon?
 
     init(model: MLXModel) {
         self.model = model
@@ -67,6 +73,32 @@ final class MLXSTTProvider: STTProvider {
         samplesLock.lock()
         capturedSamples.append(contentsOf: chunk)
         samplesLock.unlock()
+
+        // Forward new audio to an open streaming session. The buffer above
+        // stays authoritative so a streaming failure can fall back to batch.
+        if currentStreamingDaemon != nil {
+            let gen = currentGeneration
+            inferenceQueue.async { [weak self] in
+                self?.flushStreamAudio(generation: gen)
+            }
+        }
+    }
+
+    /// Sends samples not yet streamed to the daemon. Runs on `inferenceQueue`.
+    private func flushStreamAudio(generation gen: Int) {
+        guard gen == currentGeneration, let daemon = currentStreamingDaemon else { return }
+
+        samplesLock.lock()
+        // A task queued before endSession snapshotted+cleared the buffer sees
+        // an empty buffer here and must no-op; the tail goes with the finish.
+        let slice = streamedSampleCount < capturedSamples.count
+            ? Array(capturedSamples[streamedSampleCount...])
+            : []
+        streamedSampleCount = capturedSamples.count
+        samplesLock.unlock()
+
+        guard !slice.isEmpty else { return }
+        daemon.sendStreamAudio(pcmBase64: AudioWAVEncoding.int16PCMData(samples: slice).base64EncodedString())
     }
 
     func beginSession() throws {
@@ -94,13 +126,35 @@ final class MLXSTTProvider: STTProvider {
 
         samplesLock.lock()
         capturedSamples.removeAll(keepingCapacity: true)
+        streamedSampleCount = 0
         samplesLock.unlock()
 
         updateSessionActive(true)
 
         // Spin the daemon up in the background while audio is being captured
-        // so it is warm by the time the recording ends.
-        prewarmDaemonIfPossible()
+        // so it is warm by the time the recording ends, then open a streaming
+        // session so inference overlaps with the recording itself.
+        let gen = currentGeneration
+        inferenceQueue.async { [weak self] in
+            guard let self else { return }
+            guard gen == self.currentGeneration, self.currentSessionActive else { return }
+            let daemon: MLXInferenceDaemon
+            do {
+                daemon = try self.ensureDaemonReady()
+            } catch {
+                logger.warning("MLX daemon unavailable for streaming: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+            guard gen == self.currentGeneration, self.currentSessionActive else { return }
+            do {
+                try daemon.startStream(timeout: 10)
+                self.setStreamingDaemon(daemon)
+                logger.info("MLX streaming session started")
+            } catch {
+                // Batch fallback at endSession still works; just log.
+                logger.warning("MLX streaming start failed, will transcribe in batch: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     func endSession() {
@@ -110,7 +164,7 @@ final class MLXSTTProvider: STTProvider {
         updateInferenceInFlight(true)
         let gen = currentGeneration
 
-        let samples = snapshotAndClearCapturedSamples()
+        let (samples, alreadyStreamed) = snapshotAndClearCapturedSamples()
         guard !samples.isEmpty else {
             updateInferenceInFlight(false)
             onError?(.providerError(message: "No audio captured for MLX transcription."))
@@ -123,7 +177,9 @@ final class MLXSTTProvider: STTProvider {
 
             let result: Result<String, STTError>
             do {
-                result = .success(try self.runInference(samples: samples, model: model, generation: gen))
+                result = .success(try self.finishTranscription(
+                    samples: samples, alreadyStreamed: alreadyStreamed, model: model, generation: gen
+                ))
             } catch let err as STTError {
                 result = .failure(err)
             } catch {
@@ -165,10 +221,19 @@ final class MLXSTTProvider: STTProvider {
         // fast.
         let daemonToKill = hadInferenceInFlight ? daemon : nil
         if hadInferenceInFlight { daemon = nil }
+        let openStream = streamingDaemon
+        streamingDaemon = nil
         stateLock.unlock()
+
+        // Close an open streaming session so the daemon drops its buffers;
+        // the daemon itself stays warm for the next dictation.
+        if let openStream, openStream !== daemonToKill {
+            inferenceQueue.async { openStream.cancelStream() }
+        }
 
         samplesLock.lock()
         capturedSamples.removeAll(keepingCapacity: true)
+        streamedSampleCount = 0
         samplesLock.unlock()
 
         if let daemonToKill {
@@ -182,32 +247,49 @@ final class MLXSTTProvider: STTProvider {
 
     // MARK: - Inference
 
-    private func runInference(samples: [Float], model: MLXModel, generation gen: Int) throws -> String {
+    /// Finalizes the session on `inferenceQueue`: closes the streaming
+    /// session when one is open (most audio already processed), otherwise
+    /// sends the whole utterance as one batch request. Streaming failures
+    /// fall back to batch — the full sample buffer is retained for that.
+    private func finishTranscription(samples: [Float], alreadyStreamed: Int, model: MLXModel, generation gen: Int) throws -> String {
         guard gen == currentGeneration else {
             throw STTError.providerError(message: "Transcription was cancelled.")
         }
 
+        if let streaming = takeStreamingDaemon() {
+            do {
+                // Push any tail audio the flush tasks hadn't sent when the
+                // buffer was snapshotted (later flush tasks no-op).
+                if alreadyStreamed < samples.count {
+                    let tail = Array(samples[alreadyStreamed...])
+                    streaming.sendStreamAudio(pcmBase64: AudioWAVEncoding.int16PCMData(samples: tail).base64EncodedString())
+                }
+                return try streaming.endStream(timeout: requestTimeout)
+            } catch {
+                logger.warning("MLX streaming finish failed, falling back to batch: \(error.localizedDescription, privacy: .public)")
+                discardDaemon(streaming)
+            }
+        }
+
+        return try runBatchInference(samples: samples, generation: gen)
+    }
+
+    private func runBatchInference(samples: [Float], generation gen: Int) throws -> String {
         let daemon = try ensureDaemonReady()
 
         guard gen == currentGeneration else {
             throw STTError.providerError(message: "Transcription was cancelled.")
         }
 
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("whisper-smart-mlx", isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let audioURL = tempDir.appendingPathComponent("session-\(UUID().uuidString).wav")
-
-        let wav = AudioWAVEncoding.make16BitMonoWAV(samples: samples, sampleRate: 16_000)
-        try wav.write(to: audioURL, options: .atomic)
-        defer { try? FileManager.default.removeItem(at: audioURL) }
-
+        let pcm = AudioWAVEncoding.int16PCMData(samples: samples).base64EncodedString()
         do {
-            return try daemon.transcribe(audioPath: audioURL.path, timeout: requestTimeout)
+            return try daemon.transcribe(pcmBase64: pcm, timeout: requestTimeout)
         } catch {
             // Any request failure (timeout, crash, protocol error) discards
-            // the daemon so the next session starts from a clean process.
+            // the daemon so the next session starts from a clean process, and
+            // a background respawn keeps the next dictation off the cold path.
             discardDaemon(daemon)
+            prewarmDaemonIfPossible()
             throw error
         }
     }
@@ -305,11 +387,31 @@ final class MLXSTTProvider: STTProvider {
         stateLock.lock(); inferenceInFlight = value; stateLock.unlock()
     }
 
-    private func snapshotAndClearCapturedSamples() -> [Float] {
+    /// Returns (samples, count already streamed to the daemon) and resets
+    /// the buffer so late flush tasks no-op.
+    private func snapshotAndClearCapturedSamples() -> ([Float], Int) {
         samplesLock.lock(); defer { samplesLock.unlock() }
         let snapshot = capturedSamples
+        let streamed = min(streamedSampleCount, snapshot.count)
         capturedSamples.removeAll(keepingCapacity: true)
-        return snapshot
+        streamedSampleCount = 0
+        return (snapshot, streamed)
+    }
+
+    private var currentStreamingDaemon: MLXInferenceDaemon? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return streamingDaemon
+    }
+
+    private func setStreamingDaemon(_ newValue: MLXInferenceDaemon?) {
+        stateLock.lock(); streamingDaemon = newValue; stateLock.unlock()
+    }
+
+    private func takeStreamingDaemon() -> MLXInferenceDaemon? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        let current = streamingDaemon
+        streamingDaemon = nil
+        return current
     }
 }
 
@@ -411,8 +513,36 @@ private final class MLXInferenceDaemon {
         return ready && !exited
     }
 
-    /// Sends one transcription request and blocks for its response.
-    func transcribe(audioPath: String, timeout: TimeInterval) throws -> String {
+    /// Sends one batch transcription request and blocks for its response.
+    func transcribe(pcmBase64: String, timeout: TimeInterval) throws -> String {
+        try awaitResponse(payloadForID: { ["id": $0, "pcm": pcmBase64] }, timeout: timeout)
+    }
+
+    /// Opens a streaming session on the daemon (blocks for the ack).
+    func startStream(timeout: TimeInterval) throws {
+        _ = try awaitResponse(payloadForID: { ["cmd": "start", "id": $0] }, timeout: timeout)
+    }
+
+    /// Fire-and-forget audio chunk for the open streaming session. Errors
+    /// surface on `endStream`.
+    func sendStreamAudio(pcmBase64: String) {
+        try? writeLine(["cmd": "audio", "pcm": pcmBase64])
+    }
+
+    /// Finalizes the streaming session and blocks for the transcript.
+    func endStream(timeout: TimeInterval) throws -> String {
+        try awaitResponse(payloadForID: { ["cmd": "end", "id": $0] }, timeout: timeout)
+    }
+
+    /// Fire-and-forget: discards the daemon-side streaming session.
+    func cancelStream() {
+        try? writeLine(["cmd": "cancel"])
+    }
+
+    /// Sends one request carrying a fresh id and blocks for the matching
+    /// response. Callers serialize on `inferenceQueue`, so only one request
+    /// is pending at a time.
+    private func awaitResponse(payloadForID: (Int) -> [String: Any], timeout: TimeInterval) throws -> String {
         let requestID: Int
         let semaphore = DispatchSemaphore(value: 0)
 
@@ -435,17 +565,7 @@ private final class MLXInferenceDaemon {
             lock.unlock()
         }
 
-        let payload: [String: Any] = ["id": requestID, "audio": audioPath]
-        guard var line = try? JSONSerialization.data(withJSONObject: payload) else {
-            throw STTError.providerError(message: "Failed to encode MLX request.")
-        }
-        line.append(0x0A)
-
-        do {
-            try stdinHandle.write(contentsOf: line)
-        } catch {
-            throw STTError.providerError(message: "MLX engine is not accepting requests (pipe closed).")
-        }
+        try writeLine(payloadForID(requestID))
 
         guard semaphore.wait(timeout: .now() + timeout) == .success else {
             throw STTError.providerError(
@@ -464,6 +584,18 @@ private final class MLXInferenceDaemon {
             throw error
         case nil:
             throw STTError.providerError(message: "MLX engine returned no result.")
+        }
+    }
+
+    private func writeLine(_ payload: [String: Any]) throws {
+        guard var line = try? JSONSerialization.data(withJSONObject: payload) else {
+            throw STTError.providerError(message: "Failed to encode MLX request.")
+        }
+        line.append(0x0A)
+        do {
+            try stdinHandle.write(contentsOf: line)
+        } catch {
+            throw STTError.providerError(message: "MLX engine is not accepting requests (pipe closed).")
         }
     }
 
@@ -519,6 +651,8 @@ private final class MLXInferenceDaemon {
         if let errorMessage = message["error"] as? String {
             pendingResult = .failure(.providerError(message: String(errorMessage.suffix(400))))
         } else {
+            // Covers both {"text": ...} responses and acks like
+            // {"event": "stream_started"} (empty text).
             pendingResult = .success(message["text"] as? String ?? "")
         }
         lock.unlock()
