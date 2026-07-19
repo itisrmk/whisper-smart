@@ -3,6 +3,8 @@ import AVFoundation
 import Speech
 
 private final class MockHotkeyMonitor: HotkeyMonitoring {
+    var onPressBegan: (() -> Void)?
+    var onPressAbandoned: (() -> Void)?
     var onHoldStarted: (() -> Void)?
     var onHoldEnded: (() -> Void)?
     var onStartFailed: ((HotkeyMonitorError) -> Void)?
@@ -21,6 +23,8 @@ private final class MockHotkeyMonitor: HotkeyMonitoring {
         isRunning = false
     }
 
+    func triggerPressBegan() { onPressBegan?() }
+    func triggerPressAbandoned() { onPressAbandoned?() }
     func triggerHoldStart() { onHoldStarted?() }
     func triggerHoldEnd() { onHoldEnded?() }
 }
@@ -149,6 +153,89 @@ private func runStateMachineSmoke() throws {
 
     print("✓ DictationStateMachine smoke passed")
     print("  states: \(observedStates)")
+}
+
+private func runSpeculativeCaptureSmoke() throws {
+    let hotkey = MockHotkeyMonitor()
+    let audio = MockAudioCapture()
+    let stt = MockSTTProvider()
+    let injector = MockInjector()
+
+    let machine = DictationStateMachine(
+        hotkeyMonitor: hotkey,
+        audioCapture: audio,
+        sttProvider: stt,
+        injector: injector,
+        postProcessingPipeline: TranscriptPostProcessingPipeline(processors: []),
+        commandModeRouter: FeatureFlaggedCommandModeRouter(isEnabled: { false }),
+        microphoneAuthorizationStatus: { .authorized },
+        requestMicrophoneAccess: { completion in completion(true) }
+    )
+    machine.activate()
+
+    // A tap that never becomes a hold: capture starts silently and is
+    // discarded with no state transition.
+    hotkey.triggerPressBegan()
+    try expect(machine.state == .idle, "speculative capture must not leave idle")
+    try expect(audio.startCallCount == 1, "speculative capture should start audio at key-down")
+    hotkey.triggerPressAbandoned()
+    try expect(machine.state == .idle, "abandoned press should stay idle")
+    try expect(audio.stopCallCount == 1, "abandoned press should stop audio")
+
+    // A confirmed hold adopts the speculative capture instead of starting a
+    // second session.
+    hotkey.triggerPressBegan()
+    hotkey.triggerHoldStart()
+    try expect(machine.state == .recording, "confirmed hold should enter recording")
+    try expect(audio.startCallCount == 2, "adoption must reuse the speculative capture (no extra start)")
+    try expect(stt.beginSessionCallCount == 2, "adoption must reuse the speculative STT session")
+
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    hotkey.triggerHoldEnd()
+    try expect(machine.state == .transcribing, "adopted session should transcribe on release")
+    stt.emitFinal("speculative works")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    try expect(injector.injectedTexts == ["speculative works"], "adopted session should inject normally")
+
+    print("✓ Speculative capture smoke passed")
+}
+
+private func runOrphanedRecordingRecoverySmoke() throws {
+    let hotkey = MockHotkeyMonitor()
+    let audio = MockAudioCapture()
+    let stt = MockSTTProvider()
+    let injector = MockInjector()
+
+    let machine = DictationStateMachine(
+        hotkeyMonitor: hotkey,
+        audioCapture: audio,
+        sttProvider: stt,
+        injector: injector,
+        postProcessingPipeline: TranscriptPostProcessingPipeline(processors: []),
+        commandModeRouter: FeatureFlaggedCommandModeRouter(isEnabled: { false }),
+        microphoneAuthorizationStatus: { .authorized },
+        requestMicrophoneAccess: { completion in completion(true) }
+    )
+    machine.activate()
+
+    // Simulate an orphaned recording: hold started, but the release event
+    // was lost (tap reset / sleep), so no hold-end ever fires.
+    hotkey.triggerHoldStart()
+    try expect(machine.state == .recording, "first hold should record")
+
+    // The next press must not be swallowed — it recovers and records again.
+    hotkey.triggerHoldStart()
+    try expect(machine.state == .recording, "hold during orphaned recording must recover, not be swallowed")
+
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    hotkey.triggerHoldEnd()
+    stt.emitFinal("recovered")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    try expect(injector.injectedTexts == ["recovered"], "recovered session should complete end-to-end")
+
+    print("✓ Orphaned recording recovery smoke passed")
 }
 
 private func runPermissionRaceSmoke() throws {
@@ -552,6 +639,8 @@ struct QASmokeMain {
     static func main() {
         do {
             try runStateMachineSmoke()
+            try runSpeculativeCaptureSmoke()
+            try runOrphanedRecordingRecoverySmoke()
             try runPermissionRaceSmoke()
             try runResolverSmoke()
             try runParakeetNoSilentFallbackSmoke()

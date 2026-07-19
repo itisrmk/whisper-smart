@@ -2,6 +2,8 @@ import AVFoundation
 import CoreGraphics
 
 protocol HotkeyMonitoring: AnyObject {
+    var onPressBegan: (() -> Void)? { get set }
+    var onPressAbandoned: (() -> Void)? { get set }
     var onHoldStarted: (() -> Void)? { get set }
     var onHoldEnded: (() -> Void)? { get set }
     var onStartFailed: ((HotkeyMonitorError) -> Void)? { get set }

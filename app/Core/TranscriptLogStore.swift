@@ -18,6 +18,9 @@ final class TranscriptLogStore: ObservableObject {
 
     private let maxEntries = 2000
     private let fileURL: URL
+    /// Persistence runs off the main thread so a save scheduled right after
+    /// dictation cannot delay the pending paste timer.
+    private let persistenceQueue = DispatchQueue(label: "com.visperflow.transcriptlog.save", qos: .utility)
 
     private init() {
         let fm = FileManager.default
@@ -87,8 +90,12 @@ final class TranscriptLogStore: ObservableObject {
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        let snapshot = entries
+        let fileURL = fileURL
+        persistenceQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: fileURL, options: .atomic)
+        }
     }
 }
 

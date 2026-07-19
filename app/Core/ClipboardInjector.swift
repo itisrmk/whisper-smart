@@ -22,8 +22,10 @@ final class ClipboardInjector {
     /// Ordered strategies attempted for each injection.
     var strategyOrder: [Strategy] = [.accessibility, .pasteboard]
 
-    /// Delay between pasteboard write and ⌘V synthesis.
-    var pasteDelay: TimeInterval = 0.05
+    /// Delay between pasteboard write and ⌘V synthesis. Pasteboard writes
+    /// are synchronous; this only needs to cover pasteboard-server
+    /// propagation, so it can stay short.
+    var pasteDelay: TimeInterval = 0.03
 
     /// Delay before attempting clipboard restore.
     var restoreDelay: TimeInterval = 0.2
@@ -43,7 +45,7 @@ final class ClipboardInjector {
     ]
 
     /// Longer paste delay for terminal apps where PTY processing is async.
-    private let terminalPasteDelay: TimeInterval = 0.10
+    private let terminalPasteDelay: TimeInterval = 0.08
 
     /// Longer restore delay for terminals; the shell/PTY may read the
     /// clipboard well after the ⌘V event is delivered.

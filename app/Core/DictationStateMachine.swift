@@ -91,6 +91,12 @@ final class DictationStateMachine {
     private var detectedSpeechInCurrentRecording = false
     private var sessionStartedAt: Date?
     private var transcribingStartedAt: Date?
+    /// True while audio is being captured speculatively between key-down and
+    /// hold confirmation (state stays `.idle`, no UI). The confirmed hold
+    /// adopts this capture so the first ~300ms of speech isn't lost; an
+    /// abandoned tap discards it silently.
+    private var speculativeCaptureActive = false
+    private var speculativeCaptureStartedAt: Date?
 
     /// Explicit retry policy: this state machine does not auto-retry failed
     /// dictation sessions. Users must explicitly initiate a new recording.
@@ -125,6 +131,16 @@ final class DictationStateMachine {
     // MARK: - Wiring
 
     private func wireCallbacks() {
+        // Key-down (hold not yet confirmed) → start capturing speculatively
+        hotkeyMonitor.onPressBegan = { [weak self] in
+            self?.handlePressBegan()
+        }
+
+        // Tap released before the hold threshold → discard speculative capture
+        hotkeyMonitor.onPressAbandoned = { [weak self] in
+            self?.handlePressAbandoned()
+        }
+
         // Hotkey hold started → begin recording
         hotkeyMonitor.onHoldStarted = { [weak self] in
             self?.handleHoldStarted()
@@ -220,6 +236,7 @@ final class DictationStateMachine {
     func deactivate() {
         logger.info("Deactivating dictation state machine (current state: \(String(describing: self.state)))")
         hotkeyMonitor.stop()
+        discardSpeculativeCapture()
         audioCapture.stop()
         cancelTranscribingTimeout()
         cancelSuccessReset()
@@ -261,6 +278,7 @@ final class DictationStateMachine {
         cancelTranscribingTimeout()
         cancelSuccessReset()
         cancelSilenceAutoStopWatchdog()
+        discardSpeculativeCapture()
         oneShotModeActive = false
         oneShotModePendingStart = false
         pendingPermissionRecordingStart = false
@@ -312,6 +330,44 @@ final class DictationStateMachine {
 
     // MARK: - State transitions
 
+    /// Key-down before the hold threshold: start the mic now so speech
+    /// spoken during the confirmation window is captured. No state
+    /// transition and no UI — an abandoned tap must be invisible.
+    private func handlePressBegan() {
+        guard state == .idle, !speculativeCaptureActive else { return }
+        guard microphoneAuthorizationStatus() == .authorized else { return }
+
+        audioCapture.inputDeviceUID = DictationWorkflowSettings.selectedInputDeviceUID
+        do {
+            try sttProvider.beginSession()
+            try audioCapture.start()
+            speculativeCaptureActive = true
+            speculativeCaptureStartedAt = Date()
+            logger.info("Speculative capture started (awaiting hold confirmation)")
+        } catch {
+            // Best-effort: the confirmed hold retries via the normal path and
+            // surfaces errors properly there.
+            logger.info("Speculative capture unavailable: \(error.localizedDescription, privacy: .public)")
+            sttProvider.cancelSession()
+            audioCapture.stop()
+        }
+    }
+
+    private func handlePressAbandoned() {
+        guard speculativeCaptureActive else { return }
+        logger.info("Press abandoned before hold threshold — discarding speculative capture")
+        discardSpeculativeCapture()
+    }
+
+    private func discardSpeculativeCapture() {
+        guard speculativeCaptureActive else { return }
+        speculativeCaptureActive = false
+        speculativeCaptureStartedAt = nil
+        detectedSpeechInCurrentRecording = false
+        audioCapture.stop()
+        sttProvider.cancelSession()
+    }
+
     private func handleHoldStarted() {
         if state == .success {
             cancelSuccessReset()
@@ -327,6 +383,20 @@ final class DictationStateMachine {
             // session instead of silently swallowing the hotkey press.
             logger.info("Hold-start during transcribing — cancelling in-flight transcription")
             cancelInFlightTranscription()
+        }
+        if state == .recording {
+            // A release lost to a tap reset/reinstall can orphan `.recording`;
+            // without this branch the press is silently swallowed and only the
+            // second press works. Recover and start fresh.
+            logger.warning("Hold-start received while already recording — recovering orphaned session")
+            cancelSilenceAutoStopWatchdog()
+            oneShotModeActive = false
+            detectedSpeechInCurrentRecording = false
+            audioCapture.stop()
+            sttProvider.cancelSession()
+            sessionStartedAt = nil
+            transcribingStartedAt = nil
+            transition(to: .idle)
         }
         guard state == .idle else { return }
 
@@ -376,6 +446,25 @@ final class DictationStateMachine {
         let providerName = sttProvider.displayName
         var didBeginSTTSession = false
         onTranscriptChange?("")
+
+        // Adopt a speculative capture started at key-down: the mic and STT
+        // session are already running with the leading audio in the buffer.
+        if speculativeCaptureActive {
+            let startedAt = speculativeCaptureStartedAt ?? Date()
+            speculativeCaptureActive = false
+            speculativeCaptureStartedAt = nil
+            oneShotModeActive = oneShotModePendingStart
+            oneShotModePendingStart = false
+            lastDetectedSpeechAt = Date()
+            if oneShotModeActive {
+                scheduleSilenceAutoStopWatchdog()
+            }
+            sessionStartedAt = startedAt
+            transcribingStartedAt = nil
+            logger.info("Recording session adopted speculative capture (provider: \(providerName, privacy: .public))")
+            transition(to: .recording)
+            return
+        }
 
         // Set the selected input device before starting capture
         audioCapture.inputDeviceUID = DictationWorkflowSettings.selectedInputDeviceUID
@@ -505,7 +594,9 @@ final class DictationStateMachine {
     }
 
     private func handleAudioLevel(_ level: Float) {
-        guard state == .recording else { return }
+        // Speech during the speculative window (before the hold confirms)
+        // counts too — it's the same recording once adopted.
+        guard state == .recording || speculativeCaptureActive else { return }
         if level >= 0.08 {
             detectedSpeechInCurrentRecording = true
             lastDetectedSpeechAt = Date()
@@ -564,6 +655,7 @@ final class DictationStateMachine {
         cancelTranscribingTimeout()
         cancelSuccessReset()
         cancelSilenceAutoStopWatchdog()
+        discardSpeculativeCapture()
         oneShotModeActive = false
         oneShotModePendingStart = false
         pendingPermissionRecordingStart = false
@@ -614,6 +706,10 @@ final class DictationStateMachine {
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.state == .transcribing else { return }
             logger.error("Transcribing timeout (\(timeout)s) for provider \(providerName, privacy: .public) — STT provider did not respond, recovering to error")
+            // Cancel the hung session so the provider's in-flight flag clears;
+            // otherwise the next beginSession throws ("still running") and the
+            // hotkey appears dead until the stale request finally lands.
+            self.sttProvider.cancelSession()
             self.transition(to: .error("Transcription timed out while using \(providerName). Please try again."))
         }
         transcribingTimeoutWork = work
