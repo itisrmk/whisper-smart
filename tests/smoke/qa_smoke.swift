@@ -7,11 +7,15 @@ private final class MockHotkeyMonitor: HotkeyMonitoring {
     var onPressAbandoned: (() -> Void)?
     var onHoldStarted: (() -> Void)?
     var onHoldEnded: (() -> Void)?
+    var onHandsFreeLockStarted: (() -> Void)?
+    var onHandsFreeLockStopRequested: (() -> Void)?
+    var onEscapePressed: (() -> Void)?
     var onStartFailed: ((HotkeyMonitorError) -> Void)?
     private(set) var isRunning = false
 
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
+    private(set) var endHandsFreeLockCallCount = 0
 
     func start() {
         startCallCount += 1
@@ -23,10 +27,17 @@ private final class MockHotkeyMonitor: HotkeyMonitoring {
         isRunning = false
     }
 
+    func endHandsFreeLock() {
+        endHandsFreeLockCallCount += 1
+    }
+
     func triggerPressBegan() { onPressBegan?() }
     func triggerPressAbandoned() { onPressAbandoned?() }
     func triggerHoldStart() { onHoldStarted?() }
     func triggerHoldEnd() { onHoldEnded?() }
+    func triggerHandsFreeLockStart() { onHandsFreeLockStarted?() }
+    func triggerHandsFreeLockStopRequest() { onHandsFreeLockStopRequested?() }
+    func triggerEscape() { onEscapePressed?() }
 }
 
 private final class MockAudioCapture: AudioCapturing {
@@ -267,6 +278,68 @@ private func runPermissionRaceSmoke() throws {
     try expect(audio.startCallCount == 0, "audio capture must not start after a cancelled permission flow")
 
     print("✓ Microphone permission race smoke passed")
+}
+
+private func runHandsFreeLockAndEscapeSmoke() throws {
+    let hotkey = MockHotkeyMonitor()
+    let audio = MockAudioCapture()
+    let stt = MockSTTProvider()
+    let injector = MockInjector()
+
+    let machine = DictationStateMachine(
+        hotkeyMonitor: hotkey,
+        audioCapture: audio,
+        sttProvider: stt,
+        injector: injector,
+        postProcessingPipeline: TranscriptPostProcessingPipeline(processors: []),
+        commandModeRouter: FeatureFlaggedCommandModeRouter(isEnabled: { false }),
+        microphoneAuthorizationStatus: { .authorized },
+        requestMicrophoneAccess: { completion in completion(true) }
+    )
+    machine.activate()
+
+    // Double-press lock: recording starts without a held key and the stop
+    // press finishes it like a hotkey release.
+    hotkey.triggerHandsFreeLockStart()
+    try expect(machine.state == .recording, "hands-free lock should enter recording")
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    hotkey.triggerHandsFreeLockStopRequest()
+    try expect(machine.state == .transcribing, "lock stop press should enter transcribing")
+    stt.emitFinal("locked dictation")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    try expect(injector.injectedTexts == ["locked dictation"], "locked session should inject its transcript")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+    try expect(machine.state == .idle, "locked session should settle back to idle")
+
+    // Esc cancels a locked session: no transcription, no injection, and the
+    // monitor's lock state is released so the next press starts fresh.
+    hotkey.triggerHandsFreeLockStart()
+    try expect(machine.state == .recording, "second hands-free lock should enter recording")
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    let lockReleasesBeforeEscape = hotkey.endHandsFreeLockCallCount
+    hotkey.triggerEscape()
+    try expect(machine.state == .idle, "Esc should cancel the locked session back to idle")
+    try expect(injector.injectedTexts.count == 1, "cancelled session must not inject")
+    try expect(hotkey.endHandsFreeLockCallCount == lockReleasesBeforeEscape + 1, "Esc cancel must release the monitor's hands-free lock")
+
+    // Esc cancels a plain hold recording too.
+    hotkey.triggerHoldStart()
+    try expect(machine.state == .recording, "hold should enter recording")
+    audio.simulateSpeech()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    hotkey.triggerEscape()
+    try expect(machine.state == .idle, "Esc should cancel a hold recording back to idle")
+    hotkey.triggerHoldEnd()
+    try expect(machine.state == .idle, "hotkey release after Esc cancel must be a no-op")
+    try expect(injector.injectedTexts.count == 1, "Esc-cancelled hold must not inject")
+
+    // Esc while idle does nothing.
+    hotkey.triggerEscape()
+    try expect(machine.state == .idle, "Esc while idle must be ignored")
+
+    print("✓ Hands-free lock + Esc cancel smoke passed")
 }
 
 private func runResolverSmoke() throws {
@@ -634,6 +707,47 @@ private func runFormalStyleTransformSmoke() throws {
     print("✓ Formal style transform smoke passed")
 }
 
+private func runDictionarySuggestionEngineSmoke() throws {
+    let texts = [
+        "Ping me on OpenAI about the MLX build. OpenAI said yes.",
+        "The MLX daemon needs the MLX flag before Kubernetes deploys.",
+        "Ask Kubernetes to restart, then Kubernetes reports to kubernetes logs.",
+        "hello there, the build is green"
+    ]
+
+    let suggestions = DictionarySuggestionEngine.candidates(in: texts, excluding: [], limit: 5)
+    let terms = suggestions.map(\.term)
+
+    try expect(
+        terms.contains("OpenAI"),
+        "Mixed-case identifier seen twice should be suggested. Got: \(terms)"
+    )
+    try expect(
+        terms.contains("MLX"),
+        "All-caps term seen three times should be suggested. Got: \(terms)"
+    )
+    try expect(
+        !terms.contains("Kubernetes"),
+        "Capitalized word also seen lowercased should not be suggested. Got: \(terms)"
+    )
+    try expect(
+        !terms.contains("The") && !terms.contains("hello"),
+        "Plain words and sentence starters should never be suggested. Got: \(terms)"
+    )
+
+    let excluded = DictionarySuggestionEngine.candidates(
+        in: texts,
+        excluding: ["openai", "mlx"],
+        limit: 5
+    )
+    try expect(
+        excluded.isEmpty,
+        "Excluded (dictionary/snippet/dismissed) terms should not reappear. Got: \(excluded.map(\.term))"
+    )
+
+    print("✓ Dictionary suggestion engine smoke passed")
+}
+
 @main
 struct QASmokeMain {
     static func main() {
@@ -642,6 +756,7 @@ struct QASmokeMain {
             try runSpeculativeCaptureSmoke()
             try runOrphanedRecordingRecoverySmoke()
             try runPermissionRaceSmoke()
+            try runHandsFreeLockAndEscapeSmoke()
             try runResolverSmoke()
             try runParakeetNoSilentFallbackSmoke()
             try runMLXCatalogSmoke()
@@ -650,6 +765,7 @@ struct QASmokeMain {
             try runGlobalWritingStyleFallbackSmoke()
             try runDomainPresetFallbackSmoke()
             try runFormalStyleTransformSmoke()
+            try runDictionarySuggestionEngineSmoke()
             print("\nAll QA smoke checks passed.")
         } catch {
             fputs("Smoke test failure: \(error)\n", stderr)

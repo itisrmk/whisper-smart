@@ -82,6 +82,12 @@ final class DictationStateMachine {
     private var successResetWork: DispatchWorkItem?
     private var oneShotModePendingStart = false
     private var oneShotModeActive = false
+    /// True while a hands-free locked recording (hotkey double-press) is
+    /// active. Locked sessions run as one-shot sessions so the silence
+    /// auto-stop watchdog applies; this flag additionally keeps the monitor's
+    /// lock state in sync when the session ends by any path other than the
+    /// explicit stop press.
+    private var handsFreeLockActive = false
     /// True while the first-run microphone permission dialog is up. If the
     /// user releases the hotkey (or cancels) before answering, the granted
     /// callback must not start a recording nobody can stop.
@@ -149,6 +155,21 @@ final class DictationStateMachine {
         // Hotkey released → stop recording, begin transcription
         hotkeyMonitor.onHoldEnded = { [weak self] in
             self?.handleHoldEnded()
+        }
+
+        // Hotkey double-press → hands-free locked recording
+        hotkeyMonitor.onHandsFreeLockStarted = { [weak self] in
+            self?.handleHandsFreeLockStarted()
+        }
+
+        // Hotkey pressed while locked → stop recording, begin transcription
+        hotkeyMonitor.onHandsFreeLockStopRequested = { [weak self] in
+            self?.handleHandsFreeLockStopRequested()
+        }
+
+        // Esc while recording → cancel session, no transcription
+        hotkeyMonitor.onEscapePressed = { [weak self] in
+            self?.handleEscapePressed()
         }
 
         // Event tap creation failed → surface to UI
@@ -241,6 +262,7 @@ final class DictationStateMachine {
         cancelTranscribingTimeout()
         cancelSuccessReset()
         cancelSilenceAutoStopWatchdog()
+        releaseHandsFreeLock()
         // Only end the session if we were actively using the provider.
         if state == .recording || state == .transcribing {
             sttProvider.endSession()
@@ -279,6 +301,7 @@ final class DictationStateMachine {
         cancelSuccessReset()
         cancelSilenceAutoStopWatchdog()
         discardSpeculativeCapture()
+        releaseHandsFreeLock()
         oneShotModeActive = false
         oneShotModePendingStart = false
         pendingPermissionRecordingStart = false
@@ -326,6 +349,69 @@ final class DictationStateMachine {
     func stopOneShotRecording() {
         oneShotModePendingStart = false
         handleHoldEnded()
+    }
+
+    // MARK: - Hands-free lock
+
+    /// Double-press of the hotkey → start a hands-free locked recording.
+    /// Reuses the one-shot path so the silence auto-stop watchdog applies.
+    private func handleHandsFreeLockStarted() {
+        guard state == .idle || state == .success || state.isError else {
+            logger.info("Hands-free lock requested in state \(String(describing: self.state)) — ignoring")
+            hotkeyMonitor.endHandsFreeLock()
+            return
+        }
+        logger.info("Hands-free lock started (hotkey double-press)")
+        handsFreeLockActive = true
+        startOneShotRecording()
+        if state != .recording && !pendingPermissionRecordingStart {
+            // Recording failed to start — release the lock so the next press
+            // starts fresh instead of "stopping" a session that never began.
+            releaseHandsFreeLock()
+        }
+    }
+
+    /// Hotkey pressed while hands-free locked → stop and transcribe.
+    private func handleHandsFreeLockStopRequested() {
+        logger.info("Hands-free lock stop requested (hotkey press)")
+        releaseHandsFreeLock()
+        stopOneShotRecording()
+    }
+
+    /// Ends the hands-free lock (if any) on both this machine and the
+    /// monitor, so a hotkey press after the session ends starts a new
+    /// recording instead of "stopping" one that no longer exists.
+    private func releaseHandsFreeLock() {
+        guard handsFreeLockActive else { return }
+        handsFreeLockActive = false
+        hotkeyMonitor.endHandsFreeLock()
+    }
+
+    /// Esc pressed while a session is active → cancel without transcribing.
+    /// The monitor's tap is listen-only, so Esc still reaches the frontmost
+    /// app; we only act when a recording (hold or locked) is in flight.
+    private func handleEscapePressed() {
+        if pendingPermissionRecordingStart {
+            logger.info("Escape pressed while awaiting microphone permission — cancelling deferred start")
+            pendingPermissionRecordingStart = false
+            oneShotModePendingStart = false
+            releaseHandsFreeLock()
+            return
+        }
+        guard state == .recording else { return }
+
+        logger.info("Escape pressed — cancelling recording without transcription")
+        cancelSilenceAutoStopWatchdog()
+        releaseHandsFreeLock()
+        oneShotModeActive = false
+        detectedSpeechInCurrentRecording = false
+        audioCapture.stop()
+        sttProvider.cancelSession()
+        sessionStartedAt = nil
+        transcribingStartedAt = nil
+        onAudioLevelChange?(0)
+        onTranscriptChange?("")
+        transition(to: .idle)
     }
 
     // MARK: - State transitions
@@ -390,6 +476,7 @@ final class DictationStateMachine {
             // second press works. Recover and start fresh.
             logger.warning("Hold-start received while already recording — recovering orphaned session")
             cancelSilenceAutoStopWatchdog()
+            releaseHandsFreeLock()
             oneShotModeActive = false
             detectedSpeechInCurrentRecording = false
             audioCapture.stop()
@@ -420,6 +507,7 @@ final class DictationStateMachine {
                 } else {
                     logger.error("Microphone permission denied by user")
                     self.oneShotModePendingStart = false
+                    self.releaseHandsFreeLock()
                     self.transition(to: .error(AudioCaptureError.microphonePermissionDenied.localizedDescription))
                 }
             }
@@ -496,6 +584,10 @@ final class DictationStateMachine {
             // next hotkey hold (which would silently become one-shot mode and
             // auto-stop mid-hold on silence).
             oneShotModePendingStart = false
+            // A hands-free locked start that fails here (e.g. after an async
+            // microphone-permission grant) must release the lock, or the next
+            // hotkey press is consumed as a phantom "stop" by the monitor.
+            releaseHandsFreeLock()
             logger.error("Failed to start recording with provider \(providerName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             transition(to: .error(error.localizedDescription))
         }
@@ -508,12 +600,14 @@ final class DictationStateMachine {
             logger.info("Hold ended while awaiting microphone permission — cancelling deferred start")
             pendingPermissionRecordingStart = false
             oneShotModePendingStart = false
+            releaseHandsFreeLock()
             return
         }
 
         guard state == .recording else { return }
 
         cancelSilenceAutoStopWatchdog()
+        releaseHandsFreeLock()
         let hadSpeech = detectedSpeechInCurrentRecording
         oneShotModeActive = false
         detectedSpeechInCurrentRecording = false
@@ -561,6 +655,7 @@ final class DictationStateMachine {
             // so the mic doesn't stay hot after we transition to success.
             if state == .recording {
                 cancelSilenceAutoStopWatchdog()
+                releaseHandsFreeLock()
                 oneShotModeActive = false
                 detectedSpeechInCurrentRecording = false
                 audioCapture.stop()
@@ -656,6 +751,7 @@ final class DictationStateMachine {
         cancelSuccessReset()
         cancelSilenceAutoStopWatchdog()
         discardSpeculativeCapture()
+        releaseHandsFreeLock()
         oneShotModeActive = false
         oneShotModePendingStart = false
         pendingPermissionRecordingStart = false
@@ -710,7 +806,7 @@ final class DictationStateMachine {
             // otherwise the next beginSession throws ("still running") and the
             // hotkey appears dead until the stale request finally lands.
             self.sttProvider.cancelSession()
-            self.transition(to: .error("Transcription timed out while using \(providerName). Please try again."))
+            self.transition(to: .error(AppStatusCatalog.transcriptionTimedOut(providerName: providerName).message))
         }
         transcribingTimeoutWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: work)

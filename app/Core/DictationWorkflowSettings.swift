@@ -259,6 +259,11 @@ enum DictationProviderPolicy {
 
     private enum Key {
         static let cloudFallbackEnabled = "provider.cloudFallbackEnabled"
+        /// Set only when the user explicitly changes the fallback toggle.
+        /// Distinguishes an explicit choice from the migration default, so
+        /// saving an API key later can turn fallback on without overriding
+        /// a user who deliberately switched it off.
+        static let cloudFallbackUserOverride = "provider.cloudFallbackEnabled.userSet"
         static let openAIAPIKeyLegacy = "provider.openAI.apiKey"
         static let openAIEndpointProfile = "provider.openAI.endpointProfile"
         static let openAIBaseURL = "provider.openAI.baseURL"
@@ -324,8 +329,26 @@ enum DictationProviderPolicy {
     }
 
     static var cloudFallbackEnabled: Bool {
-        get { defaults.bool(forKey: Key.cloudFallbackEnabled) }
-        set { defaults.set(newValue, forKey: Key.cloudFallbackEnabled) }
+        get {
+            // One-time migration: earlier builds force-enabled this whenever
+            // the Provider tab opened, so users with a configured API key
+            // expect cloud to keep working. Default ON only for them.
+            if defaults.object(forKey: Key.cloudFallbackEnabled) == nil {
+                let hasAPIKey = !openAIAPIKey
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+                defaults.set(hasAPIKey, forKey: Key.cloudFallbackEnabled)
+                return hasAPIKey
+            }
+            return defaults.bool(forKey: Key.cloudFallbackEnabled)
+        }
+        set {
+            // The setter is only reached from explicit user actions (the
+            // Provider tab toggle); remember that so the key-save path below
+            // never overrides a deliberate off choice.
+            defaults.set(true, forKey: Key.cloudFallbackUserOverride)
+            defaults.set(newValue, forKey: Key.cloudFallbackEnabled)
+        }
     }
 
     static var openAIEndpointProfile: OpenAIEndpointProfile {
@@ -405,6 +428,15 @@ enum DictationProviderPolicy {
             _ = SecureCredentialStore.delete(account: SecureAccount.openAIAPIKey)
             defaults.removeObject(forKey: Key.openAIAPIKeyLegacy)
             return .cleared
+        }
+
+        // The first-launch migration latches cloud fallback OFF when no key
+        // exists yet; a user who then saves a key clearly wants cloud to
+        // work. Unless the user has explicitly touched the toggle, turn it
+        // on when a key is saved (mirrors the migration's "default ON for
+        // configured keys" intent).
+        if !defaults.bool(forKey: Key.cloudFallbackUserOverride) {
+            defaults.set(true, forKey: Key.cloudFallbackEnabled)
         }
 
         if SecureCredentialStore.writeString(normalized, account: SecureAccount.openAIAPIKey) {

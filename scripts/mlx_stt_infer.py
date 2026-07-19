@@ -116,18 +116,22 @@ def decode_pcm_base64(b64: str):
 class ParakeetStream:
     """One transcription session fed incrementally over the wire.
 
-    Warm parakeet batch decode is extremely fast (~0.02x realtime measured
-    on parakeet-tdt-0.6b-v3), so for typical dictation lengths finish()
-    just batch-transcribes the accumulated buffer — faster AND higher
-    quality (full attention) than finalizing an incremental decode.
+    Once the clip passes BATCH_STREAM_CROSSOVER_SAMPLES, the incremental
+    (local-attention) transcriber opens and audio is decoded in
+    FLUSH_SAMPLES chunks *while the user is still speaking*, so finish()
+    only has to decode the sub-chunk tail — release-to-text latency stays
+    near-constant instead of growing with clip duration. The final
+    `result` already merges finalized + draft tokens, so no separate
+    refine pass exists or is needed (parakeet-mlx StreamingParakeet).
 
-    Only past BATCH_STREAM_CROSSOVER_SAMPLES does the incremental
-    (local-attention) encoder start, keeping finalize latency bounded for
-    very long dictations instead of growing linearly with duration.
+    Clips that never reach the crossover are batch-transcribed on
+    finish() instead: batch decode of ~2 s of audio is effectively
+    instant and uses full attention, so it is both faster and higher
+    quality than opening a streaming context for a tiny clip.
     """
 
     FLUSH_SAMPLES = 16_000  # 1 s at 16 kHz
-    BATCH_STREAM_CROSSOVER_SAMPLES = 45 * 16_000
+    BATCH_STREAM_CROSSOVER_SAMPLES = 2 * 16_000
 
     def __init__(self, model, batch_transcribe):
         self._model = model

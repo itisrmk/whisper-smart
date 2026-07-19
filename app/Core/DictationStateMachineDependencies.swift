@@ -6,10 +6,14 @@ protocol HotkeyMonitoring: AnyObject {
     var onPressAbandoned: (() -> Void)? { get set }
     var onHoldStarted: (() -> Void)? { get set }
     var onHoldEnded: (() -> Void)? { get set }
+    var onHandsFreeLockStarted: (() -> Void)? { get set }
+    var onHandsFreeLockStopRequested: (() -> Void)? { get set }
+    var onEscapePressed: (() -> Void)? { get set }
     var onStartFailed: ((HotkeyMonitorError) -> Void)? { get set }
     var isRunning: Bool { get }
     func start()
     func stop()
+    func endHandsFreeLock()
 }
 
 protocol AudioCapturing: AnyObject {
