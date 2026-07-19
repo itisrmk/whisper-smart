@@ -24,29 +24,104 @@ on:
         description: "Release notes"
         required: false
         type: string
+  # Auto-release: every merged PR into main cuts a beta release with an
+  # auto-bumped patch version. Opt out per-PR with the `skip-release` label.
+  # Bump minor/major instead with `release:minor` / `release:major` labels.
+  # Docs/CI-only PRs (see paths-ignore) never trigger a release.
+  pull_request:
+    types: [closed]
+    branches: [main]
+    paths-ignore:
+      - ".github/**"
+      - "docs/**"
+      - "**.md"
+      - "appcast.xml"
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-dmg
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: macos-latest
     timeout-minutes: 45
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       !contains(github.event.pull_request.labels.*.name, 'skip-release'))
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # For merged-PR runs, release the tip of main (the merge result),
+          # not the PR merge ref.
+          ref: ${{ github.event_name == 'pull_request' && 'main' || github.ref }}
           fetch-depth: 0
+
+      - name: Resolve Release Parameters
+        id: params
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_NOTES: ${{ inputs.notes }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BUMP_MINOR: ${{ contains(github.event.pull_request.labels.*.name, 'release:minor') }}
+          BUMP_MAJOR: ${{ contains(github.event.pull_request.labels.*.name, 'release:major') }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="$INPUT_VERSION"
+            CHANNEL="$INPUT_CHANNEL"
+            NOTES="$INPUT_NOTES"
+          else
+            git fetch --tags --force
+            LATEST="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+            LATEST="${LATEST#v}"
+            IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST:-0.0.0}"
+            if [[ "$BUMP_MAJOR" == "true" ]]; then
+              MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+            elif [[ "$BUMP_MINOR" == "true" ]]; then
+              MINOR=$((MINOR + 1)); PATCH=0
+            else
+              PATCH=$((PATCH + 1))
+            fi
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            CHANNEL="beta"
+            NOTES="${PR_TITLE} (#${PR_NUMBER})"
+            # Auto-bumped versions must never overwrite an existing release.
+            # (Manual dispatch stays lenient: a pre-pushed tag is reused.)
+            if git ls-remote --tags origin "v${VERSION}" | grep -q "v${VERSION}"; then
+              echo "Tag v${VERSION} already exists on origin — refusing to re-release it."
+              exit 1
+            fi
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Refusing to release with malformed version: '$VERSION'"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+          {
+            echo "notes<<NOTES_EOF"
+            printf '%s\n' "$NOTES"
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing v${VERSION} (${CHANNEL}) [trigger: ${EVENT_NAME}]"
 
       - name: Release Gate
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.params.outputs.version }}
           ALLOW_ADHOC_SIGNING: 1
         run: bash scripts/release_gate.sh
 
       - name: Enforce Release Checklist Confirmation
-        if: ${{ !inputs.checklist_confirmed }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.checklist_confirmed }}
         run: |
           echo "Checklist confirmation is required before tagging a release."
           exit 1
@@ -66,7 +141,7 @@ jobs:
           done
 
       - name: Validate Production Notarization Secrets
-        if: ${{ inputs.channel == 'production' }}
+        if: ${{ steps.params.outputs.channel == 'production' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -89,8 +164,8 @@ jobs:
 
       - name: Build Signed DMG
         env:
-          VERSION: ${{ inputs.version }}
-          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ steps.params.outputs.version }}
+          CHANNEL: ${{ steps.params.outputs.channel }}
         run: |
           set -euo pipefail
           IDENTITIES="$(security find-identity -v -p codesigning | grep -v 'CSSMERR' || true)"
@@ -115,7 +190,7 @@ jobs:
           CODESIGN_IDENTITY="$SIGNING_IDENTITY" VERSION="$VERSION" bash scripts/package_dmg.sh
 
       - name: Notarize Production DMG
-        if: ${{ inputs.channel == 'production' }}
+        if: ${{ steps.params.outputs.channel == 'production' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -133,7 +208,7 @@ jobs:
       - name: Resolve Previous Tag
         id: previous_tag
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.params.outputs.version }}
         run: |
           set -euo pipefail
           git fetch --tags --force
@@ -144,11 +219,11 @@ jobs:
       - name: Compose Release Notes
         id: release_notes
         env:
-          VERSION: ${{ inputs.version }}
-          INPUT_NOTES: ${{ inputs.notes }}
+          VERSION: ${{ steps.params.outputs.version }}
+          INPUT_NOTES: ${{ steps.params.outputs.notes }}
           PREVIOUS_TAG: ${{ steps.previous_tag.outputs.value }}
           REPOSITORY: ${{ github.repository }}
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ steps.params.outputs.channel }}
         run: |
           set -euo pipefail
           NOTES_FILE="$(mktemp)"
@@ -168,7 +243,7 @@ jobs:
 
       - name: Update Appcast
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.params.outputs.version }}
           NOTES_FILE: ${{ steps.release_notes.outputs.path }}
           REPOSITORY: ${{ github.repository }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -225,7 +300,7 @@ jobs:
 
       - name: Commit + Push Appcast
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.params.outputs.version }}
         run: |
           set -euo pipefail
           if git diff --quiet -- appcast.xml; then
@@ -241,7 +316,7 @@ jobs:
 
       - name: Create and Push Tag
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.params.outputs.version }}
         run: |
           set -euo pipefail
           TAG="v${VERSION}"
@@ -259,8 +334,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version }}
-          name: v${{ inputs.version }}
+          tag_name: v${{ steps.params.outputs.version }}
+          name: v${{ steps.params.outputs.version }}
           body_path: ${{ steps.release_notes.outputs.path }}
           files: |
             .build/release/Whisper-Smart-mac.dmg
