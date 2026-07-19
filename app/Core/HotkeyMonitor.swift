@@ -33,6 +33,20 @@ final class HotkeyMonitor {
     /// Fired once when the monitored key is released.
     var onHoldEnded: (() -> Void)?
 
+    /// Fired when a double-press (press–release–press within
+    /// `doublePressInterval`) is detected. Starts a hands-free locked
+    /// recording that keeps going without holding the key.
+    var onHandsFreeLockStarted: (() -> Void)?
+
+    /// Fired when the hotkey is pressed while a hands-free lock is active —
+    /// the press that stops the locked recording and starts transcription.
+    var onHandsFreeLockStopRequested: (() -> Void)?
+
+    /// Fired when Esc is pressed. The event tap is listen-only, so Esc is
+    /// never swallowed — observers must act only while a dictation session
+    /// is active and ignore it otherwise.
+    var onEscapePressed: (() -> Void)?
+
     /// Fired when the event tap cannot be created (Accessibility permission missing).
     var onStartFailed: ((HotkeyMonitorError) -> Void)?
 
@@ -49,12 +63,29 @@ final class HotkeyMonitor {
     /// Prevents accidental taps from triggering dictation.
     var minimumHoldDuration: TimeInterval = 0.3
 
+    /// Maximum gap (seconds) between a short tap's release and the next
+    /// key-down for the pair to count as a hands-free double-press.
+    var doublePressInterval: TimeInterval = 0.4
+
     // MARK: - Private state
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var keyDownTimestamp: Date?
     private var holdFired = false
+    /// Release time of the last short tap (press abandoned before the hold
+    /// threshold). Armed for `doublePressInterval` to detect a double-press.
+    private var lastTapReleaseAt: Date?
+    /// True when another key went down while a modifier-only binding was
+    /// mid-press — the modifier was used as part of a regular shortcut
+    /// (⌘C, ⌘V, …), so its release is not a tap and must never arm the
+    /// double-press lock. Otherwise ⌘C then ⌘V within `doublePressInterval`
+    /// would silently start a hands-free recording.
+    private var pressWasChorded = false
+    /// True while a hands-free locked recording is active. Set on
+    /// double-press detection; cleared by the stop press or by
+    /// `endHandsFreeLock()` when the session ends by other means.
+    private var handsFreeLockActive = false
     private var holdCheckWork: DispatchWorkItem?
     private var healthWatchdog: Timer?
     private var wakeObserver: NSObjectProtocol?
@@ -286,8 +317,21 @@ final class HotkeyMonitor {
     }
 
     private func handleKeyDown(event: CGEvent) {
-        guard !binding.isModifierOnly else { return }
         let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        // Any key going down while a modifier-only binding is mid-press means
+        // the modifier is part of a regular shortcut chord, not a tap.
+        if binding.isModifierOnly && keyDownTimestamp != nil {
+            pressWasChorded = true
+        }
+        // Esc is observed (listen-only tap — never swallowed) so an active
+        // dictation session can be cancelled. Observers ignore it when idle.
+        if code == kVK_Escape {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                onEscapePressed?()
+            }
+            return
+        }
+        guard !binding.isModifierOnly else { return }
         guard matchingKeyCodes.contains(code) else { return }
         // Check that the required modifiers are held.
         let flags = event.flags
@@ -314,7 +358,35 @@ final class HotkeyMonitor {
             // and treat this as a new press instead of swallowing it.
             logger.warning("Key-down with stale tracking state (holdFired=\(self.holdFired)) — recovering")
             endActiveTracking()
+        } else if isAutorepeat {
+            // Autorepeat of a press we consumed (lock start/stop) — the key
+            // is still physically held, this is not a new press.
+            return
         }
+
+        // Pressing the hotkey while a hands-free lock is active stops the
+        // locked recording. The press is consumed: no hold tracking, and its
+        // release fires nothing.
+        if handsFreeLockActive {
+            handsFreeLockActive = false
+            lastTapReleaseAt = nil
+            logger.log("Hands-free lock stop requested (\(self.binding.displayString))")
+            onHandsFreeLockStopRequested?()
+            return
+        }
+
+        // Double-press: a fresh press right after a short tap locks the
+        // recording hands-free. The press is consumed — its release must not
+        // end the locked session.
+        if let tapReleaseAt = lastTapReleaseAt,
+           Date().timeIntervalSince(tapReleaseAt) <= doublePressInterval {
+            lastTapReleaseAt = nil
+            handsFreeLockActive = true
+            logger.log("Hands-free lock started via double-press (\(self.binding.displayString))")
+            onHandsFreeLockStarted?()
+            return
+        }
+
         keyDownTimestamp = Date()
         holdFired = false
         onPressBegan?()
@@ -329,17 +401,34 @@ final class HotkeyMonitor {
     private func onKeyUp() {
         if holdFired {
             logger.log("Hold ended (\(self.binding.displayString))")
+            lastTapReleaseAt = nil
             onHoldEnded?()
         } else if keyDownTimestamp != nil {
+            // A short tap: remember its release so an immediate re-press can
+            // be recognized as a hands-free double-press. Chorded presses
+            // (modifier used in a normal shortcut) never arm it.
+            if !pressWasChorded {
+                lastTapReleaseAt = Date()
+            }
             onPressAbandoned?()
         }
         resetState()
+    }
+
+    /// Clears the hands-free lock without firing callbacks. Called by the
+    /// state machine when a locked session ends by other means (silence
+    /// auto-stop, Esc cancel, error, provider swap) so the next press starts
+    /// a fresh session instead of "stopping" one that no longer exists.
+    func endHandsFreeLock() {
+        handsFreeLockActive = false
     }
 
     /// Ends whatever press/hold is currently tracked, firing the matching
     /// release callback so the state machine can never be left stuck in
     /// `.recording` with no release coming (the "press twice" bug).
     private func endActiveTracking() {
+        // A recovery abandonment is not a user tap — never arm double-press.
+        lastTapReleaseAt = nil
         if holdFired {
             logger.warning("Ending active hold during recovery")
             onHoldEnded?()
@@ -364,6 +453,7 @@ final class HotkeyMonitor {
         holdCheckWork = nil
         keyDownTimestamp = nil
         holdFired = false
+        pressWasChorded = false
     }
 
     // MARK: - Helpers
@@ -420,7 +510,7 @@ enum HotkeyMonitorError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .eventTapCreationFailed:
-            return "Cannot monitor hotkeys — grant Accessibility permission in System Settings → Privacy & Security → Accessibility."
+            return AppStatusCatalog.hotkeyMonitorDown.message
         }
     }
 }

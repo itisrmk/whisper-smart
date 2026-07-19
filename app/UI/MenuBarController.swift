@@ -16,13 +16,9 @@ final class MenuBarController {
     var onOpenSettings: (() -> Void)?
     var onQuit: (() -> Void)?
     var onRetryHotkeyMonitor: (() -> Void)?
-    var onOneShotRecording: (() -> Void)?
-    var onStopOneShotRecording: (() -> Void)?
 
     /// Menu item that shows the current error detail (hidden when no error).
     private var errorDetailItem: NSMenuItem?
-    /// Menu item for one-shot recording.
-    private var oneShotItem: NSMenuItem?
     /// Menu item for retrying the hotkey monitor.
     private var retryItem: NSMenuItem?
     /// Menu item showing provider runtime diagnostics.
@@ -30,7 +26,6 @@ final class MenuBarController {
     /// Primary dictation control item.
     private var dictateItem: NSMenuItem?
 
-    private var isOneShotActive = false
     private var hotkeyRecoveryAvailable = false
     private var currentBubbleState: BubbleState = .idle
 
@@ -140,11 +135,6 @@ final class MenuBarController {
         let showRecovery = (state == .error)
         errorDetailItem?.isHidden = !showRecovery
         retryItem?.isHidden = !(showRecovery && hotkeyRecoveryAvailable)
-
-        if state == .idle {
-            isOneShotActive = false
-            oneShotItem?.title = "One-Shot Recording (no hotkey)"
-        }
     }
 
     /// Controls whether the menu should expose hotkey-recovery actions.
@@ -187,12 +177,14 @@ final class MenuBarController {
         #if DEBUG
         diagnostics.assertDisplayConsistency()
         #endif
+        // Canonical status wording shared with the overlay and settings
+        // banners (AppStatusCatalog); only truncation differs per surface.
         let summary: String
         if diagnostics.usesFallback {
-            if let fallbackReason = diagnostics.fallbackReason, !fallbackReason.isEmpty {
-                let shortReason = fallbackReason.count > 56
-                    ? String(fallbackReason.prefix(53)) + "..."
-                    : fallbackReason
+            if let status = diagnostics.userFacingStatus {
+                let shortReason = status.message.count > 56
+                    ? String(status.message.prefix(53)) + "..."
+                    : status.message
                 summary = "Provider: \(diagnostics.effectiveKind.displayName) (fallback: \(shortReason))"
             } else {
                 summary = "Provider: \(diagnostics.effectiveKind.displayName) (fallback)"
@@ -203,8 +195,8 @@ final class MenuBarController {
         providerDiagnosticsItem?.title = summary
 
         let tooltip: String
-        if let fallbackReason = diagnostics.fallbackReason {
-            tooltip = "Fallback reason: \(fallbackReason)"
+        if let status = diagnostics.userFacingStatus {
+            tooltip = status.message
         } else {
             tooltip = "Health: \(diagnostics.healthLevel.rawValue)"
         }
@@ -227,7 +219,7 @@ final class MenuBarController {
         let dictateItem = NSMenuItem(
             title: "Start Dictation",
             action: #selector(handleToggleDictation),
-            keyEquivalent: ""
+            keyEquivalent: "d"
         )
         dictateItem.target = self
         menu.addItem(dictateItem)
@@ -261,15 +253,6 @@ final class MenuBarController {
         retry.isHidden = true
         menu.addItem(retry)
         self.retryItem = retry
-
-        let oneShot = NSMenuItem(
-            title: "One-Shot Recording (no hotkey)",
-            action: #selector(handleOneShotRecording),
-            keyEquivalent: "d"
-        )
-        oneShot.target = self
-        menu.addItem(oneShot)
-        self.oneShotItem = oneShot
 
         menu.addItem(.separator())
 
@@ -322,17 +305,5 @@ final class MenuBarController {
 
     @objc private func handleRetryHotkeyMonitor() {
         onRetryHotkeyMonitor?()
-    }
-
-    @objc private func handleOneShotRecording() {
-        if isOneShotActive {
-            isOneShotActive = false
-            oneShotItem?.title = "One-Shot Recording (no hotkey)"
-            onStopOneShotRecording?()
-        } else {
-            isOneShotActive = true
-            oneShotItem?.title = "Stop One-Shot Recording"
-            onOneShotRecording?()
-        }
     }
 }

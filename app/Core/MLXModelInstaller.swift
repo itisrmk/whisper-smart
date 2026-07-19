@@ -18,10 +18,19 @@ final class MLXModelInstaller: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
 
+    /// Cancellation marker owned by a single install task. Each install
+    /// captures its own token, so cancelling task A stays effective even if
+    /// a new install starts while A is still running on the serial queue —
+    /// a shared flag reset by `install()` would resurrect the cancelled
+    /// download (e.g. onboarding: cancel model A, then install model B).
+    private final class CancelToken {
+        var isCancelled = false
+    }
+
     private let queue = DispatchQueue(label: "com.visperflow.mlx.install", qos: .utility)
     private let processLock = NSLock()
     private var currentProcess: Process?
-    private var installCancelled = false
+    private var activeInstallToken: CancelToken?
     private let downloadTimeout: TimeInterval = 60 * 60
 
     private init() {}
@@ -50,19 +59,20 @@ final class MLXModelInstaller: ObservableObject {
 
         MLXSetupPolicy.setupConsentGranted = true
         setPhase(.installing(modelID: model.id, detail: "Preparing runtime…"))
-        installCancelled = false
+        let token = CancelToken()
+        activeInstallToken = token
 
         queue.async {
             do {
                 let pythonCommand = try MLXRuntimeBootstrapManager.shared.ensureRuntimeReady(allowInstall: true)
-                guard !self.installCancelled else {
+                guard !token.isCancelled else {
                     self.finish(model: model, success: false, completion: completion)
                     return
                 }
 
                 self.setPhase(.installing(modelID: model.id, detail: "Downloading \(model.displayName) (\(model.approxSizeLabel))…"))
                 try self.runDownload(pythonCommand: pythonCommand, model: model)
-                guard !self.installCancelled else {
+                guard !token.isCancelled else {
                     self.finish(model: model, success: false, completion: completion)
                     return
                 }
@@ -72,7 +82,7 @@ final class MLXModelInstaller: ObservableObject {
                 self.setPhase(.idle)
                 self.finish(model: model, success: true, completion: completion)
             } catch {
-                guard !self.installCancelled else {
+                guard !token.isCancelled else {
                     self.finish(model: model, success: false, completion: completion)
                     return
                 }
@@ -84,7 +94,8 @@ final class MLXModelInstaller: ObservableObject {
     }
 
     func cancelInstall() {
-        installCancelled = true
+        activeInstallToken?.isCancelled = true
+        activeInstallToken = nil
         processLock.lock()
         currentProcess?.terminate()
         currentProcess = nil

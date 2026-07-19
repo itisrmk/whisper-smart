@@ -2,6 +2,18 @@ import AppKit
 import SwiftUI
 
 final class TopCenterOverlayPanelController {
+    /// Where the capsule sits on screen.
+    enum Placement {
+        /// Just below the menu bar, horizontally centered.
+        case topCenter
+        /// Snug against the bottom edge of the notch/menu-bar safe area.
+        /// On displays without a notch this behaves exactly like `topCenter`.
+        case notchDocked
+    }
+
+    /// Applied on the next `show()`; safe to set from any thread before showing.
+    var placement: Placement = .topCenter
+
     private var panel: NSPanel?
     private let stateSubject: BubbleStateSubject
 
@@ -90,7 +102,22 @@ final class TopCenterOverlayPanelController {
         guard let panel, let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
         let x = visible.midX - panel.frame.width / 2
-        let y = visible.maxY - panel.frame.height - 18
+        let y: CGFloat
+
+        switch placement {
+        case .topCenter:
+            y = visible.maxY - panel.frame.height - 18
+        case .notchDocked:
+            let notchInset = screen.safeAreaInsets.top
+            if notchInset > 0 {
+                // Dock the capsule right under the notch/menu-bar cutout.
+                y = screen.frame.maxY - notchInset - panel.frame.height - 4
+            } else {
+                // No notch: identical to the top-center placement.
+                y = visible.maxY - panel.frame.height - 18
+            }
+        }
+
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 }

@@ -2,8 +2,8 @@ import Foundation
 
 enum DictationOverlayMode: String, CaseIterable, Identifiable {
     case off
-    case floatingBubble
     case topCenterWaveform
+    case notchDocked
 
     var id: String { rawValue }
 
@@ -11,10 +11,10 @@ enum DictationOverlayMode: String, CaseIterable, Identifiable {
         switch self {
         case .off:
             return "Off"
-        case .floatingBubble:
-            return "Floating bubble (legacy)"
         case .topCenterWaveform:
-            return "Top-center waveform overlay"
+            return "Top-center bar"
+        case .notchDocked:
+            return "Notch-docked"
         }
     }
 }
@@ -28,11 +28,21 @@ enum DictationOverlaySettings {
         static let recordingSoundsEnabled = "recordingSoundsEnabled"
     }
 
+    /// Raw value of the retired floating-bubble mode; migrated to top-center.
+    private static let retiredFloatingBubbleRawValue = "floatingBubble"
+
     static var overlayMode: DictationOverlayMode {
         get {
-            if let raw = defaults.string(forKey: Key.overlayMode),
-               let mode = DictationOverlayMode(rawValue: raw) {
-                return mode
+            if let raw = defaults.string(forKey: Key.overlayMode) {
+                if let mode = DictationOverlayMode(rawValue: raw) {
+                    return mode
+                }
+                // The floating bubble was removed; carry those users over to
+                // the top-center bar so an overlay still appears.
+                if raw == retiredFloatingBubbleRawValue {
+                    defaults.set(DictationOverlayMode.topCenterWaveform.rawValue, forKey: Key.overlayMode)
+                    return .topCenterWaveform
+                }
             }
 
             // Backward compatibility: map old `showBubble` to the new mode.

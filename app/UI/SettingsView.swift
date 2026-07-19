@@ -52,6 +52,11 @@ struct SettingsView: View {
         .menuIndicator(.hidden)
         .vfForcedDarkTheme()
         .animation(VFAnimation.fadeMedium, value: selectedTab)
+        .onReceive(NotificationCenter.default.publisher(for: .correctionDictionaryPrefillRequested)) { _ in
+            withAnimation(VFAnimation.springSnappy) {
+                selectedTab = .dictionary
+            }
+        }
     }
 
     @ViewBuilder
@@ -61,6 +66,8 @@ struct SettingsView: View {
             GeneralSettingsTab()
         case .hotkey:
             HotkeySettingsTab()
+        case .dictionary:
+            DictionaryStyleSettingsTab()
         case .provider:
             ProviderSettingsTab()
         case .history:
@@ -73,32 +80,35 @@ struct SettingsView: View {
 // MARK: - Tab Enum
 
 private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
-    case general, hotkey, provider, history
+    case general, hotkey, dictionary, provider, history
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .general:  return "General"
-        case .hotkey:   return "Hotkey"
-        case .provider: return "Provider"
-        case .history:  return "History"
+        case .general:    return "General"
+        case .hotkey:     return "Hotkey"
+        case .dictionary: return "Dictionary & Style"
+        case .provider:   return "Provider"
+        case .history:    return "History"
         }
     }
 
     var icon: String {
         switch self {
-        case .general:  return "slider.horizontal.3"
-        case .hotkey:   return "command"
-        case .provider: return "cloud"
-        case .history:  return "list.bullet"
+        case .general:    return "slider.horizontal.3"
+        case .hotkey:     return "command"
+        case .dictionary: return "character.book.closed"
+        case .provider:   return "cloud"
+        case .history:    return "list.bullet"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .general: return "Startup, audio & workflow"
+        case .general: return "Startup, audio & overlay"
         case .hotkey: return "Global shortcut controls"
+        case .dictionary: return "Styles, snippets & corrections"
         case .provider: return "Models & cloud setup"
         case .history: return "Transcript metrics & logs"
         }
@@ -109,6 +119,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .general: return "Startup, audio, and your everyday dictation workflow."
         case .hotkey: return "One global shortcut for hands-free dictation, anywhere on your Mac."
+        case .dictionary: return "Writing styles, voice commands, snippets, and corrections — tuned to how you write."
         case .provider: return "Choose where transcription runs — right on your Mac, or in the cloud."
         case .history: return "Everything you've dictated, with timing so you can spot what to tune."
         }
@@ -337,6 +348,57 @@ private struct NeuDivider: View {
     }
 }
 
+// MARK: - Advanced Disclosure
+
+/// Collapsed-by-default container for advanced controls, styled to match
+/// the flat panel language (hairline border, accent chevron, zero radius).
+private struct AdvancedDisclosure<Content: View>: View {
+    var title: String = "Advanced"
+    @State private var isExpanded = false
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(VFAnimation.fadeMedium) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: VFSpacing.xs) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(VFColor.accent)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    Text(title)
+                        .font(VFFont.archivo(12.5, .semibold))
+                        .foregroundStyle(VFColor.text)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, VFSpacing.sm)
+                .padding(.vertical, 9)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: VFSpacing.md) {
+                    content()
+                }
+                .padding(VFSpacing.sm)
+                .padding(.top, VFSpacing.xs)
+            }
+        }
+        .background(
+            Rectangle()
+                .fill(VFColor.panel2)
+                .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
+        )
+    }
+}
+
 private struct GlassFieldModifier: ViewModifier {
     var cornerRadius: CGFloat = 0
     var verticalPadding: CGFloat = VFSpacing.xs
@@ -445,61 +507,14 @@ private struct GeneralSettingsTab: View {
     @AppStorage("dictationOverlayMode") private var overlayModeRaw = DictationOverlayMode.topCenterWaveform.rawValue
     @AppStorage("recordingSoundsEnabled") private var recordingSoundsEnabled = true
     @AppStorage("postProcessingPipelineEnabled") private var postProcessingPipelineEnabled = true
-    @AppStorage("commandModeScaffoldEnabled") private var commandModeScaffoldEnabled = false
 
     @State private var availableInputDevices: [AudioInputDevice] = []
     @State private var selectedInputDeviceUID: String = ""
-    @State private var inputDeviceMenuExpanded = false
 
     @State private var silenceTimeoutSeconds = DictationWorkflowSettings.silenceTimeoutSeconds
     @State private var insertionMode = DictationWorkflowSettings.insertionMode
-    @State private var defaultWritingStyle = DictationWorkflowSettings.defaultWritingStyle
-    @State private var defaultDomainPreset = DictationWorkflowSettings.defaultDomainPreset
-    @State private var perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
-    @State private var snippetsJSON = DictationWorkflowSettings.snippetsJSON
-    @State private var correctionDictionaryJSON = DictationWorkflowSettings.correctionDictionaryJSON
-    @State private var customAIInstructions = DictationWorkflowSettings.customAIInstructions
-    @State private var developerModeEnabled = DictationWorkflowSettings.developerModeEnabled
-    @State private var voiceCommandFormattingEnabled = DictationWorkflowSettings.voiceCommandFormattingEnabled
-    @FocusState private var customInstructionsFocused: Bool
 
     @State private var permSnap = PermissionDiagnostics.snapshot()
-
-    @State private var perAppProfiles: [PerAppProfileDraft] = []
-    @State private var snippetRows: [PhraseMappingDraft] = []
-    @State private var correctionRows: [PhraseMappingDraft] = []
-
-    private struct PerAppProfileDraft: Identifiable, Equatable {
-        var id = UUID()
-        var bundleID: String = ""
-        var style: String = "casual"
-        var prefix: String = ""
-        var suffix: String = ""
-    }
-
-    private struct PhraseMappingDraft: Identifiable, Equatable {
-        var id = UUID()
-        var key: String = ""
-        var value: String = ""
-    }
-
-    private struct AppProfileRecommendation: Identifiable {
-        let id: String
-        let appName: String
-        let bundleID: String
-        let style: String
-        let prefix: String
-        let suffix: String
-    }
-
-    private let profileStyles = ["neutral", "formal", "casual", "concise", "developer"]
-    private let recommendedProfiles: [AppProfileRecommendation] = [
-        .init(id: "mail", appName: "Mail", bundleID: "com.apple.mail", style: "formal", prefix: "", suffix: ""),
-        .init(id: "slack", appName: "Slack", bundleID: "com.tinyspeck.slackmacgap", style: "casual", prefix: "", suffix: ""),
-        .init(id: "notion", appName: "Notion", bundleID: "notion.id", style: "concise", prefix: "", suffix: ""),
-        .init(id: "vscode", appName: "VS Code", bundleID: "com.microsoft.VSCode", style: "developer", prefix: "", suffix: ""),
-        .init(id: "cursor", appName: "Cursor", bundleID: "com.todesktop.230313mzl4w4u92", style: "developer", prefix: "", suffix: "")
-    ]
 
     var body: some View {
         VStack(spacing: VFSpacing.lg) {
@@ -534,94 +549,84 @@ private struct GeneralSettingsTab: View {
                     .buttonStyle(.plain)
                 }
                 NeuDivider()
-                // Microphone selection
-                HStack {
-                    VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                        Text("Input device")
-                            .font(VFFont.settingsBody)
-                            .foregroundStyle(VFColor.textPrimary)
-                        Text("Choose a specific microphone")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
-                    }
-                    Spacer()
-                    Menu {
-                        Button {
-                            selectedInputDeviceUID = ""
-                            DictationWorkflowSettings.selectedInputDeviceUID = ""
-                        } label: {
-                            HStack {
-                                Text("System Default")
-                                if selectedInputDeviceUID.isEmpty {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                        if !availableInputDevices.isEmpty {
-                            Divider()
-                        }
-                        ForEach(availableInputDevices) { device in
-                            Button {
-                                selectedInputDeviceUID = device.id
-                                DictationWorkflowSettings.selectedInputDeviceUID = device.id
-                            } label: {
-                                HStack {
-                                    Text(device.name)
-                                    if device.id == selectedInputDeviceUID {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Text(selectedInputDeviceName)
-                            .lineLimit(1)
-                            .glassSelectPill()
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: 180)
-                }
-                NeuDivider()
                 NeuToggleRow(
                     title: "Recording sounds",
                     subtitle: "Play a short sound when recording starts and stops",
                     isOn: $recordingSoundsEnabled
                 )
                 NeuDivider()
-                NeuToggleRow(
-                    title: "Transcript cleanup pipeline",
-                    subtitle: "Apply conservative text cleanup after transcription",
-                    isOn: $postProcessingPipelineEnabled
-                )
-                NeuDivider()
-                NeuToggleRow(
-                    title: "Command mode scaffold",
-                    subtitle: "Route command-style phrases through a safe passthrough scaffold",
-                    isOn: $commandModeScaffoldEnabled
-                )
-            }
-
-            NeuSection(icon: "wand.and.stars", title: "Workflow") {
-                VStack(alignment: .leading, spacing: VFSpacing.md) {
+                AdvancedDisclosure {
+                    // Microphone selection
                     HStack {
-                        Text("Silence timeout")
-                            .font(VFFont.settingsBody)
-                            .foregroundStyle(VFColor.textPrimary)
+                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                            Text("Input device")
+                                .font(VFFont.settingsBody)
+                                .foregroundStyle(VFColor.textPrimary)
+                            Text("Choose a specific microphone")
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+                        }
                         Spacer()
-                        Text(String(format: "%.1fs", silenceTimeoutSeconds))
+                        Menu {
+                            Button {
+                                selectedInputDeviceUID = ""
+                                DictationWorkflowSettings.selectedInputDeviceUID = ""
+                            } label: {
+                                HStack {
+                                    Text("System Default")
+                                    if selectedInputDeviceUID.isEmpty {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                            if !availableInputDevices.isEmpty {
+                                Divider()
+                            }
+                            ForEach(availableInputDevices) { device in
+                                Button {
+                                    selectedInputDeviceUID = device.id
+                                    DictationWorkflowSettings.selectedInputDeviceUID = device.id
+                                } label: {
+                                    HStack {
+                                        Text(device.name)
+                                        if device.id == selectedInputDeviceUID {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Text(selectedInputDeviceName)
+                                .lineLimit(1)
+                                .glassSelectPill()
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: 180)
+                    }
+
+                    NeuDivider()
+
+                    VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                        HStack {
+                            Text("Silence timeout")
+                                .font(VFFont.settingsBody)
+                                .foregroundStyle(VFColor.textPrimary)
+                            Spacer()
+                            Text(String(format: "%.1fs", silenceTimeoutSeconds))
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+                        }
+
+                        Slider(value: $silenceTimeoutSeconds, in: 0.35...8.0, step: 0.1)
+                            .onChange(of: silenceTimeoutSeconds) { _, newValue in
+                                DictationWorkflowSettings.silenceTimeoutSeconds = newValue
+                            }
+
+                        Text("Used by one-shot dictation to auto-stop when no speech is detected.")
                             .font(VFFont.settingsCaption)
                             .foregroundStyle(VFColor.textSecondary)
                     }
-
-                    Slider(value: $silenceTimeoutSeconds, in: 0.35...8.0, step: 0.1)
-                        .onChange(of: silenceTimeoutSeconds) { _, newValue in
-                            DictationWorkflowSettings.silenceTimeoutSeconds = newValue
-                        }
-
-                    Text("Used by one-shot dictation to auto-stop when no speech is detected.")
-                        .font(VFFont.settingsCaption)
-                        .foregroundStyle(VFColor.textSecondary)
 
                     NeuDivider()
 
@@ -642,132 +647,16 @@ private struct GeneralSettingsTab: View {
                                 .glassSelectPill()
                         }
                         .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    }
-
-                    NeuDivider()
-
-                    perAppProfilesEditor
-                }
-            }
-
-            NeuSection(icon: "sparkles.rectangle.stack", title: "Intelligence") {
-                VStack(alignment: .leading, spacing: VFSpacing.md) {
-                    NeuToggleRow(
-                        title: "Voice punctuation commands",
-                        subtitle: "Recognize commands like comma, period, new paragraph, or 'replace X with Y in ...'",
-                        isOn: $voiceCommandFormattingEnabled
-                    )
-                    .onChange(of: voiceCommandFormattingEnabled) { _, newValue in
-                        DictationWorkflowSettings.voiceCommandFormattingEnabled = newValue
+                        .buttonStyle(.plain)
                     }
 
                     NeuDivider()
 
                     NeuToggleRow(
-                        title: "Developer dictation mode",
-                        subtitle: "Convert spoken coding tokens (open paren, underscore, brace)",
-                        isOn: $developerModeEnabled
+                        title: "Transcript cleanup pipeline",
+                        subtitle: "Apply conservative text cleanup after transcription",
+                        isOn: $postProcessingPipelineEnabled
                     )
-                    .onChange(of: developerModeEnabled) { _, newValue in
-                        DictationWorkflowSettings.developerModeEnabled = newValue
-                    }
-
-                    NeuDivider()
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                            Text("Default writing style")
-                                .font(VFFont.settingsBody)
-                                .foregroundStyle(VFColor.textPrimary)
-                            Text("Used when no per-app profile matches the active app")
-                                .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.textSecondary)
-                        }
-                        Spacer()
-                        Menu {
-                            ForEach(DictationWorkflowSettings.WritingStyle.allCases) { style in
-                                Button(style.displayName) {
-                                    defaultWritingStyle = style
-                                    DictationWorkflowSettings.defaultWritingStyle = style
-                                }
-                            }
-                        } label: {
-                            Text(defaultWritingStyle.displayName)
-                                .glassSelectPill()
-                        }
-                        .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    }
-
-                    NeuDivider()
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                            Text("Dictation domain preset")
-                                .font(VFFont.settingsBody)
-                                .foregroundStyle(VFColor.textPrimary)
-                            Text(defaultDomainPreset.helperText)
-                                .font(VFFont.settingsCaption)
-                                .foregroundStyle(VFColor.textSecondary)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                        Menu {
-                            ForEach(DictationWorkflowSettings.DomainPreset.allCases) { preset in
-                                Button(preset.displayName) {
-                                    defaultDomainPreset = preset
-                                    DictationWorkflowSettings.defaultDomainPreset = preset
-                                }
-                            }
-                        } label: {
-                            Text(defaultDomainPreset.displayName)
-                                .glassSelectPill()
-                        }
-                        .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    }
-
-                    NeuDivider()
-
-                    VStack(alignment: .leading, spacing: VFSpacing.sm) {
-                        Text("Custom AI instructions (cloud)")
-                            .font(VFFont.settingsBody)
-                            .foregroundStyle(VFColor.textPrimary)
-
-                        TextEditor(text: $customAIInstructions)
-                            .font(VFFont.archivo(12))
-                            .scrollContentBackground(.hidden)
-                            .focused($customInstructionsFocused)
-                            .frame(height: 78)
-                            .padding(6)
-                            .background(
-                                Rectangle()
-                                    .fill(VFColor.panel2)
-                                    .overlay(
-                                        Rectangle().stroke(
-                                            customInstructionsFocused ? VFColor.accent : VFColor.border2,
-                                            lineWidth: 1
-                                        )
-                                    )
-                            )
-                            .onChange(of: customAIInstructions) { _, newValue in
-                                DictationWorkflowSettings.customAIInstructions = newValue
-                            }
-
-                        Text("Used as transcription prompt when OpenAI cloud provider is active.")
-                            .font(VFFont.settingsCaption)
-                            .foregroundStyle(VFColor.textSecondary)
-                            .lineSpacing(2)
-                    }
-
-                    NeuDivider()
-
-                    snippetsEditor
-
-                    NeuDivider()
-
-                    correctionDictionaryEditor
                 }
             }
 
@@ -815,28 +704,16 @@ private struct GeneralSettingsTab: View {
             // pass; the overlay-mode getter can write UserDefaults (legacy-key
             // migration), which re-enters the view graph mid-update.
             DispatchQueue.main.async {
-            // Ensure old `showBubble` users get migrated to the new mode key.
-            overlayModeRaw = DictationOverlaySettings.overlayMode.rawValue
-            recordingSoundsEnabled = DictationOverlaySettings.recordingSoundsEnabled
-            permSnap = PermissionDiagnostics.snapshot()
-            silenceTimeoutSeconds = DictationWorkflowSettings.silenceTimeoutSeconds
-            insertionMode = DictationWorkflowSettings.insertionMode
-            defaultWritingStyle = DictationWorkflowSettings.defaultWritingStyle
-            defaultDomainPreset = DictationWorkflowSettings.defaultDomainPreset
-            perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
-            snippetsJSON = DictationWorkflowSettings.snippetsJSON
-            correctionDictionaryJSON = DictationWorkflowSettings.correctionDictionaryJSON
-            customAIInstructions = DictationWorkflowSettings.customAIInstructions
-            developerModeEnabled = DictationWorkflowSettings.developerModeEnabled
-            voiceCommandFormattingEnabled = DictationWorkflowSettings.voiceCommandFormattingEnabled
+                // Ensure old `showBubble` users get migrated to the new mode key.
+                overlayModeRaw = DictationOverlaySettings.overlayMode.rawValue
+                recordingSoundsEnabled = DictationOverlaySettings.recordingSoundsEnabled
+                permSnap = PermissionDiagnostics.snapshot()
+                silenceTimeoutSeconds = DictationWorkflowSettings.silenceTimeoutSeconds
+                insertionMode = DictationWorkflowSettings.insertionMode
 
-            // Load available input devices
-            availableInputDevices = AudioDeviceManager.availableInputDevices()
-            selectedInputDeviceUID = DictationWorkflowSettings.selectedInputDeviceUID
-
-            perAppProfiles = parsePerAppProfiles(from: perAppDefaultsJSON)
-            snippetRows = parsePhraseMap(from: snippetsJSON)
-            correctionRows = parsePhraseMap(from: correctionDictionaryJSON)
+                // Load available input devices
+                availableInputDevices = AudioDeviceManager.availableInputDevices()
+                selectedInputDeviceUID = DictationWorkflowSettings.selectedInputDeviceUID
             }
         }
         .onChange(of: overlayModeRaw) { _, newValue in
@@ -846,15 +723,6 @@ private struct GeneralSettingsTab: View {
             if DictationOverlaySettings.overlayMode != mode {
                 DictationOverlaySettings.overlayMode = mode
             }
-        }
-        .onChange(of: perAppProfiles) { _, newValue in
-            persistPerAppProfiles(newValue)
-        }
-        .onChange(of: snippetRows) { _, newValue in
-            persistPhraseMap(newValue, target: .snippets)
-        }
-        .onChange(of: correctionRows) { _, newValue in
-            persistPhraseMap(newValue, target: .corrections)
         }
     }
 
@@ -870,6 +738,227 @@ private struct GeneralSettingsTab: View {
             return device.name
         }
         return "System Default"
+    }
+}
+
+// MARK: - Dictionary & Style
+
+private struct DictionaryStyleSettingsTab: View {
+    @State private var defaultWritingStyle = DictationWorkflowSettings.defaultWritingStyle
+    @State private var defaultDomainPreset = DictationWorkflowSettings.defaultDomainPreset
+    @State private var perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
+    @State private var snippetsJSON = DictationWorkflowSettings.snippetsJSON
+    @State private var correctionDictionaryJSON = DictationWorkflowSettings.correctionDictionaryJSON
+    @State private var customAIInstructions = DictationWorkflowSettings.customAIInstructions
+    @State private var developerModeEnabled = DictationWorkflowSettings.developerModeEnabled
+    @State private var voiceCommandFormattingEnabled = DictationWorkflowSettings.voiceCommandFormattingEnabled
+    @FocusState private var customInstructionsFocused: Bool
+
+    @State private var perAppProfiles: [PerAppProfileDraft] = []
+    @State private var snippetRows: [PhraseMappingDraft] = []
+    @State private var correctionRows: [PhraseMappingDraft] = []
+    @State private var vocabularySuggestions: [DictionarySuggestion] = []
+
+    private struct PerAppProfileDraft: Identifiable, Equatable {
+        var id = UUID()
+        var bundleID: String = ""
+        var style: String = "casual"
+        var prefix: String = ""
+        var suffix: String = ""
+    }
+
+    private struct PhraseMappingDraft: Identifiable, Equatable {
+        var id = UUID()
+        var key: String = ""
+        var value: String = ""
+    }
+
+    private struct AppProfileRecommendation: Identifiable {
+        let id: String
+        let appName: String
+        let bundleID: String
+        let style: String
+        let prefix: String
+        let suffix: String
+    }
+
+    private let profileStyles = ["neutral", "formal", "casual", "concise", "developer"]
+    private let recommendedProfiles: [AppProfileRecommendation] = [
+        .init(id: "mail", appName: "Mail", bundleID: "com.apple.mail", style: "formal", prefix: "", suffix: ""),
+        .init(id: "slack", appName: "Slack", bundleID: "com.tinyspeck.slackmacgap", style: "casual", prefix: "", suffix: ""),
+        .init(id: "notion", appName: "Notion", bundleID: "notion.id", style: "concise", prefix: "", suffix: ""),
+        .init(id: "vscode", appName: "VS Code", bundleID: "com.microsoft.VSCode", style: "developer", prefix: "", suffix: ""),
+        .init(id: "cursor", appName: "Cursor", bundleID: "com.todesktop.230313mzl4w4u92", style: "developer", prefix: "", suffix: "")
+    ]
+
+    var body: some View {
+        VStack(spacing: VFSpacing.lg) {
+            NeuSection(icon: "sparkles.rectangle.stack", title: "Style & Commands") {
+                VStack(alignment: .leading, spacing: VFSpacing.md) {
+                    NeuToggleRow(
+                        title: "Voice punctuation commands",
+                        subtitle: "Recognize commands like comma, period, new paragraph, or 'replace X with Y in ...'",
+                        isOn: $voiceCommandFormattingEnabled
+                    )
+                    .onChange(of: voiceCommandFormattingEnabled) { _, newValue in
+                        DictationWorkflowSettings.voiceCommandFormattingEnabled = newValue
+                    }
+
+                    NeuDivider()
+
+                    NeuToggleRow(
+                        title: "Developer dictation mode",
+                        subtitle: "Convert spoken coding tokens (open paren, underscore, brace)",
+                        isOn: $developerModeEnabled
+                    )
+                    .onChange(of: developerModeEnabled) { _, newValue in
+                        DictationWorkflowSettings.developerModeEnabled = newValue
+                    }
+
+                    NeuDivider()
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                            Text("Default writing style")
+                                .font(VFFont.settingsBody)
+                                .foregroundStyle(VFColor.textPrimary)
+                            Text("Used when no per-app profile matches the active app")
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+                        }
+                        Spacer()
+                        Menu {
+                            ForEach(DictationWorkflowSettings.WritingStyle.allCases) { style in
+                                Button(style.displayName) {
+                                    defaultWritingStyle = style
+                                    DictationWorkflowSettings.defaultWritingStyle = style
+                                }
+                            }
+                        } label: {
+                            Text(defaultWritingStyle.displayName)
+                                .glassSelectPill()
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+                    }
+
+                    NeuDivider()
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                            Text("Dictation domain preset")
+                                .font(VFFont.settingsBody)
+                                .foregroundStyle(VFColor.textPrimary)
+                            Text(defaultDomainPreset.helperText)
+                                .font(VFFont.settingsCaption)
+                                .foregroundStyle(VFColor.textSecondary)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        Menu {
+                            ForEach(DictationWorkflowSettings.DomainPreset.allCases) { preset in
+                                Button(preset.displayName) {
+                                    defaultDomainPreset = preset
+                                    DictationWorkflowSettings.defaultDomainPreset = preset
+                                }
+                            }
+                        } label: {
+                            Text(defaultDomainPreset.displayName)
+                                .glassSelectPill()
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+                    }
+
+                    NeuDivider()
+
+                    VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                        Text("Custom AI instructions (cloud)")
+                            .font(VFFont.settingsBody)
+                            .foregroundStyle(VFColor.textPrimary)
+
+                        TextEditor(text: $customAIInstructions)
+                            .font(VFFont.archivo(12))
+                            .scrollContentBackground(.hidden)
+                            .focused($customInstructionsFocused)
+                            .frame(height: 78)
+                            .padding(6)
+                            .background(
+                                Rectangle()
+                                    .fill(VFColor.panel2)
+                                    .overlay(
+                                        Rectangle().stroke(
+                                            customInstructionsFocused ? VFColor.accent : VFColor.border2,
+                                            lineWidth: 1
+                                        )
+                                    )
+                            )
+                            .onChange(of: customAIInstructions) { _, newValue in
+                                DictationWorkflowSettings.customAIInstructions = newValue
+                            }
+
+                        Text("Used as transcription prompt when OpenAI cloud provider is active.")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                            .lineSpacing(2)
+                    }
+                }
+            }
+
+            NeuSection(icon: "character.book.closed", title: "Dictionary") {
+                VStack(alignment: .leading, spacing: VFSpacing.md) {
+                    snippetsEditor
+
+                    NeuDivider()
+
+                    if !vocabularySuggestions.isEmpty {
+                        vocabularySuggestionsStrip
+                    }
+
+                    correctionDictionaryEditor
+                }
+            }
+
+            NeuSection(icon: "square.grid.2x2", title: "Per-App Profiles") {
+                perAppProfilesEditor
+            }
+        }
+        .onAppear {
+            // Deferred: this runs during the settings window's initial layout
+            // pass; writing state mid-update re-enters the view graph.
+            DispatchQueue.main.async {
+                defaultWritingStyle = DictationWorkflowSettings.defaultWritingStyle
+                defaultDomainPreset = DictationWorkflowSettings.defaultDomainPreset
+                perAppDefaultsJSON = DictationWorkflowSettings.perAppDefaultsJSON
+                snippetsJSON = DictationWorkflowSettings.snippetsJSON
+                correctionDictionaryJSON = DictationWorkflowSettings.correctionDictionaryJSON
+                customAIInstructions = DictationWorkflowSettings.customAIInstructions
+                developerModeEnabled = DictationWorkflowSettings.developerModeEnabled
+                voiceCommandFormattingEnabled = DictationWorkflowSettings.voiceCommandFormattingEnabled
+
+                perAppProfiles = parsePerAppProfiles(from: perAppDefaultsJSON)
+                snippetRows = parsePhraseMap(from: snippetsJSON)
+                correctionRows = parsePhraseMap(from: correctionDictionaryJSON)
+                refreshVocabularySuggestions()
+                consumePendingCorrectionPrefill()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .correctionDictionaryPrefillRequested)) { _ in
+            // Deferred: the History tab posts before this tab is mounted; when
+            // it is already mounted, consume in place.
+            DispatchQueue.main.async {
+                consumePendingCorrectionPrefill()
+            }
+        }
+        .onChange(of: perAppProfiles) { _, newValue in
+            persistPerAppProfiles(newValue)
+        }
+        .onChange(of: snippetRows) { _, newValue in
+            persistPhraseMap(newValue, target: .snippets)
+        }
+        .onChange(of: correctionRows) { _, newValue in
+            persistPhraseMap(newValue, target: .corrections)
+        }
     }
 
     @ViewBuilder
@@ -1096,6 +1185,102 @@ private struct GeneralSettingsTab: View {
                 .padding(.top, VFSpacing.xs)
             }
         }
+    }
+
+    @ViewBuilder
+    private var vocabularySuggestionsStrip: some View {
+        VStack(alignment: .leading, spacing: VFSpacing.xs) {
+            Text("Suggestions")
+                .font(VFFont.settingsBody)
+                .foregroundStyle(VFColor.textPrimary)
+            Text("Vocabulary spotted in your transcript history. Add to teach the correction dictionary, or dismiss to hide forever.")
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textSecondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: VFSpacing.xs) {
+                    ForEach(vocabularySuggestions) { suggestion in
+                        HStack(spacing: VFSpacing.xs) {
+                            Text(suggestion.term)
+                                .font(VFFont.archivo(12, .semibold))
+                                .foregroundStyle(VFColor.textPrimary)
+                                .lineLimit(1)
+
+                            Button {
+                                acceptVocabularySuggestion(suggestion)
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(VFColor.accent)
+                                    .frame(width: 14, height: 14)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Add \(suggestion.term) to dictionary")
+
+                            Button {
+                                dismissVocabularySuggestion(suggestion)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(VFColor.muted)
+                                    .frame(width: 14, height: 14)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Dismiss suggestion \(suggestion.term)")
+                        }
+                        .padding(.horizontal, VFSpacing.sm)
+                        .padding(.vertical, VFSpacing.xs)
+                        .background(
+                            Rectangle()
+                                .fill(VFColor.panel)
+                                .overlay(Rectangle().stroke(VFColor.border2, lineWidth: 1))
+                        )
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(VFSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Rectangle()
+                .fill(VFColor.panel2)
+                .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
+        )
+    }
+
+    private func refreshVocabularySuggestions() {
+        vocabularySuggestions = DictionarySuggestionEngine.suggestions(
+            fromHistoryTexts: TranscriptLogStore.shared.entries.map(\.text)
+        )
+    }
+
+    private func acceptVocabularySuggestion(_ suggestion: DictionarySuggestion) {
+        prefillCorrectionRow(with: suggestion.term)
+        vocabularySuggestions.removeAll { $0.term == suggestion.term }
+    }
+
+    private func dismissVocabularySuggestion(_ suggestion: DictionarySuggestion) {
+        DictionarySuggestionEngine.dismiss(suggestion.term)
+        vocabularySuggestions.removeAll { $0.term == suggestion.term }
+    }
+
+    private func consumePendingCorrectionPrefill() {
+        guard let text = CorrectionDictionaryPrefill.consume() else { return }
+        prefillCorrectionRow(with: text)
+    }
+
+    /// Adds a correction row mapping the misheard (lowercased) form to the
+    /// properly cased term, ready for the user to adjust.
+    private func prefillCorrectionRow(with term: String) {
+        let key = term.lowercased()
+        if let existing = correctionRows.firstIndex(where: {
+            $0.key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == key
+        }) {
+            correctionRows[existing].value = term
+            return
+        }
+        correctionRows.append(PhraseMappingDraft(key: key, value: term))
     }
 
     @ViewBuilder
@@ -1646,6 +1831,7 @@ private struct ProviderSettingsTab: View {
 
     @State private var selectedKind: STTProviderKind = STTProviderKind.loadSelection()
     @StateObject private var mlxInstaller = MLXModelInstaller.shared
+    @State private var cloudFallbackEnabled = DictationProviderPolicy.cloudFallbackEnabled
     @State private var openAIAPIKey = DictationProviderPolicy.openAIAPIKey
     @State private var openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
     @State private var openAIBaseURL = DictationProviderPolicy.openAIBaseURL
@@ -1680,6 +1866,14 @@ private struct ProviderSettingsTab: View {
                 return "xmark.octagon.fill"
             }
         }
+
+        init(_ severity: AppStatusSeverity) {
+            switch severity {
+            case .info: self = .info
+            case .warning: self = .warning
+            case .error: self = .error
+            }
+        }
     }
 
     var body: some View {
@@ -1696,12 +1890,35 @@ private struct ProviderSettingsTab: View {
                         }
                     }
 
-                    if selectedKind == .parakeet || selectedKind == .whisper {
-                        MLXModelDetailRow(kind: selectedKind, installer: mlxInstaller)
+                    NeuToggleRow(
+                        title: "Allow cloud fallback",
+                        subtitle: "Let dictation use the OpenAI cloud endpoint when Cloud is selected or local models are unavailable",
+                        isOn: $cloudFallbackEnabled
+                    )
+                    .onChange(of: cloudFallbackEnabled) { _, newValue in
+                        // Deferred: persisting posts .sttProviderDidChange whose
+                        // cascade must not run mid-update.
+                        DispatchQueue.main.async {
+                            guard DictationProviderPolicy.cloudFallbackEnabled != newValue else { return }
+                            DictationProviderPolicy.cloudFallbackEnabled = newValue
+                            NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+                        }
                     }
 
                     if selectedKind == .openaiAPI {
                         providerConfigurationSection
+                    }
+
+                    if selectedKind == .parakeet || selectedKind == .whisper || selectedKind == .openaiAPI {
+                        AdvancedDisclosure {
+                            if selectedKind == .parakeet || selectedKind == .whisper {
+                                MLXModelDetailRow(kind: selectedKind, installer: mlxInstaller)
+                            }
+
+                            if selectedKind == .openaiAPI {
+                                cloudEndpointAdvancedSection
+                            }
+                        }
                     }
                 }
             }
@@ -1714,7 +1931,7 @@ private struct ProviderSettingsTab: View {
             // both of which re-enter the view graph mid-update and crash
             // (AttributeGraph precondition failure).
             DispatchQueue.main.async {
-                DictationProviderPolicy.cloudFallbackEnabled = true
+                cloudFallbackEnabled = DictationProviderPolicy.cloudFallbackEnabled
                 openAIAPIKey = DictationProviderPolicy.openAIAPIKey
                 openAIEndpointProfile = DictationProviderPolicy.openAIEndpointProfile
                 openAIBaseURL = DictationProviderPolicy.openAIBaseURL
@@ -1750,68 +1967,6 @@ private struct ProviderSettingsTab: View {
     private var providerConfigurationSection: some View {
         if selectedKind == .openaiAPI {
             VStack(alignment: .leading, spacing: VFSpacing.sm) {
-                HStack {
-                    Text("Endpoint profile")
-                        .font(VFFont.settingsBody)
-                        .foregroundStyle(VFColor.textPrimary)
-                    Spacer()
-                    Menu {
-                        ForEach(DictationProviderPolicy.OpenAIEndpointProfile.allCases) { profile in
-                            Button(profile.displayName) {
-                                openAIEndpointProfile = profile
-                                DictationProviderPolicy.openAIEndpointProfile = profile
-                                // Load the profile's defaults so the form never
-                                // shows the previous profile's stale values.
-                                openAIBaseURL = profile.defaultBaseURL
-                                openAIModel = profile.defaultModel
-                                DictationProviderPolicy.openAIBaseURL = openAIBaseURL
-                                DictationProviderPolicy.openAIModel = openAIModel
-                                NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
-                                openAIAPIKeyStatusMessage = nil
-                            }
-                        }
-                    } label: {
-                        Text(openAIEndpointProfile.displayName)
-                            .glassSelectPill()
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(.plain)
-                }
-
-                HStack(spacing: VFSpacing.sm) {
-                    VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                        Text("Base URL")
-                            .font(VFFont.settingsBody)
-                            .foregroundStyle(VFColor.textPrimary)
-                        TextField(openAIEndpointProfile.defaultBaseURL, text: $openAIBaseURL)
-                            .textFieldStyle(.plain)
-                            .glassInputField()
-                            .onChange(of: openAIBaseURL) { _, newValue in
-                                // Persist as-typed so switching tabs doesn't
-                                // discard edits; normalization happens on save.
-                                DictationProviderPolicy.openAIBaseURL = newValue
-                            }
-                            .onSubmit {
-                                persistOpenAIEndpointConfiguration()
-                            }
-                    }
-
-                    VStack(alignment: .leading, spacing: VFSpacing.xs) {
-                        Text("Model")
-                            .font(VFFont.settingsBody)
-                            .foregroundStyle(VFColor.textPrimary)
-                        TextField(openAIEndpointProfile.defaultModel, text: $openAIModel)
-                            .textFieldStyle(.plain)
-                            .glassInputField()
-                            .onChange(of: openAIModel) { _, newValue in
-                                DictationProviderPolicy.openAIModel = newValue
-                            }
-                            .onSubmit {
-                                persistOpenAIEndpointConfiguration()
-                            }
-                    }
-                }
-
                 Text("OpenAI API key")
                     .font(VFFont.settingsBody)
                     .foregroundStyle(VFColor.textPrimary)
@@ -1829,24 +1984,14 @@ private struct ProviderSettingsTab: View {
                     }
 
                 HStack(spacing: VFSpacing.sm) {
-                    profileActionButton(title: "Save Endpoint", enabled: true) {
-                        persistOpenAIEndpointConfiguration()
-                    }
                     profileActionButton(title: "Paste & Save", isPrimary: true, enabled: true) {
                         pasteAndSaveOpenAIAPIKey()
-                    }
-                    profileActionButton(title: "Save API Key", enabled: true) {
-                        persistOpenAIAPIKey()
                     }
                 }
 
                 if let status = openAIAPIKeyStatusMessage {
                     statusText(status, severity: openAIAPIKeyStatusSeverity)
                 }
-
-                Text("Supports official OpenAI and compatible self-hosted gateways that expose `/v1/audio/transcriptions`.")
-                    .font(VFFont.settingsCaption)
-                    .foregroundStyle(VFColor.textSecondary)
             }
             .onDisappear { [openAIAPIKey] in
                 // Save an edited API key even if the user never pressed
@@ -1861,6 +2006,79 @@ private struct ProviderSettingsTab: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Cloud endpoint configuration (profile, base URL, model). Lives inside
+    /// the Advanced disclosure — everyday setup only needs the API key above.
+    @ViewBuilder
+    private var cloudEndpointAdvancedSection: some View {
+        VStack(alignment: .leading, spacing: VFSpacing.sm) {
+            HStack {
+                Text("Endpoint profile")
+                    .font(VFFont.settingsBody)
+                    .foregroundStyle(VFColor.textPrimary)
+                Spacer()
+                Menu {
+                    ForEach(DictationProviderPolicy.OpenAIEndpointProfile.allCases) { profile in
+                        Button(profile.displayName) {
+                            openAIEndpointProfile = profile
+                            DictationProviderPolicy.openAIEndpointProfile = profile
+                            // Load the profile's defaults so the form never
+                            // shows the previous profile's stale values.
+                            openAIBaseURL = profile.defaultBaseURL
+                            openAIModel = profile.defaultModel
+                            DictationProviderPolicy.openAIBaseURL = openAIBaseURL
+                            DictationProviderPolicy.openAIModel = openAIModel
+                            NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+                            openAIAPIKeyStatusMessage = nil
+                        }
+                    }
+                } label: {
+                    Text(openAIEndpointProfile.displayName)
+                        .glassSelectPill()
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: VFSpacing.sm) {
+                VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                    Text("Base URL")
+                        .font(VFFont.settingsBody)
+                        .foregroundStyle(VFColor.textPrimary)
+                    TextField(openAIEndpointProfile.defaultBaseURL, text: $openAIBaseURL)
+                        .textFieldStyle(.plain)
+                        .glassInputField()
+                        .onChange(of: openAIBaseURL) { _, newValue in
+                            // Persist as-typed so switching tabs doesn't
+                            // discard edits; normalization happens on save.
+                            DictationProviderPolicy.openAIBaseURL = newValue
+                        }
+                        .onSubmit {
+                            persistOpenAIEndpointConfiguration()
+                        }
+                }
+
+                VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                    Text("Model")
+                        .font(VFFont.settingsBody)
+                        .foregroundStyle(VFColor.textPrimary)
+                    TextField(openAIEndpointProfile.defaultModel, text: $openAIModel)
+                        .textFieldStyle(.plain)
+                        .glassInputField()
+                        .onChange(of: openAIModel) { _, newValue in
+                            DictationProviderPolicy.openAIModel = newValue
+                        }
+                        .onSubmit {
+                            persistOpenAIEndpointConfiguration()
+                        }
+                }
+            }
+
+            Text("Supports official OpenAI and compatible self-hosted gateways that expose `/v1/audio/transcriptions`. Press Return in a field to save it.")
+                .font(VFFont.settingsCaption)
+                .foregroundStyle(VFColor.textSecondary)
         }
     }
 
@@ -1969,8 +2187,10 @@ private struct ProviderSettingsTab: View {
         switch mlxInstaller.phase {
         case .installing(let modelID, let detail) where modelID == model.id:
             return .working(detail)
-        case .failed(let modelID, let message) where modelID == model.id:
-            return .failed(sanitizedStatusMessage(message, fallback: "Install failed."))
+        case .failed(let modelID, _) where modelID == model.id:
+            // Raw installer output (repo names, xcode-select hints, tool logs)
+            // only appears inside Advanced; the card stays plain-language.
+            return .failed(AppStatusCatalog.modelInstallFailed.message)
         default:
             return mlxInstaller.isInstalled(model) ? .installed : .notInstalled
         }
@@ -2062,9 +2282,11 @@ private struct ProviderSettingsTab: View {
     private func presetStatusMessage(for preset: SmartModelPreset, diagnostics: ProviderRuntimeDiagnostics) -> PresetStatus? {
         // Install-state prompts live on the card's action button now; the only
         // status worth a banner is the active provider silently falling back.
+        // Wording comes from AppStatusCatalog so the banner matches the menu
+        // bar and overlay exactly.
         guard preset == activePreset else { return nil }
-        if diagnostics.usesFallback, let reason = diagnostics.fallbackReason {
-            return PresetStatus(message: friendlyFallbackMessage(reason), severity: fallbackSeverity(for: reason))
+        if let status = diagnostics.userFacingStatus {
+            return PresetStatus(message: status.message, severity: ProviderMessageSeverity(status.severity))
         }
         return nil
     }
@@ -2087,64 +2309,6 @@ private struct ProviderSettingsTab: View {
                 .fill(severity.color.opacity(0.10))
                 .overlay(Rectangle().stroke(severity.color.opacity(0.35), lineWidth: 1))
         )
-    }
-
-    private func fallbackSeverity(for reason: String) -> ProviderMessageSeverity {
-        let normalized = reason.lowercased()
-        if normalized.contains("not ready") || normalized.contains("not configured") || normalized.contains("not found") {
-            return .warning
-        }
-        if normalized.contains("failed") || normalized.contains("error") {
-            return .error
-        }
-        return .warning
-    }
-
-    private func runtimeFailureSeverity(for message: String) -> ProviderMessageSeverity {
-        let normalized = message.lowercased()
-        if normalized.contains("xcode-select") || normalized.contains("command line tools") || normalized.contains("make") {
-            return .warning
-        }
-        return .error
-    }
-
-    private func friendlyFallbackMessage(_ reason: String) -> String {
-        let normalized = reason.lowercased()
-        if normalized.contains("api key") {
-            return "Setup needed: add your OpenAI API key to use Cloud mode."
-        }
-        if normalized.contains("endpoint") {
-            return "Setup needed: check Cloud endpoint URL/model in Provider settings."
-        }
-        if normalized.contains("disabled") {
-            return "Setup needed: enable cloud fallback to use Cloud mode."
-        }
-        if normalized.contains("model") && normalized.contains("not ready") {
-            return "Setup needed: install the Parakeet model/runtime from Provider settings."
-        }
-        if normalized.contains("runtime") && normalized.contains("not integrated") {
-            return "Balanced currently uses Apple Speech fallback in this build."
-        }
-        if normalized.contains("runtime bootstrap failed") {
-            return "Setup needed: local runtime is not ready. Open Provider and run setup."
-        }
-        return "Setup needed before this provider can run."
-    }
-
-    private func sanitizedStatusMessage(_ message: String, fallback: String) -> String {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return fallback }
-
-        // Only hide messages that are pure plumbing noise. Installer errors
-        // legitimately contain "exit N" or tool output — blanking them left
-        // users with a generic message and no way to fix the real problem.
-        let lower = trimmed.lowercased()
-        if lower.contains("nsurl") || lower.contains("domain=") {
-            return fallback
-        }
-
-        let firstLine = trimmed.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? trimmed
-        return firstLine.count > 220 ? String(firstLine.prefix(217)) + "…" : firstLine
     }
 
     private func profileActionButton(
@@ -2210,7 +2374,11 @@ private struct ProviderSettingsTab: View {
         let normalized = DictationProviderPolicy.normalizedOpenAIAPIKey(explicitKey ?? openAIAPIKey)
         openAIAPIKey = normalized
         let persistenceResult = DictationProviderPolicy.persistOpenAIAPIKey(normalized)
-        DictationProviderPolicy.cloudFallbackEnabled = true
+        // Saving a key can auto-enable cloud fallback (unless the user
+        // explicitly turned it off) — reflect that in the visible toggle.
+        // The toggle's onChange no-ops because the persisted value already
+        // matches, so this does not count as an explicit user override.
+        cloudFallbackEnabled = DictationProviderPolicy.cloudFallbackEnabled
         NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
 
         switch DictationProviderPolicy.validateOpenAIAPIKey(normalized) {
@@ -2465,8 +2633,6 @@ private struct TranscriptHistoryTab: View {
                         metricChip(title: "Success", value: "\(successRatePercent)%")
                         metricChip(title: "Avg STT", value: averageLatencyLabel)
                         metricChip(title: "Avg E2E", value: averageEndToEndLabel)
-                        metricChip(title: "P95 E2E", value: p95EndToEndLabel)
-                        metricChip(title: "Latency SLO", value: sloLabel, tint: sloTint)
                         if !topProviderLabel.isEmpty {
                             metricChip(title: "Top provider", value: topProviderLabel)
                         }
@@ -2508,6 +2674,7 @@ private struct TranscriptHistoryTab: View {
                                             .font(VFFont.archivo(13))
                                             .foregroundStyle(VFColor.text)
                                             .lineLimit(2)
+                                            .textSelection(.enabled)
 
                                         HStack(spacing: 7) {
                                             HStack(spacing: 5) {
@@ -2534,6 +2701,9 @@ private struct TranscriptHistoryTab: View {
                                         }
                                         iconActionButton(systemName: "doc.on.doc", accessibilityLabel: "Copy transcript") {
                                             store.copy(entry.text)
+                                        }
+                                        iconActionButton(systemName: "character.book.closed", accessibilityLabel: "Add to dictionary") {
+                                            addToDictionary(entry)
                                         }
                                     }
                                 }
@@ -2562,6 +2732,25 @@ private struct TranscriptHistoryTab: View {
         .buttonStyle(GlassIconButtonStyle(cornerRadius: 9))
         .focusable(true)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    /// Opens the Dictionary & Style tab with a correction entry pre-filled from
+    /// the user's current text selection (when one exists in this row) or the
+    /// row's full transcript text.
+    private func addToDictionary(_ entry: TranscriptLogEntry) {
+        let selection = currentSelectedText()
+        let text = (selection?.isEmpty == false ? selection! : entry.text)
+        CorrectionDictionaryPrefill.request(text: text)
+    }
+
+    /// Best-effort read of the focused text selection inside the settings
+    /// window (e.g. a selection made in a selectable transcript row).
+    private func currentSelectedText() -> String? {
+        guard let responder = NSApp.keyWindow?.firstResponder as? NSText else { return nil }
+        let range = responder.selectedRange
+        let full = responder.string
+        guard range.length > 0, let swiftRange = Range(range, in: full) else { return nil }
+        return String(full[swiftRange]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Stat tile in the metrics grid: uppercase kicker over a heavy value.
@@ -2599,30 +2788,6 @@ private struct TranscriptHistoryTab: View {
     private var averageEndToEndLabel: String {
         guard let avg = metricsSummary.averageEndToEndMs else { return "—" }
         return "\(avg)ms"
-    }
-
-    private var p95EndToEndLabel: String {
-        guard let p95 = metricsSummary.p95EndToEndMs else { return "—" }
-        return "\(p95)ms"
-    }
-
-    private var sloLabel: String {
-        guard let p95Pass = metricsSummary.p95MeetsSLO,
-              let avgPass = metricsSummary.averageMeetsSLO else {
-            return "N/A"
-        }
-        return (p95Pass && avgPass) ? "On target" : "Needs tuning"
-    }
-
-    private var sloTint: Color {
-        switch (metricsSummary.averageMeetsSLO, metricsSummary.p95MeetsSLO) {
-        case (.some(true), .some(true)):
-            return VFColor.success
-        case (.some(false), _), (_, .some(false)):
-            return VFColor.error
-        default:
-            return VFColor.textSecondary
-        }
     }
 
     private var topProviderLabel: String {

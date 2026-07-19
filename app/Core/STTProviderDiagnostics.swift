@@ -33,6 +33,14 @@ struct ProviderRuntimeDiagnostics {
         requestedKind != effectiveKind
     }
 
+    /// Canonical user-facing status for this resolution, or nil when there is
+    /// nothing to surface. All UI (menu bar, overlay, settings banners) must
+    /// render this shared wording rather than the raw `fallbackReason`.
+    var userFacingStatus: AppStatus? {
+        guard usesFallback, let fallbackReason, !fallbackReason.isEmpty else { return nil }
+        return AppStatusCatalog.providerFallback(reason: fallbackReason)
+    }
+
     // MARK: - Regression guard
 
     /// Debug-only consistency check: when `effectiveKind` differs from
@@ -241,7 +249,7 @@ enum STTProviderResolver {
                 isPassing: environment.cloudFallbackEnabled(),
                 detail: environment.cloudFallbackEnabled()
                     ? "Cloud fallback has been explicitly enabled by the user."
-                    : "Cloud fallback is disabled. Enable it in Settings -> Provider to use OpenAI Whisper API."
+                    : "Cloud fallback is off. Turn on 'Allow cloud fallback' in Settings -> Provider to use OpenAI Whisper API."
             )
         )
 
@@ -273,7 +281,7 @@ enum STTProviderResolver {
 
         guard environment.cloudFallbackEnabled(), hasAPIKey, endpointError == nil else {
             let reason = !environment.cloudFallbackEnabled()
-                ? "OpenAI Whisper API is disabled until cloud fallback is explicitly enabled."
+                ? "OpenAI Whisper API is disabled until 'Allow cloud fallback' is turned on."
                 : (!hasAPIKey
                     ? "OpenAI Whisper API requires an API key."
                     : "OpenAI Whisper API endpoint is not configured correctly."
@@ -444,7 +452,7 @@ enum STTProviderResolver {
                     detail: detail
                 ),
                 true,
-                "MLX runtime setup failed. Retry setup from Settings -> Provider."
+                AppStatusCatalog.mlxRuntimeSetupFailed.message
             )
         }
     }

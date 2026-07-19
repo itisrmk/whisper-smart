@@ -4,7 +4,7 @@ import os.log
 private let logger = Logger(subsystem: "com.visperflow", category: "AppDelegate")
 
 /// The NSApplicationDelegate that wires together the menu bar,
-/// floating bubble, settings window, and the core dictation pipeline.
+/// recording overlay, settings window, and the core dictation pipeline.
 ///
 /// Owns the `DictationStateMachine` and bridges its state changes
 /// to the UI layer through `BubbleStateSubject`.
@@ -15,7 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let bubbleState = BubbleStateSubject()
 
     private lazy var menuBar = MenuBarController(stateSubject: bubbleState)
-    private lazy var bubblePanel = BubblePanelController(stateSubject: bubbleState)
     private lazy var topCenterOverlayPanel = TopCenterOverlayPanelController(stateSubject: bubbleState)
     private lazy var settingsWindow = SettingsWindowController()
     private lazy var onboardingWindow = OnboardingWindowController(stateSubject: bubbleState)
@@ -252,7 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentAccessibilityGuidance() {
-        let msg = "Accessibility permission required. Grant access in System Settings → Privacy & Security → Accessibility. Hotkey setup resumes automatically."
+        // Canonical wording shared by the overlay and menu-bar surfaces.
+        let msg = AppStatusCatalog.accessibilityPermissionMissing.message
         bubbleState.transition(to: .error, errorDetail: msg)
         menuBar.updateIcon(for: .error)
         menuBar.updateErrorDetail(msg)
@@ -360,14 +360,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBar.onRetryHotkeyMonitor = { [weak self] in
             self?.retryHotkeyMonitor()
-        }
-
-        menuBar.onOneShotRecording = { [weak self] in
-            self?.stateMachine.startOneShotRecording()
-        }
-
-        menuBar.onStopOneShotRecording = { [weak self] in
-            self?.stateMachine.stopOneShotRecording()
         }
 
         bubbleState.onTap = { [weak self] in
@@ -710,20 +702,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard shouldShowOverlay else {
-            bubblePanel.hide()
             topCenterOverlayPanel.hide()
             return
         }
 
         switch mode {
         case .off:
-            bubblePanel.hide()
             topCenterOverlayPanel.hide()
-        case .floatingBubble:
-            topCenterOverlayPanel.hide()
-            bubblePanel.show()
         case .topCenterWaveform:
-            bubblePanel.hide()
+            topCenterOverlayPanel.placement = .topCenter
+            topCenterOverlayPanel.show()
+        case .notchDocked:
+            topCenterOverlayPanel.placement = .notchDocked
             topCenterOverlayPanel.show()
         }
     }
@@ -733,7 +723,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.errorOverlayHideWork = nil
             if case .error = self.stateMachine.state {
-                self.bubblePanel.hide()
                 self.topCenterOverlayPanel.hide()
             }
         }
@@ -743,10 +732,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func isHotkeySetupIssue(for state: DictationStateMachine.State) -> Bool {
         guard case .error(let message) = state else { return false }
-        let normalized = message.lowercased()
-        if normalized.contains("cannot monitor hotkeys") { return true }
-        if normalized.contains("accessibility permission") { return true }
-        return false
+        return AppStatusCatalog.isHotkeySetupIssue(message)
     }
 
     private func shouldRequestSpeechPermissionAtLaunch() -> Bool {

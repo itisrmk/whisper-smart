@@ -169,7 +169,9 @@ final class AudioCaptureService {
         }
         self.converter = audioConverter
 
-        let bufferSize: AVAudioFrameCount = AVAudioFrameCount(hardwareFormat.sampleRate * 0.1)
+        // 50 ms tap buffers keep the trailing audio lost at hotkey release small
+        // and feed the streaming STT path with low latency.
+        let bufferSize: AVAudioFrameCount = AVAudioFrameCount(hardwareFormat.sampleRate * 0.05)
 
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: hardwareFormat) { [weak self] buffer, time in
             guard let self = self, let converter = self.converter else { return }

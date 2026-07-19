@@ -29,7 +29,7 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
 
     func beginSession() throws {
         guard DictationProviderPolicy.cloudFallbackEnabled else {
-            throw STTError.providerError(message: "Cloud provider is disabled. Enable cloud fallback in Settings -> Provider.")
+            throw STTError.providerError(message: "Cloud provider is disabled. Turn on 'Allow cloud fallback' in Settings -> Provider.")
         }
 
         let key = DictationProviderPolicy.openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)

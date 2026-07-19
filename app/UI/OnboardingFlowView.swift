@@ -143,15 +143,17 @@ struct OnboardingFlowView: View {
 
     @State private var step: OnboardingFlowStep = .welcome
 
-    // Welcome
-    @State private var selectedResonances: Set<String> = []
-
     // Permissions
     @State private var permissionSnapshot = PermissionDiagnostics.snapshot()
     @State private var didPromptAccessibility = false
 
     // Engine
     @State private var selectedPreset: OnboardingEnginePreset = .balanced
+    @StateObject private var mlxInstaller = MLXModelInstaller.shared
+    /// The MLX model whose install onboarding kicked off, if any. Drives the
+    /// compact progress row on the steps after the engine choice.
+    @State private var onboardingInstallModel: MLXModel?
+    @State private var runtimeBootstrapDetail = ""
 
     // Mic check
     @StateObject private var micMeter = MicLevelMeter()
@@ -170,13 +172,6 @@ struct OnboardingFlowView: View {
 
     private let permissionTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
-    private static let resonanceOptions = [
-        "I can't keep up with my messages",
-        "I'm tired of typing all day",
-        "My thoughts move faster than my fingers",
-        "I want my hands free while I work",
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -188,6 +183,10 @@ struct OnboardingFlowView: View {
                 .padding(.horizontal, VFSpacing.xxxl)
                 .padding(.top, VFSpacing.lg)
 
+            modelInstallStatusRow
+                .padding(.horizontal, VFSpacing.xxxl)
+                .padding(.bottom, VFSpacing.sm)
+
             footer
                 .padding(.horizontal, VFSpacing.xxxl)
                 .padding(.bottom, VFSpacing.xl)
@@ -197,6 +196,10 @@ struct OnboardingFlowView: View {
         .onReceive(permissionTimer) { _ in
             guard step == .permissions else { return }
             refreshPermissions()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mlxRuntimeBootstrapDidChange)) { _ in
+            let snapshot = MLXRuntimeBootstrapManager.shared.statusSnapshot()
+            runtimeBootstrapDetail = snapshot.phase == .bootstrapping ? snapshot.detail : ""
         }
         .animation(VFAnimation.fadeMedium, value: step)
     }
@@ -253,44 +256,18 @@ struct OnboardingFlowView: View {
                 .foregroundStyle(VFColor.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Which of these sound like you?")
-                .font(VFFont.settingsBody)
-                .foregroundStyle(VFColor.textPrimary)
-
-            VStack(spacing: VFSpacing.xs) {
-                ForEach(Self.resonanceOptions, id: \.self) { option in
-                    let isSelected = selectedResonances.contains(option)
-                    Button {
-                        if isSelected {
-                            selectedResonances.remove(option)
-                        } else {
-                            selectedResonances.insert(option)
-                        }
-                    } label: {
-                        HStack(spacing: VFSpacing.sm) {
-                            Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(isSelected ? VFColor.accent : VFColor.muted)
-                            Text(option)
-                                .font(VFFont.settingsBody)
-                                .foregroundStyle(VFColor.text)
-                            Spacer()
-                        }
-                        .padding(VFSpacing.md)
-                        .background(
-                            Rectangle()
-                                .fill(isSelected ? VFColor.active : VFColor.panel)
-                                .overlay(
-                                    Rectangle().stroke(
-                                        isSelected ? VFColor.accent : VFColor.border,
-                                        lineWidth: isSelected ? 1.5 : 1
-                                    )
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
+            VStack(alignment: .leading, spacing: VFSpacing.sm) {
+                finishBullet(icon: "keyboard.fill", text: "Hold your dictation key from any app — Slack, email, docs, code.")
+                finishBullet(icon: "waveform", text: "Speak naturally. Messy phrasing is fine; it comes out clean.")
+                finishBullet(icon: "text.cursor", text: "Release, and the text lands right where your cursor is.")
             }
+            .padding(VFSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Rectangle()
+                    .fill(VFColor.panel)
+                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
+            )
 
             Text("Setup takes about two minutes.")
                 .font(VFFont.settingsCaption)
@@ -437,7 +414,7 @@ struct OnboardingFlowView: View {
             HStack(spacing: VFSpacing.sm) {
                 ForEach(OnboardingEnginePreset.allCases) { preset in
                     Button {
-                        selectedPreset = preset
+                        selectEnginePreset(preset)
                     } label: {
                         VStack(alignment: .leading, spacing: VFSpacing.xs) {
                             HStack {
@@ -485,10 +462,24 @@ struct OnboardingFlowView: View {
                 }
             }
 
-            Text("Local engines download a model on first use; the cloud engine needs your API key in Settings → Provider.")
+            Text(engineFootnote)
                 .font(VFFont.settingsFootnote)
                 .foregroundStyle(VFColor.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var engineFootnote: String {
+        guard let model = MLXModelCatalog.selectedModel(for: selectedPreset.providerKind) else {
+            return "The cloud engine needs your OpenAI API key — add it in Settings → Provider."
+        }
+        if mlxInstaller.isInstalled(model) {
+            return "\(model.displayName) is already installed on this Mac — you're ready to go."
+        }
+        if case .installing(let modelID, _) = mlxInstaller.phase, modelID == model.id {
+            return "Downloading \(model.displayName) (\(model.approxSizeLabel)) now — you can keep going while it installs."
+        }
+        return "\(model.displayName) (\(model.approxSizeLabel)) downloads in the background — you can keep going while it installs."
     }
 
     // MARK: Mic check
@@ -778,6 +769,53 @@ struct OnboardingFlowView: View {
         }
     }
 
+    // MARK: Model install status
+
+    /// Compact one-liner tracking the background MLX model install kicked off
+    /// on the engine step. Shown on every step after the engine choice so the
+    /// user always knows where their local model stands.
+    @ViewBuilder
+    private var modelInstallStatusRow: some View {
+        if step.rawValue >= OnboardingFlowStep.micCheck.rawValue,
+           let model = onboardingInstallModel {
+            switch mlxInstaller.phase {
+            case .installing(let modelID, let detail) where modelID == model.id:
+                HStack(spacing: VFSpacing.xs) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(runtimeBootstrapDetail.isEmpty ? detail : runtimeBootstrapDetail)
+                        .font(VFFont.settingsFootnote)
+                        .foregroundStyle(VFColor.textSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+            case .failed(let modelID, _) where modelID == model.id:
+                HStack(alignment: .firstTextBaseline, spacing: VFSpacing.xs) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(VFColor.muted)
+                    Text("The \(model.displayName) download hit a snag — no problem, Whisper Smart will use Apple's built-in engine until you install it from Settings → Provider.")
+                        .font(VFFont.settingsFootnote)
+                        .foregroundStyle(VFColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            default:
+                if mlxInstaller.isInstalled(model) {
+                    HStack(spacing: VFSpacing.xs) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("\(model.displayName) installed — your local engine is ready.")
+                            .font(VFFont.settingsFootnote)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(VFColor.success)
+                }
+            }
+        }
+    }
+
     // MARK: Footer
 
     private var footer: some View {
@@ -869,6 +907,52 @@ struct OnboardingFlowView: View {
     private func applyEnginePreset() {
         selectedPreset.providerKind.saveSelection()
         NotificationCenter.default.post(name: .sttProviderDidChange, object: nil)
+        // Safety net: the default (Balanced) can be confirmed without ever
+        // clicking a card, so make sure its model install is running too.
+        beginModelInstallIfNeeded()
+    }
+
+    private func selectEnginePreset(_ preset: OnboardingEnginePreset) {
+        guard preset != selectedPreset else { return }
+        selectedPreset = preset
+        beginModelInstallIfNeeded()
+    }
+
+    /// Kicks off the runtime bootstrap + model download for the selected local
+    /// preset in the background. Picking a local engine card is the download
+    /// consent (the footnote spells out size and behavior); onboarding never
+    /// blocks on the install — Apple Speech covers dictation until it lands.
+    private func beginModelInstallIfNeeded() {
+        let model = MLXModelCatalog.selectedModel(for: selectedPreset.providerKind)
+
+        // Switched away from an onboarding-started install: stop the old
+        // download so we don't pull gigabytes the user no longer wants.
+        var cancelledInFlightInstall = false
+        if let inFlight = onboardingInstallModel, inFlight.id != model?.id {
+            if case .installing(let modelID, _) = mlxInstaller.phase, modelID == inFlight.id {
+                mlxInstaller.cancelInstall()
+                cancelledInFlightInstall = true
+            }
+            onboardingInstallModel = nil
+        }
+
+        guard let model, !mlxInstaller.isInstalled(model) else { return }
+        if cancelledInFlightInstall {
+            // cancelInstall() resets the installer phase via an async hop to
+            // the main queue, so `phase` still reads `.installing(oldModel)`
+            // here — both the guard below and install()'s own re-entrancy
+            // guard would wrongly bail and the new model would never start.
+            // Queue the new install behind that pending reset (FIFO on main).
+            onboardingInstallModel = model
+            let installer = mlxInstaller
+            DispatchQueue.main.async {
+                installer.install(model)
+            }
+            return
+        }
+        if case .installing = mlxInstaller.phase { return }
+        onboardingInstallModel = model
+        mlxInstaller.install(model)
     }
 
     private func applyHotkey(_ binding: HotkeyBinding) {
