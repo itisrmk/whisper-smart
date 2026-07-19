@@ -31,7 +31,9 @@ VERSION=X.Y.Z ALLOW_ADHOC_SIGNING=1 bash scripts/package_dmg.sh   # Build app bu
 
 Full release flow: build DMG → update `appcast.xml` (add new `<item>` at top) → commit → `git tag vX.Y.Z` → push tag + main → `gh release create` with DMG + appcast assets.
 
-The CI workflow `.github/workflows/release-dmg.yml` handles this with proper code signing when triggered manually.
+The CI workflow `.github/workflows/release-dmg.yml` handles all of this with proper code signing. It runs two ways:
+- **Automatic**: every merged PR into `main` cuts a beta release with an auto-bumped patch version. PR labels `release:minor` / `release:major` bump differently; the `skip-release` label opts out; docs/CI-only PRs (`.github/**`, `docs/**`, `*.md`, `appcast.xml`) never trigger.
+- **Manual**: `gh workflow run release-dmg.yml -f version=X.Y.Z -f channel=beta -f checklist_confirmed=true` for explicit versions or production releases.
 
 ## Architecture
 
