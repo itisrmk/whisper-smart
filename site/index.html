@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Whisper Smart — Fast, private dictation for your Mac</title>
-  <meta name="description" content="Hold a hotkey, speak, release — your words appear at the cursor. Local, private speech-to-text for macOS. Free and open source." />
-  <meta property="og:title" content="Whisper Smart — Fast, private dictation for your Mac" />
-  <meta property="og:description" content="Hold a hotkey, speak, release — your words appear at the cursor. Runs locally on Apple Silicon. Free and open source." />
+  <title>Whisper Smart — Speak. It's written.</title>
+  <meta name="description" content="Hold one key. Talk in any app. Whisper Smart turns your voice into text on the spot — running right on your Mac, no cloud required. Free forever." />
+  <meta property="og:title" content="Whisper Smart — Speak. It's written." />
+  <meta property="og:description" content="Hold one key. Talk in any app. On-device speech-to-text for macOS. Free and open source." />
   <meta property="og:image" content="https://itisrmk.github.io/whisper-smart/logo.png" />
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/png" href="logo.png" />
@@ -15,229 +15,614 @@
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #F3F2F2;
-      --panel: #FFFFFF;
-      --panel2: #F4F2F2;
-      --text: #201E1D;
-      --muted: #736F6F;
-      --border: rgba(32, 30, 29, 0.13);
-      --accent: #EC3013;
-      --accent-hover: #DD2B0F;
-      --accent-soft: #FFE0D9;
-      --kbd-bg: #EBEAE9;
+      --color-bg: #f3f2f2;
+      --color-surface: #eae9e9;
+      --color-text: #201e1d;
+      --color-accent: #ec3013;
+      --color-accent-700: #ae1800;
+      --color-divider: color-mix(in srgb, #201e1d 40%, transparent);
+      --font-heading: "Archivo", system-ui, sans-serif;
+      --font-body: "Archivo", system-ui, sans-serif;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #1B1A19;
-        --panel: #262322;
-        --panel2: #2F2C2B;
-        --text: #F4F3F2;
-        --muted: #A39E9D;
-        --border: rgba(244, 243, 242, 0.12);
-        --accent: #FF563C;
-        --accent-hover: #FF7358;
-        --accent-soft: rgba(255, 86, 60, 0.16);
-        --kbd-bg: #211F1E;
-      }
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
-    body {
-      font-family: "Archivo", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-    .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+    body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); text-wrap: pretty; -webkit-font-smoothing: antialiased; }
+    a { color: var(--color-accent); text-decoration: none; }
+    ::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+    .ws-rule { height: 2px; border: 0; margin: 0; background: var(--color-divider); }
+    .muted-78 { color: color-mix(in srgb, var(--color-text) 78%, transparent); }
+    .muted-62 { color: color-mix(in srgb, var(--color-text) 62%, transparent); }
 
-    header.hero { padding: 96px 0 72px; text-align: center; }
-    .hero img.logo {
-      width: 112px; height: 112px; border-radius: 26px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
-    }
-    .hero h1 { font-size: 44px; font-weight: 800; letter-spacing: -0.02em; margin-top: 28px; }
-    .hero p.tagline { font-size: 20px; color: var(--muted); margin-top: 12px; max-width: 560px; margin-left: auto; margin-right: auto; }
-    .hero .cta { margin-top: 36px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-    a.download {
-      display: inline-flex; align-items: center; gap: 10px;
-      background: var(--accent); color: #fff; text-decoration: none;
-      font-size: 17px; font-weight: 700;
-      padding: 15px 32px; border-radius: 14px;
-      transition: background 0.15s ease, transform 0.15s ease;
-    }
-    a.download:hover { background: var(--accent-hover); transform: translateY(-1px); }
-    a.download svg { width: 18px; height: 18px; }
-    .cta .meta { font-size: 13px; color: var(--muted); }
-    .cta .meta a { color: var(--muted); }
+    .navlink { font: 600 13.5px var(--font-heading); color: var(--color-text); }
+    .navlink:hover { color: var(--color-accent); }
+    .btn-accent { display: inline-flex; align-items: center; gap: 11px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-weight: 700; }
+    .btn-accent:hover { background: var(--color-accent-700); }
+    .btn-inverse { display: inline-flex; align-items: center; gap: 11px; background: var(--color-bg); color: var(--color-text); font-family: var(--font-heading); font-weight: 700; }
+    .btn-inverse:hover { background: color-mix(in srgb, var(--color-bg) 88%, #000); }
+    .btn-outline-inverse { display: inline-flex; align-items: center; gap: 10px; background: transparent; color: var(--color-bg); border: 2px solid var(--color-bg); font-family: var(--font-heading); font-weight: 700; }
+    .btn-outline-inverse:hover { background: color-mix(in srgb, var(--color-bg) 16%, transparent); }
+    .footlink { font: 500 13.5px var(--font-body); color: var(--color-bg); }
+    .footlink:hover { color: var(--color-accent); }
+    .footlegal { color: color-mix(in srgb, var(--color-bg) 70%, transparent); }
+    .footlegal:hover { color: var(--color-accent); }
 
-    section { padding: 56px 0; border-top: 1px solid var(--border); }
-    h2 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 28px; text-align: center; }
+    .kicker { display: block; font: 700 13px var(--font-heading); letter-spacing: .1em; text-transform: uppercase; color: var(--color-accent-700); margin-bottom: 12px; }
+    .section-h2 { margin: 0 0 36px; font: 800 clamp(30px, 3.4vw, 44px)/1.05 var(--font-heading); letter-spacing: -.02em; }
 
-    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-    .step {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 16px; padding: 24px; text-align: center;
+    .feature-row { display: grid; grid-template-columns: minmax(90px, 150px) minmax(0, 360px) minmax(0, 1fr); gap: 20px clamp(24px, 4vw, 64px); align-items: start; padding: 30px 0; }
+    .feature-row + .feature-row { border-top: 2px solid var(--color-divider); }
+
+    .faq-item { border-bottom: 1px solid var(--color-divider); }
+    .faq-btn { width: 100%; display: flex; align-items: center; gap: 16px; text-align: left; background: transparent; border: 0; cursor: pointer; padding: 22px 0; color: var(--color-text); font-family: var(--font-heading); }
+    .faq-btn:hover { color: var(--color-accent); }
+    .faq-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 2px solid var(--color-divider); transition: transform .2s; }
+    .faq-item.open .faq-icon { transform: rotate(45deg); }
+    .faq-a { display: none; margin: 0; padding: 0 44px 26px 0; font: 400 15.5px/1.65 var(--font-body); color: color-mix(in srgb, var(--color-text) 78%, transparent); max-width: 70ch; }
+    .faq-item.open .faq-a { display: block; }
+
+    /* — app mockup (compiled from WhisperApp design component) — */
+    .wa { width: 900px; border-radius: 12px; overflow: hidden; font-family: var(--font-body); background: var(--wa-bg); color: var(--wa-text); box-shadow: var(--wa-win); border: 1px solid var(--wa-border2); flex: none; }
+    .wa-light {
+      --wa-bg: #f3f2f2; --wa-sidebar: #ebeae9; --wa-chrome: #e4e3e3; --wa-panel: #ffffff; --wa-panel2: #f4f2f2;
+      --wa-text: #201e1d; --wa-muted: #736f6f; --wa-border: rgba(32,30,29,.13); --wa-border2: rgba(32,30,29,.24);
+      --wa-accent: #ec3013; --wa-active: #fdeeeb; --wa-accentSoft: #ffe0d9; --wa-accentStrong: #ae1800;
+      --wa-knobOff: #a29e9e; --wa-win: 0 30px 90px rgba(40,38,38,.3);
     }
-    .step .num {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 34px; height: 34px; border-radius: 50%;
-      background: var(--accent-soft); color: var(--accent);
-      font-weight: 700; font-size: 15px; margin-bottom: 12px;
+    .wa-dark {
+      --wa-bg: #1b1a19; --wa-sidebar: #211f1e; --wa-chrome: #242120; --wa-panel: #262322; --wa-panel2: #2f2c2b;
+      --wa-text: #f4f3f2; --wa-muted: #a39e9d; --wa-border: rgba(244,243,242,.12); --wa-border2: rgba(244,243,242,.24);
+      --wa-accent: #ff563c; --wa-active: rgba(255,86,60,.13); --wa-accentSoft: rgba(255,86,60,.16); --wa-accentStrong: #ff9783;
+      --wa-knobOff: #8a8584; --wa-win: 0 30px 90px rgba(0,0,0,.6);
     }
-    .step h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-    .step p { font-size: 14px; color: var(--muted); }
-    kbd {
-      font-family: inherit; font-size: 13px; font-weight: 600;
-      background: var(--kbd-bg); border: 1px solid var(--border);
-      border-radius: 6px; padding: 2px 7px;
-    }
+    .wa-titlebar { height: 40px; display: flex; align-items: center; padding: 0 16px; background: var(--wa-chrome); border-bottom: 1px solid var(--wa-border); position: relative; }
+    .wa-title { position: absolute; left: 0; right: 0; text-align: center; font: 600 12px var(--font-heading); color: var(--wa-muted); letter-spacing: .01em; pointer-events: none; }
+    .wa-nav-item { display: flex; gap: 11px; align-items: flex-start; text-align: left; padding: 11px 16px 11px 13px; border-left: 3px solid transparent; color: var(--wa-text); }
+    .wa-nav-item.active { border-left-color: var(--wa-accent); background: var(--wa-active); color: var(--wa-accent); }
+    .wa-row { display: flex; align-items: flex-start; gap: 20px; padding: 18px 0; border-top: 1px solid var(--wa-border); }
+    .wa-row-title { font: 600 14px var(--font-heading); color: var(--wa-text); }
+    .wa-row-sub { font: 400 12.5px var(--font-body); color: var(--wa-muted); margin-top: 3px; }
+    .wa-toggle { position: relative; width: 46px; height: 26px; flex: none; }
+    .wa-toggle.on { border: 1px solid var(--wa-accent); background: var(--wa-accent); }
+    .wa-toggle.off { border: 1px solid var(--wa-border2); background: transparent; }
+    .wa-knob { position: absolute; top: 2px; width: 20px; height: 20px; }
+    .wa-toggle.on .wa-knob { left: 22px; background: #fff; }
+    .wa-toggle.off .wa-knob { left: 2px; background: var(--wa-knobOff); }
+    .wa-select { display: flex; align-items: center; gap: 7px; border: 1px solid var(--wa-border2); padding: 7px 11px; color: var(--wa-accent); font: 600 13px var(--font-heading); }
+    .mock-wrap { display: flex; justify-content: flex-start; overflow-x: auto; }
+    .mock-center { justify-content: safe center; }
 
-    .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-    .feature {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 16px; padding: 22px 24px;
-    }
-    .feature h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-    .feature p { font-size: 14px; color: var(--muted); }
-
-    .privacy {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 20px; padding: 36px; text-align: center;
-    }
-    .privacy h2 { margin-bottom: 12px; }
-    .privacy p { color: var(--muted); max-width: 620px; margin: 0 auto; font-size: 15px; }
-
-    .requirements { text-align: center; }
-    .requirements ul { list-style: none; color: var(--muted); font-size: 15px; }
-    .requirements li { margin: 6px 0; }
-
-    footer { padding: 48px 0 64px; border-top: 1px solid var(--border); text-align: center; color: var(--muted); font-size: 14px; }
-    footer a { color: var(--accent); text-decoration: none; font-weight: 500; }
-    footer a:hover { text-decoration: underline; }
-    footer .links { display: flex; justify-content: center; gap: 24px; margin-bottom: 16px; }
-
-    @media (max-width: 640px) {
-      header.hero { padding: 64px 0 48px; }
-      .hero h1 { font-size: 34px; }
-      .steps, .features { grid-template-columns: 1fr; }
+    @media (max-width: 860px) {
+      .nav-links { display: none !important; }
+      .grid-stats { grid-template-columns: repeat(2, 1fr) !important; }
+      .grid-3, .grid-2 { grid-template-columns: 1fr !important; }
+      .feature-row { grid-template-columns: minmax(70px, 90px) 1fr; }
+      .feature-row p { grid-column: 2; }
+      .grid-req { grid-template-columns: 1fr !important; }
+      .grid-pricing { grid-template-columns: 1fr !important; }
+      .grid-foot { grid-template-columns: 1fr 1fr !important; }
     }
   </style>
 </head>
 <body>
-  <header class="hero">
-    <div class="wrap">
-      <img class="logo" src="logo.png" alt="Whisper Smart logo" width="112" height="112" />
-      <h1>Whisper Smart</h1>
-      <p class="tagline">Hold a hotkey, speak, release — your words appear right at the cursor. Fast, private dictation for your Mac.</p>
-      <div class="cta">
-        <a class="download" href="https://github.com/itisrmk/whisper-smart/releases/latest/download/Whisper-Smart-mac.dmg">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          Download for Mac
+
+<div style="max-width:1240px;margin:0 auto">
+
+  <!-- NAV -->
+  <nav style="position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:28px;padding:14px clamp(20px,5vw,64px);background:color-mix(in srgb,var(--color-bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:2px solid var(--color-divider)">
+    <a href="#top" style="display:flex;align-items:center;gap:11px;color:var(--color-text)">
+      <span style="width:34px;height:34px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--color-accent)">
+        <svg width="19" height="19" viewBox="0 0 120 120"><rect x="9" y="16" width="14" height="88" fill="#fff"></rect><rect x="31" y="16" width="14" height="46" fill="#fff"></rect><rect x="53" y="16" width="14" height="66" fill="#fff"></rect><rect x="75" y="16" width="14" height="46" fill="#fff"></rect><rect x="97" y="16" width="14" height="88" fill="#fff"></rect></svg>
+      </span>
+      <span style="font:800 17px var(--font-heading);letter-spacing:-.02em">Whisper Smart</span>
+    </a>
+    <div class="nav-links" style="margin-left:auto;display:flex;align-items:center;gap:26px">
+      <a class="navlink" href="#features">Features</a>
+      <a class="navlink" href="#how">How it works</a>
+      <a class="navlink" href="#privacy">Privacy</a>
+      <a class="navlink" href="#pricing">Pricing</a>
+      <a class="navlink" href="#faq">FAQ</a>
+      <a class="btn-accent" style="gap:8px;padding:9px 15px;font-size:13.5px" href="https://github.com/itisrmk/whisper-smart/releases/latest/download/Whisper-Smart-mac.dmg">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>Download
+      </a>
+    </div>
+  </nav>
+
+  <div id="top" style="padding:0 clamp(20px,5vw,64px)">
+
+    <!-- HERO -->
+    <section style="padding:88px 0 44px">
+      <div style="display:inline-flex;align-items:center;gap:8px;font:700 12px var(--font-heading);letter-spacing:.14em;text-transform:uppercase;color:var(--color-accent-700);margin-bottom:26px">
+        <span style="width:9px;height:9px;background:var(--color-accent)"></span>Speech-to-text for macOS
+      </div>
+      <h1 style="margin:0;font:800 clamp(52px,8.4vw,116px)/0.94 var(--font-heading);letter-spacing:-.035em;margin-left:-.05em">SPEAK.<br>IT'S WRITTEN.</h1>
+      <p class="muted-78" style="max-width:620px;margin:30px 0 0;font:400 18px/1.6 var(--font-body)">Hold one key. Talk in any app. Whisper Smart turns your voice into text on the spot — running right on your Mac, no cloud required. It's faster than you type and free forever.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-top:34px">
+        <a class="btn-accent" style="padding:16px 24px;font-size:16px;letter-spacing:-.01em" href="https://github.com/itisrmk/whisper-smart/releases/latest/download/Whisper-Smart-mac.dmg">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>Download for Mac
         </a>
-        <span class="meta" id="version-meta">macOS 14+ &middot; Free &amp; open source</span>
+        <span class="muted-62 dl-meta" style="font:500 13.5px var(--font-body)">Free&nbsp;·&nbsp;Apple Silicon&nbsp;·&nbsp;macOS 14+&nbsp;·&nbsp;.dmg, ~3&nbsp;MB</span>
+      </div>
+    </section>
+
+    <!-- APP SHOWCASE (light) -->
+    <section style="padding:20px 0 64px">
+      <div class="mock-wrap mock-center">
+        <div class="wa wa-light">
+          <div class="wa-titlebar">
+            <div style="display:flex;gap:8px">
+              <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></span>
+              <span style="width:12px;height:12px;border-radius:50%;background:#febc2e"></span>
+              <span style="width:12px;height:12px;border-radius:50%;background:#28c840"></span>
+            </div>
+            <span class="wa-title">Whisper Smart — Preferences</span>
+          </div>
+          <div style="display:flex;height:640px">
+            <aside style="width:232px;flex:none;background:var(--wa-sidebar);border-right:1px solid var(--wa-border);display:flex;flex-direction:column">
+              <div style="display:flex;gap:11px;align-items:center;padding:18px 16px 16px">
+                <span style="width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--wa-accent);color:#fff">
+                  <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12h1M6 8v8M10 4v16M14 7v10M18 9v6M21 11v2"/></svg>
+                </span>
+                <span style="display:flex;flex-direction:column;line-height:1.2">
+                  <span style="font:800 15px var(--font-heading);color:var(--wa-text);letter-spacing:-.01em">Whisper Smart</span>
+                  <span style="font:400 11.5px var(--font-body);color:var(--wa-muted)">Preferences</span>
+                </span>
+              </div>
+              <div style="height:2px;background:var(--wa-border);margin:0 0 8px"></div>
+              <nav style="display:flex;flex-direction:column">
+                <div class="wa-nav-item active">
+                  <span style="width:19px;height:19px;flex:none;margin-top:1px;display:flex"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" x2="20" y1="8.5" y2="8.5"/><line x1="4" x2="20" y1="15.5" y2="15.5"/><circle cx="9" cy="8.5" r="2.4" fill="var(--wa-sidebar)"/><circle cx="15" cy="15.5" r="2.4" fill="var(--wa-sidebar)"/></svg></span>
+                  <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13.5px var(--font-heading)">General</span><span style="font:400 11px var(--font-body);color:var(--wa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Startup, audio &amp; workflow</span></span>
+                </div>
+                <div class="wa-nav-item">
+                  <span style="width:19px;height:19px;flex:none;margin-top:1px;display:flex;align-items:center;justify-content:center;font:700 15px var(--font-heading)">⌘</span>
+                  <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13.5px var(--font-heading)">Hotkey</span><span style="font:400 11px var(--font-body);color:var(--wa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Global shortcut controls</span></span>
+                </div>
+                <div class="wa-nav-item">
+                  <span style="width:19px;height:19px;flex:none;margin-top:1px;display:flex"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.7 1.5A3.5 3.5 0 0 0 6.5 19z"/></svg></span>
+                  <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13.5px var(--font-heading)">Provider</span><span style="font:400 11px var(--font-body);color:var(--wa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Models &amp; cloud setup</span></span>
+                </div>
+                <div class="wa-nav-item">
+                  <span style="width:19px;height:19px;flex:none;margin-top:1px;display:flex"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h11M8 12h11M8 18h7"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg></span>
+                  <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13.5px var(--font-heading)">History</span><span style="font:400 11px var(--font-body);color:var(--wa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Transcript metrics &amp; logs</span></span>
+                </div>
+              </nav>
+              <div style="margin-top:auto;padding:16px;display:flex;flex-direction:column;gap:9px">
+                <span style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--wa-border2);color:var(--wa-text);font:600 12.5px var(--font-heading)">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--wa-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/></svg>
+                  Onboarding
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:5px 10px;background:var(--wa-active);color:var(--wa-muted);font:600 11px var(--font-heading);letter-spacing:.02em"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M16 1.5c.1 1-.3 2-.9 2.7-.6.7-1.6 1.3-2.6 1.2-.1-1 .4-2 .9-2.6.6-.7 1.7-1.2 2.6-1.3zM18.7 12.6c0-2 1.6-2.9 1.7-3-1-1.4-2.4-1.6-2.9-1.6-1.2-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7-1.3 0-2.6.8-3.2 2-1.4 2.4-.4 6 1 8 .6 1 1.4 2 2.4 2 .9 0 1.3-.6 2.4-.6s1.4.6 2.4.6c1 0 1.7-.9 2.3-1.9.7-1.1 1-2.1 1-2.2 0-.1-2-.8-2-3.1z"/></svg>macOS native</span>
+              </div>
+            </aside>
+            <main style="flex:1;min-width:0;overflow:hidden;background:var(--wa-bg)">
+              <div style="padding:28px 32px 44px">
+                <h1 style="margin:0;font:800 33px var(--font-heading);letter-spacing:-.02em;color:var(--wa-text)">General</h1>
+                <p style="margin:7px 0 24px;font:400 13.5px var(--font-body);color:var(--wa-muted);max-width:460px">Startup, audio, and your everyday dictation workflow.</p>
+                <section style="background:var(--wa-panel);border:1px solid var(--wa-border);padding:2px 24px 20px">
+                  <div style="display:flex;align-items:center;gap:11px;padding:18px 0 14px;border-bottom:2px solid var(--wa-border)">
+                    <span style="width:30px;height:30px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--wa-accentSoft);color:var(--wa-accent)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" x2="20" y1="8.5" y2="8.5"/><line x1="4" x2="20" y1="15.5" y2="15.5"/><circle cx="9" cy="8.5" r="2.2" fill="var(--wa-panel)"/><circle cx="15" cy="15.5" r="2.2" fill="var(--wa-panel)"/></svg></span>
+                    <span style="font:800 16px var(--font-heading);color:var(--wa-text)">Behavior</span>
+                  </div>
+                  <div class="wa-row" style="border-top:0">
+                    <div style="flex:1;min-width:0"><div class="wa-row-title">Launch at login</div><div class="wa-row-sub">Start Whisper Smart automatically when you sign in.</div></div>
+                    <div style="flex:none;display:flex;align-items:center;min-height:26px"><span class="wa-toggle on"><span class="wa-knob"></span></span></div>
+                  </div>
+                  <div class="wa-row">
+                    <div style="flex:1;min-width:0"><div class="wa-row-title">Recording overlay</div><div class="wa-row-sub">Pick how you'd like to see live feedback while you talk.</div></div>
+                    <span class="wa-select">Top-center waveform<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></span>
+                  </div>
+                  <div class="wa-row">
+                    <div style="flex:1;min-width:0"><div class="wa-row-title">Input device</div><div class="wa-row-sub">Choose which microphone we listen to.</div></div>
+                    <span class="wa-select">MacBook Pro Microphone<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></span>
+                  </div>
+                  <div class="wa-row">
+                    <div style="flex:1;min-width:0"><div class="wa-row-title">Recording sounds</div><div class="wa-row-sub">Play a gentle chime when recording starts and stops.</div></div>
+                    <div style="flex:none;display:flex;align-items:center;min-height:26px"><span class="wa-toggle on"><span class="wa-knob"></span></span></div>
+                  </div>
+                  <div class="wa-row">
+                    <div style="flex:1;min-width:0"><div class="wa-row-title">Transcript cleanup</div><div class="wa-row-sub">Tidy up your text with light, conservative cleanup after each transcription.</div></div>
+                    <div style="flex:none;display:flex;align-items:center;min-height:26px"><span class="wa-toggle on"><span class="wa-knob"></span></span></div>
+                  </div>
+                  <div class="wa-row" style="padding-bottom:4px">
+                    <div style="flex:1;min-width:0"><div class="wa-row-title">Command mode scaffold</div><div class="wa-row-sub">Safely route command-style phrases through a passthrough scaffold.</div></div>
+                    <div style="flex:none;display:flex;align-items:center;min-height:26px"><span class="wa-toggle off"><span class="wa-knob"></span></span></div>
+                  </div>
+                </section>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <hr class="ws-rule">
+
+  <!-- STATS -->
+  <section style="padding:52px clamp(20px,5vw,64px)">
+    <div class="grid-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:32px 24px">
+      <div><div style="font:800 clamp(38px,4vw,52px)/1 var(--font-heading);color:var(--color-accent);margin-left:-.03em">100%</div><div style="margin-top:12px;font:600 12px var(--font-heading);letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 68%,transparent)">On-device option — nothing leaves your Mac</div></div>
+      <div><div style="font:800 clamp(38px,4vw,52px)/1 var(--font-heading);color:var(--color-accent);margin-left:-.03em">&lt;4s</div><div style="margin-top:12px;font:600 12px var(--font-heading);letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 68%,transparent)">Talk to text, most dictations</div></div>
+      <div><div style="font:800 clamp(38px,4vw,52px)/1 var(--font-heading);color:var(--color-accent);margin-left:-.03em">Any</div><div style="margin-top:12px;font:600 12px var(--font-heading);letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 68%,transparent)">App — inserts wherever your cursor is</div></div>
+      <div><div style="font:800 clamp(38px,4vw,52px)/1 var(--font-heading);color:var(--color-accent);margin-left:-.03em">$0</div><div style="margin-top:12px;font:600 12px var(--font-heading);letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 68%,transparent)">Free — no account, no subscription</div></div>
+    </div>
+  </section>
+
+  <hr class="ws-rule">
+
+  <!-- FEATURES -->
+  <section id="features" style="padding:64px clamp(20px,5vw,64px) 40px">
+    <span class="kicker" style="margin-bottom:36px">What it does</span>
+    <div class="feature-row">
+      <div style="display:flex;align-items:center;gap:14px"><span style="width:10px;height:10px;flex:none;background:var(--color-accent)"></span><span style="font:800 15px var(--font-heading)">01</span></div>
+      <h2 style="margin:0;font:800 26px/1.15 var(--font-heading);letter-spacing:-.015em">One key. Talk anywhere.</h2>
+      <p class="muted-78" style="margin:0;font:400 16px/1.6 var(--font-body);max-width:52ch">A single global hotkey works in every app on your Mac — your code editor, a browser field, a chat box. Hold to talk, release to insert the text right where your cursor sits. No window to switch to.</p>
+    </div>
+    <div class="feature-row">
+      <div style="display:flex;align-items:center;gap:14px"><span style="width:10px;height:10px;flex:none;background:var(--color-accent)"></span><span style="font:800 15px var(--font-heading)">02</span></div>
+      <h2 style="margin:0;font:800 26px/1.15 var(--font-heading);letter-spacing:-.015em">Runs on your Mac.</h2>
+      <p class="muted-78" style="margin:0;font:400 16px/1.6 var(--font-body);max-width:52ch">Apple-Silicon-native MLX models — Whisper and Parakeet — transcribe locally, so it works on a plane, in a basement, or anywhere you value privacy. Pick Light for speed or Best for accuracy.</p>
+    </div>
+    <div class="feature-row">
+      <div style="display:flex;align-items:center;gap:14px"><span style="width:10px;height:10px;flex:none;background:var(--color-accent)"></span><span style="font:800 15px var(--font-heading)">03</span></div>
+      <h2 style="margin:0;font:800 26px/1.15 var(--font-heading);letter-spacing:-.015em">Cloud when you want it.</h2>
+      <p class="muted-78" style="margin:0;font:400 16px/1.6 var(--font-body);max-width:52ch">Prefer OpenAI's Whisper API for a specific task? Add your key and switch models in a click. Nothing installs or connects until you deliberately turn it on.</p>
+    </div>
+    <div class="feature-row">
+      <div style="display:flex;align-items:center;gap:14px"><span style="width:10px;height:10px;flex:none;background:var(--color-accent)"></span><span style="font:800 15px var(--font-heading)">04</span></div>
+      <h2 style="margin:0;font:800 26px/1.15 var(--font-heading);letter-spacing:-.015em">Cleaned up automatically.</h2>
+      <p class="muted-78" style="margin:0;font:400 16px/1.6 var(--font-body);max-width:52ch">Light, conservative cleanup fixes punctuation and stray filler after each transcription — so what lands in your document reads like you meant to write it.</p>
+    </div>
+    <div class="feature-row">
+      <div style="display:flex;align-items:center;gap:14px"><span style="width:10px;height:10px;flex:none;background:var(--color-accent)"></span><span style="font:800 15px var(--font-heading)">05</span></div>
+      <h2 style="margin:0;font:800 26px/1.15 var(--font-heading);letter-spacing:-.015em">Every word, logged.</h2>
+      <p class="muted-78" style="margin:0;font:400 16px/1.6 var(--font-body);max-width:52ch">History keeps a searchable record of what you dictated, with latency and success metrics so you can spot which model and settings are pulling their weight.</p>
+    </div>
+  </section>
+
+  <hr class="ws-rule">
+
+  <!-- HOW IT WORKS -->
+  <section id="how" style="padding:64px clamp(20px,5vw,64px)">
+    <span class="kicker">How it works</span>
+    <h2 class="section-h2" style="margin-bottom:40px">Three moves. No menus.</h2>
+    <div class="grid-3" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--color-divider);border:2px solid var(--color-divider)">
+      <div style="background:var(--color-bg);padding:32px 26px">
+        <div style="font:800 13px var(--font-heading);letter-spacing:.1em;color:var(--color-accent)">STEP 01</div>
+        <div style="margin-top:18px;display:flex;align-items:center;gap:8px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:34px;padding:0 9px;background:var(--color-text);color:var(--color-bg);font:700 16px var(--font-heading)">⌘</span>
+          <span class="muted-62" style="font:600 14px var(--font-heading)">hold</span>
+        </div>
+        <h3 style="margin:20px 0 8px;font:800 22px var(--font-heading);letter-spacing:-.01em">Press &amp; hold</h3>
+        <p class="muted-78" style="margin:0;font:400 15px/1.6 var(--font-body)">One global hotkey works from anywhere — your editor, your browser, a Slack box. Set it to whatever your thumb likes.</p>
+      </div>
+      <div style="background:var(--color-bg);padding:32px 26px">
+        <div style="font:800 13px var(--font-heading);letter-spacing:.1em;color:var(--color-accent)">STEP 02</div>
+        <div style="margin-top:18px;display:flex;align-items:flex-end;gap:4px;height:34px">
+          <span style="width:5px;height:14px;background:var(--color-accent)"></span><span style="width:5px;height:28px;background:var(--color-accent)"></span><span style="width:5px;height:20px;background:var(--color-accent)"></span><span style="width:5px;height:32px;background:var(--color-accent)"></span><span style="width:5px;height:12px;background:var(--color-accent)"></span><span style="width:5px;height:24px;background:var(--color-accent)"></span>
+        </div>
+        <h3 style="margin:20px 0 8px;font:800 22px var(--font-heading);letter-spacing:-.01em">Just talk</h3>
+        <p class="muted-78" style="margin:0;font:400 15px/1.6 var(--font-body)">Speak naturally. A tidy waveform shows you it's listening. Ramble, correct yourself, keep going — it keeps up.</p>
+      </div>
+      <div style="background:var(--color-bg);padding:32px 26px">
+        <div style="font:800 13px var(--font-heading);letter-spacing:.1em;color:var(--color-accent)">STEP 03</div>
+        <div style="margin-top:18px;display:flex;align-items:center;gap:8px;height:34px">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--color-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          <span class="muted-62" style="font:600 14px var(--font-heading)">inserted</span>
+        </div>
+        <h3 style="margin:20px 0 8px;font:800 22px var(--font-heading);letter-spacing:-.01em">Release — done</h3>
+        <p class="muted-78" style="margin:0;font:400 15px/1.6 var(--font-body)">Let go and the cleaned-up text lands right at your cursor, punctuation and all. No copy-paste, no switching windows.</p>
       </div>
     </div>
-  </header>
+  </section>
 
-  <section>
-    <div class="wrap">
-      <h2>How it works</h2>
-      <div class="steps">
-        <div class="step">
-          <span class="num">1</span>
-          <h3>Hold</h3>
-          <p>Press and hold your hotkey — like the right <kbd>&#8984;</kbd> key — in any app.</p>
-        </div>
-        <div class="step">
-          <span class="num">2</span>
-          <h3>Speak</h3>
-          <p>Say what you want to write. A floating bubble shows it's listening.</p>
-        </div>
-        <div class="step">
-          <span class="num">3</span>
-          <h3>Release</h3>
-          <p>Let go — your transcribed text lands exactly where your cursor is.</p>
+  <hr class="ws-rule">
+
+  <!-- PRIVACY -->
+  <section id="privacy" style="padding:64px clamp(20px,5vw,64px)">
+    <span class="kicker">On-device vs cloud</span>
+    <h2 class="section-h2" style="margin-bottom:10px">Your voice stays yours.</h2>
+    <p class="muted-78" style="margin:0 0 36px;max-width:56ch;font:400 16px/1.6 var(--font-body)">Whisper Smart runs Apple-Silicon-native MLX models right on your Mac — so by default, no audio ever leaves the machine. Want a cloud model? That's a deliberate, per-model choice.</p>
+    <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <div style="border:2px solid var(--color-text);padding:28px 26px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><span style="width:11px;height:11px;background:var(--color-accent)"></span><span style="font:800 18px var(--font-heading)">On-device</span><span style="margin-left:auto;font:700 10px var(--font-heading);letter-spacing:.1em;background:var(--color-accent);color:var(--color-bg);padding:4px 8px">DEFAULT</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--color-divider)"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--color-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:500 14.5px/1.5 var(--font-body)">No audio or text ever leaves your Mac</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--color-divider)"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--color-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:500 14.5px/1.5 var(--font-body)">Works fully offline — plane, train, anywhere</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--color-divider)"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--color-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:500 14.5px/1.5 var(--font-body)">MLX models built for Apple Silicon</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--color-divider)"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--color-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:500 14.5px/1.5 var(--font-body)">Free to download and run, no key needed</span></div>
+      </div>
+      <div style="border:2px solid var(--color-divider);padding:28px 26px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><span style="width:11px;height:11px;border:2px solid var(--color-text)"></span><span style="font:800 18px var(--font-heading)">Cloud</span><span class="muted-62" style="margin-left:auto;font:700 10px var(--font-heading);letter-spacing:.1em;border:1px solid var(--color-divider);padding:4px 8px">OPT-IN</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--color-divider)"><span style="width:17px;flex:none;margin-top:1px;text-align:center;font:700 15px var(--font-heading);color:color-mix(in srgb,var(--color-text) 45%,transparent)">·</span><span style="font:500 14.5px/1.5 var(--font-body);color:color-mix(in srgb,var(--color-text) 82%,transparent)">OpenAI Whisper API for remote transcription</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--color-divider)"><span style="width:17px;flex:none;margin-top:1px;text-align:center;font:700 15px var(--font-heading);color:color-mix(in srgb,var(--color-text) 45%,transparent)">·</span><span style="font:500 14.5px/1.5 var(--font-body);color:color-mix(in srgb,var(--color-text) 82%,transparent)">Requires your own API key</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--color-divider)"><span style="width:17px;flex:none;margin-top:1px;text-align:center;font:700 15px var(--font-heading);color:color-mix(in srgb,var(--color-text) 45%,transparent)">·</span><span style="font:500 14.5px/1.5 var(--font-body);color:color-mix(in srgb,var(--color-text) 82%,transparent)">Audio is sent to the provider you choose</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--color-divider)"><span style="width:17px;flex:none;margin-top:1px;text-align:center;font:700 15px var(--font-heading);color:color-mix(in srgb,var(--color-text) 45%,transparent)">·</span><span style="font:500 14.5px/1.5 var(--font-body);color:color-mix(in srgb,var(--color-text) 82%,transparent)">Off until you deliberately enable it</span></div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="ws-rule">
+
+  <!-- CLOSER LOOK (dark, Provider tab) -->
+  <section style="padding:64px clamp(20px,5vw,64px)">
+    <span class="kicker">A closer look</span>
+    <h2 class="section-h2">Every setting, one clean window.</h2>
+    <div style="background:var(--color-text);padding:40px clamp(16px,4vw,56px)">
+      <div class="mock-wrap mock-center">
+        <div class="wa wa-dark">
+          <div class="wa-titlebar">
+            <div style="display:flex;gap:8px">
+              <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></span>
+              <span style="width:12px;height:12px;border-radius:50%;background:#febc2e"></span>
+              <span style="width:12px;height:12px;border-radius:50%;background:#28c840"></span>
+            </div>
+            <span class="wa-title">Whisper Smart — Preferences</span>
+          </div>
+          <div style="display:flex;height:640px">
+            <aside style="width:232px;flex:none;background:var(--wa-sidebar);border-right:1px solid var(--wa-border);display:flex;flex-direction:column">
+              <div style="display:flex;gap:11px;align-items:center;padding:18px 16px 16px">
+                <span style="width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--wa-accent);color:#fff">
+                  <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12h1M6 8v8M10 4v16M14 7v10M18 9v6M21 11v2"/></svg>
+                </span>
+                <span style="display:flex;flex-direction:column;line-height:1.2">
+                  <span style="font:800 15px var(--font-heading);color:var(--wa-text);letter-spacing:-.01em">Whisper Smart</span>
+                  <span style="font:400 11.5px var(--font-body);color:var(--wa-muted)">Preferences</span>
+                </span>
+              </div>
+              <div style="height:2px;background:var(--wa-border);margin:0 0 8px"></div>
+              <nav style="display:flex;flex-direction:column">
+                <div class="wa-nav-item">
+                  <span style="width:19px;height:19px;flex:none;margin-top:1px;display:flex"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" x2="20" y1="8.5" y2="8.5"/><line x1="4" x2="20" y1="15.5" y2="15.5"/><circle cx="9" cy="8.5" r="2.4" fill="var(--wa-sidebar)"/><circle cx="15" cy="15.5" r="2.4" fill="var(--wa-sidebar)"/></svg></span>
+                  <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13.5px var(--font-heading)">General</span><span style="font:400 11px var(--font-body);color:var(--wa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Startup, audio &amp; workflow</span></span>
+                </div>
+                <div class="wa-nav-item">
+                  <span style="width:19px;height:19px;flex:none;margin-top:1px;display:flex;align-items:center;justify-content:center;font:700 15px var(--font-heading)">⌘</span>
+                  <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13.5px var(--font-heading)">Hotkey</span><span style="font:400 11px var(--font-body);color:var(--wa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Global shortcut controls</span></span>
+                </div>
+                <div class="wa-nav-item active">
+                  <span style="width:19px;height:19px;flex:none;margin-top:1px;display:flex"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.7 1.5A3.5 3.5 0 0 0 6.5 19z"/></svg></span>
+                  <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13.5px var(--font-heading)">Provider</span><span style="font:400 11px var(--font-body);color:var(--wa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Models &amp; cloud setup</span></span>
+                </div>
+                <div class="wa-nav-item">
+                  <span style="width:19px;height:19px;flex:none;margin-top:1px;display:flex"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h11M8 12h11M8 18h7"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg></span>
+                  <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font:600 13.5px var(--font-heading)">History</span><span style="font:400 11px var(--font-body);color:var(--wa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Transcript metrics &amp; logs</span></span>
+                </div>
+              </nav>
+              <div style="margin-top:auto;padding:16px;display:flex;flex-direction:column;gap:9px">
+                <span style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--wa-border2);color:var(--wa-text);font:600 12.5px var(--font-heading)">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="var(--wa-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/></svg>
+                  Onboarding
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:5px 10px;background:var(--wa-active);color:var(--wa-muted);font:600 11px var(--font-heading);letter-spacing:.02em"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M16 1.5c.1 1-.3 2-.9 2.7-.6.7-1.6 1.3-2.6 1.2-.1-1 .4-2 .9-2.6.6-.7 1.7-1.2 2.6-1.3zM18.7 12.6c0-2 1.6-2.9 1.7-3-1-1.4-2.4-1.6-2.9-1.6-1.2-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7-1.3 0-2.6.8-3.2 2-1.4 2.4-.4 6 1 8 .6 1 1.4 2 2.4 2 .9 0 1.3-.6 2.4-.6s1.4.6 2.4.6c1 0 1.7-.9 2.3-1.9.7-1.1 1-2.1 1-2.2 0-.1-2-.8-2-3.1z"/></svg>macOS native</span>
+              </div>
+            </aside>
+            <main style="flex:1;min-width:0;overflow:hidden;background:var(--wa-bg)">
+              <div style="padding:28px 32px 44px">
+                <h1 style="margin:0;font:800 33px var(--font-heading);letter-spacing:-.02em;color:var(--wa-text)">Provider</h1>
+                <p style="margin:7px 0 24px;font:400 13.5px var(--font-body);color:var(--wa-muted);max-width:480px">Choose where transcription runs — right on your Mac, or in the cloud.</p>
+                <section style="background:var(--wa-panel);border:1px solid var(--wa-border);padding:2px 24px 24px">
+                  <div style="display:flex;align-items:center;gap:11px;padding:18px 0 14px;border-bottom:2px solid var(--wa-border)">
+                    <span style="width:30px;height:30px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--wa-accentSoft);color:var(--wa-accent)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h1M6 8v8M9 5v14M12 9v6M15 6v12M18 9v6M21 11v2"/></svg></span>
+                    <span style="font:800 16px var(--font-heading);color:var(--wa-text)">Smart model selection</span>
+                  </div>
+                  <p style="margin:16px 0 4px;font:400 12.5px var(--font-body);color:var(--wa-muted);max-width:520px">Pick a model, download it, then set it as your default. Nothing installs until you ask. Cloud needs an OpenAI API key.</p>
+                  <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+                    <div style="display:flex;gap:15px;align-items:flex-start;padding:16px;background:var(--wa-panel);border:1.5px solid var(--wa-border)">
+                      <span style="width:46px;height:46px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--wa-panel2);border:1px solid var(--wa-border);font:800 11px var(--font-heading);letter-spacing:.05em;color:var(--wa-accent)">LGT</span>
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font:700 15px var(--font-heading);color:var(--wa-text)">Light</span><span style="font:400 12px var(--font-body);color:var(--wa-muted)">Whisper Base (MLX) · fast, local</span></div>
+                        <div style="margin-top:11px;display:flex;align-items:center;gap:9px;min-height:26px">
+                          <span style="display:inline-flex;align-items:center;gap:6px;background:var(--wa-accent);color:#fff;padding:7px 13px;font:700 12px var(--font-heading)"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>Download</span>
+                        </div>
+                      </div>
+                      <span style="width:22px;height:22px;flex:none;align-self:center;border-radius:50%;border:1.5px solid var(--wa-border2)"></span>
+                    </div>
+                    <div style="display:flex;gap:15px;align-items:flex-start;padding:16px;background:var(--wa-active);border:1.5px solid var(--wa-accent)">
+                      <span style="width:46px;height:46px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--wa-panel2);border:1px solid var(--wa-border);font:800 11px var(--font-heading);letter-spacing:.05em;color:var(--wa-accent)">TDT</span>
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font:700 15px var(--font-heading);color:var(--wa-text)">Balanced</span><span style="font:400 12px var(--font-body);color:var(--wa-muted)">Parakeet TDT 0.6B (MLX) · best local speed</span></div>
+                        <div style="margin-top:11px;display:flex;align-items:center;gap:9px;min-height:26px">
+                          <span style="display:inline-flex;align-items:center;gap:6px;background:var(--wa-accentSoft);color:var(--wa-accentStrong);padding:4px 10px;font:600 11px var(--font-heading);letter-spacing:.03em"><span style="width:6px;height:6px;border-radius:50%;background:var(--wa-accent)"></span>In use</span>
+                        </div>
+                      </div>
+                      <span style="width:22px;height:22px;flex:none;align-self:center;border-radius:50%;border:1.5px solid var(--wa-accent);background:var(--wa-accent);box-shadow:inset 0 0 0 3px var(--wa-panel)"></span>
+                    </div>
+                    <div style="display:flex;gap:15px;align-items:flex-start;padding:16px;background:var(--wa-panel);border:1.5px solid var(--wa-border)">
+                      <span style="width:46px;height:46px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--wa-panel2);border:1px solid var(--wa-border);font:800 11px var(--font-heading);letter-spacing:.05em;color:var(--wa-accent)">MAX</span>
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font:700 15px var(--font-heading);color:var(--wa-text)">Best</span><span style="font:400 12px var(--font-body);color:var(--wa-muted)">Whisper Large-v3 Turbo (MLX) · highest local accuracy</span></div>
+                        <div style="margin-top:11px;display:flex;align-items:center;gap:9px;min-height:26px">
+                          <span style="display:inline-flex;align-items:center;gap:6px;background:var(--wa-accent);color:#fff;padding:7px 13px;font:700 12px var(--font-heading)"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>Download</span>
+                        </div>
+                      </div>
+                      <span style="width:22px;height:22px;flex:none;align-self:center;border-radius:50%;border:1.5px solid var(--wa-border2)"></span>
+                    </div>
+                    <div style="display:flex;gap:15px;align-items:flex-start;padding:16px;background:var(--wa-panel);border:1.5px solid var(--wa-border)">
+                      <span style="width:46px;height:46px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--wa-panel2);border:1px solid var(--wa-border);font:800 11px var(--font-heading);letter-spacing:.05em;color:var(--wa-accent)">API</span>
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font:700 15px var(--font-heading);color:var(--wa-text)">Cloud</span><span style="font:400 12px var(--font-body);color:var(--wa-muted)">OpenAI Whisper API · remote transcription</span></div>
+                        <div style="margin-top:11px;display:flex;align-items:center;gap:9px;min-height:26px">
+                          <span style="display:inline-flex;align-items:center;gap:6px;color:var(--wa-text);border:1px solid var(--wa-border2);padding:6px 12px;font:700 12px var(--font-heading)">Add API key</span>
+                        </div>
+                      </div>
+                      <span style="width:22px;height:22px;flex:none;align-self:center;border-radius:50%;border:1.5px solid var(--wa-border2)"></span>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </main>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
-  <section>
-    <div class="wrap">
-      <h2>Features</h2>
-      <div class="features">
-        <div class="feature">
-          <h3>Works everywhere</h3>
-          <p>Any text field in any app — email, chat, code editors, even terminals. No integration needed.</p>
-        </div>
-        <div class="feature">
-          <h3>Local, fast models</h3>
-          <p>Runs Parakeet and Whisper models locally on Apple Silicon via MLX, with streaming transcription while you speak.</p>
-        </div>
-        <div class="feature">
-          <h3>Your choice of engine</h3>
-          <p>Local MLX models, Apple's built-in speech recognition, or cloud transcription — switch anytime.</p>
-        </div>
-        <div class="feature">
-          <h3>Hands-free mode</h3>
-          <p>Prefer not to hold a key? Toggle dictation on and let silence detection finish the take for you.</p>
-        </div>
-        <div class="feature">
-          <h3>Auto-updates</h3>
-          <p>New releases install themselves in the background, so you're always on the latest version.</p>
-        </div>
-        <div class="feature">
-          <h3>Transcript history</h3>
-          <p>Every take is kept locally. Re-insert any past transcription with one click.</p>
-        </div>
+  <hr class="ws-rule">
+
+  <!-- PRICING -->
+  <section id="pricing" style="padding:64px clamp(20px,5vw,64px)">
+    <div class="grid-pricing" style="background:var(--color-accent);color:var(--color-bg);padding:clamp(36px,5vw,64px) clamp(28px,5vw,60px);display:grid;grid-template-columns:1.3fr 1fr;gap:40px;align-items:center">
+      <div>
+        <div style="font:700 12px var(--font-heading);letter-spacing:.14em;text-transform:uppercase;opacity:.85">Pricing</div>
+        <div style="margin-top:14px;font:800 clamp(56px,7vw,96px)/0.9 var(--font-heading);letter-spacing:-.03em">$0.<br>Forever.</div>
+        <p style="margin:26px 0 0;max-width:40ch;font:400 16px/1.6 var(--font-body);opacity:.92">No trial, no account, no upsell. Download it, use it every day, tell a friend. Whisper Smart is free and always will be.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:11px;align-items:flex-start;padding-bottom:14px;border-bottom:1px solid color-mix(in srgb,var(--color-bg) 30%,transparent)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:600 15px/1.4 var(--font-heading)">Unlimited dictation, no word caps</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding-bottom:14px;border-bottom:1px solid color-mix(in srgb,var(--color-bg) 30%,transparent)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:600 15px/1.4 var(--font-heading)">All on-device models</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding-bottom:14px;border-bottom:1px solid color-mix(in srgb,var(--color-bg) 30%,transparent)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:600 15px/1.4 var(--font-heading)">Custom global hotkey</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding-bottom:14px;border-bottom:1px solid color-mix(in srgb,var(--color-bg) 30%,transparent)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:600 15px/1.4 var(--font-heading)">Transcript cleanup &amp; history</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;padding-bottom:14px;border-bottom:1px solid color-mix(in srgb,var(--color-bg) 30%,transparent)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><path d="M20 6 9 17l-5-5"/></svg><span style="font:600 15px/1.4 var(--font-heading)">Free updates, forever</span></div>
+        <a class="btn-inverse" style="margin-top:8px;gap:10px;padding:15px 22px;font-size:15.5px;align-self:flex-start" href="https://github.com/itisrmk/whisper-smart/releases/latest/download/Whisper-Smart-mac.dmg">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>Get Whisper Smart
+        </a>
       </div>
     </div>
   </section>
 
-  <section>
-    <div class="wrap">
-      <div class="privacy">
-        <h2>Private by design</h2>
-        <p>With local models, your voice never leaves your Mac — audio is transcribed on-device and immediately discarded. No accounts, no tracking, no telemetry. The entire app is open source, so you can verify every line.</p>
+  <hr class="ws-rule">
+
+  <!-- REQUIREMENTS -->
+  <section style="padding:56px clamp(20px,5vw,64px)">
+    <div class="grid-req" style="display:grid;grid-template-columns:220px 1fr;gap:40px">
+      <h2 style="margin:0;font:800 clamp(24px,2.4vw,30px)/1.1 var(--font-heading);letter-spacing:-.02em">System<br>requirements</h2>
+      <div class="grid-3" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--color-divider);border:2px solid var(--color-divider)">
+        <div style="background:var(--color-bg);padding:22px 20px"><div class="muted-62" style="font:700 11px var(--font-heading);letter-spacing:.08em;text-transform:uppercase">Chip</div><div style="margin-top:8px;font:800 18px var(--font-heading)">Apple Silicon</div><div style="margin-top:6px;font:400 13px/1.5 var(--font-body);color:color-mix(in srgb,var(--color-text) 72%,transparent)">M1 or newer. MLX models are Apple-Silicon only.</div></div>
+        <div style="background:var(--color-bg);padding:22px 20px"><div class="muted-62" style="font:700 11px var(--font-heading);letter-spacing:.08em;text-transform:uppercase">macOS</div><div style="margin-top:8px;font:800 18px var(--font-heading)">14 Sonoma+</div><div style="margin-top:6px;font:400 13px/1.5 var(--font-body);color:color-mix(in srgb,var(--color-text) 72%,transparent)">Accessibility permission for text insertion.</div></div>
+        <div style="background:var(--color-bg);padding:22px 20px"><div class="muted-62" style="font:700 11px var(--font-heading);letter-spacing:.08em;text-transform:uppercase">Space</div><div style="margin-top:8px;font:800 18px var(--font-heading)">~2 GB</div><div style="margin-top:6px;font:400 13px/1.5 var(--font-body);color:color-mix(in srgb,var(--color-text) 72%,transparent)">App is small; models download on demand.</div></div>
       </div>
     </div>
   </section>
 
-  <section>
-    <div class="wrap requirements">
-      <h2>Requirements</h2>
-      <ul>
-        <li>macOS 14 (Sonoma) or later</li>
-        <li>Apple Silicon (M1 or newer) for local MLX models</li>
-        <li>Microphone and Accessibility permissions</li>
-      </ul>
+  <hr class="ws-rule">
+
+  <!-- FAQ -->
+  <section id="faq" style="padding:64px clamp(20px,5vw,64px)">
+    <span class="kicker">FAQ</span>
+    <h2 class="section-h2">Straight answers.</h2>
+    <div style="border-top:2px solid var(--color-divider)">
+      <div class="faq-item open">
+        <button class="faq-btn" type="button">
+          <span style="font:800 18px/1.3 var(--font-heading);letter-spacing:-.01em;flex:1">Is it really free?</span>
+          <span class="faq-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        </button>
+        <p class="faq-a">Yes — completely free, with no account, no trial timer, and no paid tier hiding the good features. Download it and use it every day. The on-device models are free to download too.</p>
+      </div>
+      <div class="faq-item">
+        <button class="faq-btn" type="button">
+          <span style="font:800 18px/1.3 var(--font-heading);letter-spacing:-.01em;flex:1">Does my audio go to the cloud?</span>
+          <span class="faq-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        </button>
+        <p class="faq-a">Not by default. The on-device MLX models transcribe entirely on your Mac, so no audio or text ever leaves the machine. Cloud transcription is strictly opt-in and only runs if you add an API key and pick a cloud model.</p>
+      </div>
+      <div class="faq-item">
+        <button class="faq-btn" type="button">
+          <span style="font:800 18px/1.3 var(--font-heading);letter-spacing:-.01em;flex:1">Which Macs are supported?</span>
+          <span class="faq-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        </button>
+        <p class="faq-a">Any Apple Silicon Mac (M1 or later) running macOS 14 Sonoma or newer. The MLX models are built for Apple Silicon and are not available on Intel Macs.</p>
+      </div>
+      <div class="faq-item">
+        <button class="faq-btn" type="button">
+          <span style="font:800 18px/1.3 var(--font-heading);letter-spacing:-.01em;flex:1">Which apps does it work in?</span>
+          <span class="faq-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        </button>
+        <p class="faq-a">Anywhere you can type. Whisper Smart inserts text at your cursor using macOS Accessibility, so it works in editors, browsers, chat apps, note tools — the lot. You grant Accessibility permission once on first launch.</p>
+      </div>
+      <div class="faq-item">
+        <button class="faq-btn" type="button">
+          <span style="font:800 18px/1.3 var(--font-heading);letter-spacing:-.01em;flex:1">How fast is it?</span>
+          <span class="faq-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        </button>
+        <p class="faq-a">Most dictations go from speech to inserted text in under four seconds on-device, depending on the model you pick and your Mac. Choose the Light model for the quickest turnaround or Best for maximum accuracy.</p>
+      </div>
+      <div class="faq-item">
+        <button class="faq-btn" type="button">
+          <span style="font:800 18px/1.3 var(--font-heading);letter-spacing:-.01em;flex:1">Can I change the hotkey?</span>
+          <span class="faq-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        </button>
+        <p class="faq-a">Yes. Start from a preset like Right ⌘ Hold or Fn Hold, or record your own combo in Preferences — click the shortcut pill and press the keys you want.</p>
+      </div>
     </div>
   </section>
 
-  <footer>
-    <div class="wrap">
-      <div class="links">
-        <a href="https://github.com/itisrmk/whisper-smart">GitHub</a>
-        <a href="https://github.com/itisrmk/whisper-smart/releases">Releases</a>
-        <a href="https://github.com/itisrmk/whisper-smart/issues">Report an issue</a>
-      </div>
-      <p>Whisper Smart is free and open source software.</p>
-    </div>
-  </footer>
+</div>
 
-  <script>
-    fetch("https://api.github.com/repos/itisrmk/whisper-smart/releases/latest")
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (release) {
-        if (!release || !release.tag_name) return;
-        var meta = document.getElementById("version-meta");
-        meta.textContent = "";
-        meta.append(release.tag_name.replace(/^v/, "v") + " · macOS 14+ · Free & open source");
-      })
-      .catch(function () {});
-  </script>
+<!-- DOWNLOAD / CLOSE -->
+<section id="download" style="background:var(--color-accent);color:var(--color-bg)">
+  <div style="max-width:1240px;margin:0 auto;padding:clamp(56px,7vw,104px) clamp(20px,5vw,64px)">
+    <h2 style="margin:0;font:800 clamp(44px,6.4vw,92px)/0.94 var(--font-heading);letter-spacing:-.03em;margin-left:-.05em">Stop typing.<br>Start talking.</h2>
+    <p style="margin:26px 0 0;max-width:48ch;font:400 18px/1.6 var(--font-body);opacity:.92">Free download. Runs on your Mac. Your words in your apps in seconds.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-top:36px">
+      <a class="btn-inverse" style="padding:17px 26px;font-size:16px" href="https://github.com/itisrmk/whisper-smart/releases/latest/download/Whisper-Smart-mac.dmg">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>Download for Mac
+      </a>
+      <a class="btn-outline-inverse" style="padding:15px 24px;font-size:16px" href="https://github.com/itisrmk/whisper-smart">View on GitHub</a>
+      <span class="dl-meta" style="font:500 13.5px var(--font-body);opacity:.8">Free · Apple Silicon · macOS 14+ · .dmg, ~3 MB</span>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer style="background:var(--color-text);color:var(--color-bg)">
+  <div style="max-width:1240px;margin:0 auto;padding:48px clamp(20px,5vw,64px) 40px">
+    <div class="grid-foot" style="display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:32px">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="width:30px;height:30px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--color-accent)"><svg width="17" height="17" viewBox="0 0 120 120"><rect x="9" y="16" width="14" height="88" fill="#fff"></rect><rect x="31" y="16" width="14" height="46" fill="#fff"></rect><rect x="53" y="16" width="14" height="66" fill="#fff"></rect><rect x="75" y="16" width="14" height="46" fill="#fff"></rect><rect x="97" y="16" width="14" height="88" fill="#fff"></rect></svg></span>
+          <span style="font:800 16px var(--font-heading)">Whisper Smart</span>
+        </div>
+        <p style="margin:16px 0 0;max-width:34ch;font:400 13.5px/1.6 var(--font-body);color:color-mix(in srgb,var(--color-bg) 62%,transparent)">On-device speech-to-text for macOS. Press a key, talk anywhere, get text. Free.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:11px">
+        <div style="font:700 11px var(--font-heading);letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-bg) 55%,transparent);margin-bottom:4px">Product</div>
+        <a class="footlink" href="#features">Features</a>
+        <a class="footlink" href="#how">How it works</a>
+        <a class="footlink" href="#pricing">Pricing</a>
+        <a class="footlink" href="https://github.com/itisrmk/whisper-smart/releases/latest/download/Whisper-Smart-mac.dmg">Download</a>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:11px">
+        <div style="font:700 11px var(--font-heading);letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-bg) 55%,transparent);margin-bottom:4px">Resources</div>
+        <a class="footlink" href="#faq">FAQ</a>
+        <a class="footlink" href="#privacy">Privacy</a>
+        <a class="footlink" href="https://github.com/itisrmk/whisper-smart/releases">Changelog</a>
+        <a class="footlink" href="https://github.com/itisrmk/whisper-smart">GitHub</a>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:11px">
+        <div style="font:700 11px var(--font-heading);letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--color-bg) 55%,transparent);margin-bottom:4px">Contact</div>
+        <a class="footlink" href="https://github.com/itisrmk/whisper-smart/issues">Support</a>
+        <a class="footlink" href="https://github.com/itisrmk/whisper-smart/issues/new">Report an issue</a>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;margin-top:40px;padding-top:20px;border-top:1px solid color-mix(in srgb,var(--color-bg) 22%,transparent);font:400 12.5px var(--font-body);color:color-mix(in srgb,var(--color-bg) 55%,transparent)">
+      <span>© <span id="year">2026</span> Whisper Smart. Built for macOS.</span>
+      <span style="display:flex;gap:20px"><a class="footlegal" href="#privacy">Privacy</a><a class="footlegal" href="https://github.com/itisrmk/whisper-smart">Open source</a></span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById("year").textContent = new Date().getFullYear();
+
+  document.querySelectorAll(".faq-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var item = btn.parentElement;
+      var wasOpen = item.classList.contains("open");
+      document.querySelectorAll(".faq-item.open").forEach(function (o) { o.classList.remove("open"); });
+      if (!wasOpen) item.classList.add("open");
+    });
+  });
+
+  fetch("https://api.github.com/repos/itisrmk/whisper-smart/releases/latest")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (release) {
+      if (!release || !release.tag_name) return;
+      var asset = (release.assets || []).find(function (a) { return a.name === "Whisper-Smart-mac.dmg"; });
+      var size = asset ? Math.max(1, Math.round(asset.size / 1048576)) + " MB" : "~3 MB";
+      var text = "Free · Apple Silicon · macOS 14+ · " + release.tag_name + " · .dmg, " + size;
+      document.querySelectorAll(".dl-meta").forEach(function (el) { el.textContent = text; });
+    })
+    .catch(function () {});
+</script>
 </body>
 </html>
