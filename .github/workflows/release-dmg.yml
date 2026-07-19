@@ -34,6 +34,7 @@ on:
     paths-ignore:
       - ".github/**"
       - "docs/**"
+      - "site/**"
       - "**.md"
       - "appcast.xml"
 
@@ -163,12 +164,14 @@ jobs:
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
       - name: Build Signed DMG
+        id: build
         env:
           VERSION: ${{ steps.params.outputs.version }}
           CHANNEL: ${{ steps.params.outputs.channel }}
         run: |
           set -euo pipefail
           IDENTITIES="$(security find-identity -v -p codesigning | grep -v 'CSSMERR' || true)"
+          SIGNING_KIND="developer-id"
           SIGNING_IDENTITY="$(printf '%s\n' "$IDENTITIES" | grep 'Developer ID Application' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
           if [[ -z "$SIGNING_IDENTITY" ]]; then
             # Fallback: an Apple Development certificate still provides a
@@ -176,6 +179,7 @@ jobs:
             # across updates), unlike ad-hoc signing. It cannot be notarized,
             # so it is only allowed for the beta channel until a Developer ID
             # Application certificate is provisioned.
+            SIGNING_KIND="development"
             SIGNING_IDENTITY="$(printf '%s\n' "$IDENTITIES" | grep 'Apple Development' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
             if [[ -n "$SIGNING_IDENTITY" && "$CHANNEL" == "production" ]]; then
               echo "Production channel requires a Developer ID Application certificate; only an Apple Development identity is available."
@@ -188,15 +192,31 @@ jobs:
           fi
           echo "Signing with identity: $SIGNING_IDENTITY"
           CODESIGN_IDENTITY="$SIGNING_IDENTITY" VERSION="$VERSION" bash scripts/package_dmg.sh
+          if [[ "$SIGNING_KIND" == "developer-id" ]]; then
+            codesign --force --timestamp --sign "$SIGNING_IDENTITY" ".build/release/Whisper-Smart-mac.dmg"
+          fi
+          echo "signing_kind=${SIGNING_KIND}" >> "$GITHUB_OUTPUT"
 
-      - name: Notarize Production DMG
-        if: ${{ steps.params.outputs.channel == 'production' }}
+      # Notarize every Developer ID-signed release, beta included — beta is
+      # what the auto-release pipeline ships to end users, and an unnotarized
+      # DMG is blocked by Gatekeeper on download.
+      - name: Notarize DMG
+        if: ${{ steps.build.outputs.signing_kind == 'developer-id' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          for var_name in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            value="${!var_name:-}"
+            if [[ -z "$value" ]]; then
+              echo "A Developer ID certificate is in use, so notarization is mandatory,"
+              echo "but the required secret is missing: $var_name"
+              echo "Add APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID repo secrets."
+              exit 1
+            fi
+          done
           DMG_PATH=".build/release/Whisper-Smart-mac.dmg"
           xcrun notarytool submit "$DMG_PATH" \
             --apple-id "$APPLE_ID" \
@@ -204,6 +224,8 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait
           xcrun stapler staple "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+          spctl --assess --type open --context context:primary-signature -v "$DMG_PATH"
 
       - name: Resolve Previous Tag
         id: previous_tag
