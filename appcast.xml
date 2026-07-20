@@ -6,6 +6,16 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.4.2</title>
+      <description>Gate onboarding engine step on local model download (#22)
+Release channel: **beta**
+Release artifact: `.build/release/Whisper-Smart-mac.dmg`
+Rollback reference: https://github.com/itisrmk/whisper-smart/releases/tag/v0.4.1</description>
+      <pubDate>Mon, 20 Jul 2026 08:24:58 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.4.2/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.4.2" sparkle:version="202607200824" sparkle:edSignature="br6/3XysltHX9pkiJxnGARvOCrTqBBkAWkXmk4pJ4wKYgAgPQUnuQocsBFDl+mSM1L2dZc7V3rQPRyhaPTC6Cw==" length="2666848" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.4.1</title>
       <description>Notarized Developer ID release
 Release channel: **beta**
@@ -246,18 +256,6 @@ New in this release:
 - Kept one-click UX and setup messaging improvements</description>
       <pubDate>Sat, 14 Feb 2026 17:24:25 -0700</pubDate>
       <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.4/Whisper-Smart-0.2.4.dmg" sparkle:shortVersionString="0.2.4" sparkle:version="202602141724" length="4473305" type="application/octet-stream"/>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-    </item>
-    <item>
-      <title>Version 0.2.3</title>
-      <description>v0.2.3 - Parakeet download reliability and calmer setup UX
-New in this release:
-- Fixed Parakeet TDT v3 source URLs to avoid HTTP 404
-- Added auto fallback to mirror source on 404 and manual &quot;Try mirror&quot; action
-- Reduced red/error overuse in setup UI; red now reserved for true failures
-- One-click setup flows remain unchanged and verified</description>
-      <pubDate>Sat, 14 Feb 2026 16:43:34 -0700</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.3/Whisper-Smart-0.2.3.dmg" sparkle:shortVersionString="0.2.3" sparkle:version="202602141643" length="4473976" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
   </channel>
