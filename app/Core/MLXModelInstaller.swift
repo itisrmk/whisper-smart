@@ -18,6 +18,11 @@ final class MLXModelInstaller: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
 
+    /// Fraction (0...1) of the in-flight model download, parsed from the
+    /// runner script's `PROGRESS` lines. Resets to 0 when an install starts and
+    /// is only meaningful while `phase` is `.installing`.
+    @Published private(set) var installProgress: Double = 0
+
     /// Cancellation marker owned by a single install task. Each install
     /// captures its own token, so cancelling task A stays effective even if
     /// a new install starts while A is still running on the serial queue —
@@ -58,6 +63,7 @@ final class MLXModelInstaller: ObservableObject {
         }
 
         MLXSetupPolicy.setupConsentGranted = true
+        setProgress(0)
         setPhase(.installing(modelID: model.id, detail: "Preparing runtime…"))
         let token = CancelToken()
         activeInstallToken = token
@@ -100,6 +106,7 @@ final class MLXModelInstaller: ObservableObject {
         currentProcess?.terminate()
         currentProcess = nil
         processLock.unlock()
+        setProgress(0)
         setPhase(.idle)
     }
 
@@ -127,13 +134,34 @@ final class MLXModelInstaller: ObservableObject {
         ]
 
         let stderrPipe = Pipe()
-        process.standardOutput = Pipe()
+        let stdoutPipe = Pipe()
+        process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
         let stderrData = NSMutableData()
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
             if !chunk.isEmpty { stderrData.append(chunk) }
+        }
+
+        // Parse `PROGRESS <fraction>` lines emitted by the runner script to
+        // drive the onboarding download bar. Buffered so partial lines split
+        // across reads don't get dropped.
+        var stdoutBuffer = Data()
+        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            stdoutBuffer.append(chunk)
+            while let newline = stdoutBuffer.firstIndex(of: 0x0A) {
+                let lineData = stdoutBuffer.subdata(in: stdoutBuffer.startIndex..<newline)
+                stdoutBuffer.removeSubrange(stdoutBuffer.startIndex...newline)
+                guard let line = String(data: lineData, encoding: .utf8) else { continue }
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasPrefix("PROGRESS "),
+                   let value = Double(trimmed.dropFirst("PROGRESS ".count)) {
+                    self?.setProgress(min(max(value, 0), 1))
+                }
+            }
         }
 
         let completion = DispatchSemaphore(value: 0)
@@ -145,6 +173,7 @@ final class MLXModelInstaller: ObservableObject {
 
         defer {
             stderrPipe.fileHandleForReading.readabilityHandler = nil
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
             processLock.lock()
             currentProcess = nil
             processLock.unlock()
@@ -191,6 +220,13 @@ final class MLXModelInstaller: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.phase != newPhase else { return }
             self.phase = newPhase
+        }
+    }
+
+    private func setProgress(_ value: Double) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.installProgress != value else { return }
+            self.installProgress = value
         }
     }
 

@@ -466,6 +466,94 @@ struct OnboardingFlowView: View {
                 .font(VFFont.settingsFootnote)
                 .foregroundStyle(VFColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let model = selectedLocalModel, !mlxInstaller.isInstalled(model) {
+                engineDownloadStatus(for: model)
+            }
+        }
+        .onAppear {
+            // Start (or resume) the local model download as soon as the user
+            // lands on this step so the progress bar reflects real state and
+            // Continue can gate on completion.
+            beginModelInstallIfNeeded()
+        }
+    }
+
+    /// The local MLX model backing the currently selected preset, or nil for
+    /// the cloud engine (which has no local download to gate on).
+    private var selectedLocalModel: MLXModel? {
+        MLXModelCatalog.selectedModel(for: selectedPreset.providerKind)
+    }
+
+    /// Inline progress panel on the engine step. A real progress bar while the
+    /// model downloads, a graceful fallback note if it fails, so the user never
+    /// advances into the practice step with a half-installed model.
+    @ViewBuilder
+    private func engineDownloadStatus(for model: MLXModel) -> some View {
+        switch mlxInstaller.phase {
+        case .installing(let modelID, let detail) where modelID == model.id:
+            let hasProgress = mlxInstaller.installProgress > 0
+            VStack(alignment: .leading, spacing: VFSpacing.xs) {
+                HStack(spacing: VFSpacing.xs) {
+                    if hasProgress {
+                        Text("Downloading \(model.displayName)")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.text)
+                        Spacer(minLength: 0)
+                        Text("\(Int((mlxInstaller.installProgress * 100).rounded()))%")
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.accent)
+                            .monospacedDigit()
+                    } else {
+                        ProgressView().controlSize(.small)
+                        Text(runtimeBootstrapDetail.isEmpty ? detail : runtimeBootstrapDetail)
+                            .font(VFFont.settingsCaption)
+                            .foregroundStyle(VFColor.textSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+                if hasProgress {
+                    ProgressView(value: mlxInstaller.installProgress)
+                        .tint(VFColor.accent)
+                }
+                Text("Hang tight — this finishes before your first dictation so the test won't error out.")
+                    .font(VFFont.settingsFootnote)
+                    .foregroundStyle(VFColor.muted)
+            }
+            .padding(VFSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Rectangle()
+                    .fill(VFColor.panel)
+                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
+            )
+        case .failed(let modelID, _) where modelID == model.id:
+            HStack(alignment: .firstTextBaseline, spacing: VFSpacing.xs) {
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(VFColor.muted)
+                Text("The \(model.displayName) download hit a snag. You can continue — Whisper Smart uses Apple's built-in engine until you retry it from Settings → Provider.")
+                    .font(VFFont.settingsFootnote)
+                    .foregroundStyle(VFColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(VFSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Rectangle()
+                    .fill(VFColor.panel)
+                    .overlay(Rectangle().stroke(VFColor.border, lineWidth: 1))
+            )
+        default:
+            HStack(spacing: VFSpacing.xs) {
+                ProgressView().controlSize(.small)
+                Text("Preparing download…")
+                    .font(VFFont.settingsCaption)
+                    .foregroundStyle(VFColor.textSecondary)
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -851,7 +939,13 @@ struct OnboardingFlowView: View {
         switch step {
         case .welcome:     return "Let's go"
         case .permissions: return "Continue"
-        case .engine:      return "Use this engine"
+        case .engine:
+            if let model = selectedLocalModel, !mlxInstaller.isInstalled(model) {
+                if case .installing(let modelID, _) = mlxInstaller.phase, modelID == model.id {
+                    return "Downloading…"
+                }
+            }
+            return "Use this engine"
         case .micCheck:    return "Sounds good"
         case .hotkey:      return "Continue"
         case .practice:    return "Continue"
@@ -863,6 +957,14 @@ struct OnboardingFlowView: View {
         switch step {
         case .permissions:
             return permissionSnapshot.microphone.isUsable && permissionSnapshot.accessibility.isUsable
+        case .engine:
+            // Cloud engine (no local model) or already-installed model: free to go.
+            guard let model = selectedLocalModel, !mlxInstaller.isInstalled(model) else { return true }
+            // A failed download still lets the user proceed on the Apple fallback.
+            if case .failed(let modelID, _) = mlxInstaller.phase, modelID == model.id { return true }
+            // Otherwise the local model is still downloading — hold here so the
+            // practice step never fires against a missing model.
+            return false
         case .practice:
             return practiceCelebrated
         default:

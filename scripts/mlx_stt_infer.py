@@ -95,12 +95,57 @@ def run_check() -> None:
 def run_download(engine: str, model: str) -> None:
     from huggingface_hub import snapshot_download
 
+    tqdm_class = _make_progress_tqdm()
+    kwargs = {"tqdm_class": tqdm_class} if tqdm_class is not None else {}
     if engine == "parakeet":
         # parakeet-mlx loads exactly these two files.
-        snapshot_download(repo_id=model, allow_patterns=["config.json", "model.safetensors"])
+        snapshot_download(
+            repo_id=model,
+            allow_patterns=["config.json", "model.safetensors"],
+            **kwargs,
+        )
     else:
-        snapshot_download(repo_id=model)
+        snapshot_download(repo_id=model, **kwargs)
+    # Guarantee the bar lands on 100% even if the last update was coalesced.
+    print("PROGRESS 1.0000", flush=True)
     print("downloaded")
+
+
+def _make_progress_tqdm():
+    """Custom tqdm that emits aggregate `PROGRESS <fraction>` lines on stdout.
+
+    huggingface_hub spins up one tqdm per file plus an outer "Fetching files"
+    bar. We aggregate byte totals across every instance so the emitted fraction
+    reflects overall download progress, not per-file. The Swift installer parses
+    these lines to drive a real progress bar during onboarding.
+    """
+    try:
+        from tqdm.auto import tqdm as _tqdm
+    except Exception:
+        return None
+
+    class _Aggregate:
+        total = 0
+        done = 0
+
+    agg = _Aggregate()
+
+    class _ProgressTqdm(_tqdm):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            agg.total += self.total or 0
+            self._last_n = self.n or 0
+
+        def update(self, n=1):
+            ret = super().update(n)
+            agg.done += (self.n or 0) - self._last_n
+            self._last_n = self.n or 0
+            if agg.total > 0:
+                frac = min(agg.done / agg.total, 1.0)
+                print(f"PROGRESS {frac:.4f}", flush=True)
+            return ret
+
+    return _ProgressTqdm
 
 
 def decode_pcm_base64(b64: str):
