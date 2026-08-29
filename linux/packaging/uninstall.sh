@@ -13,6 +13,9 @@ rm -f "$PREFIX/bin/whisper-smart"
 rm -rf "$PREFIX/lib/whisper-smart"
 rm -f "$PREFIX/share/applications/whisper-smart.desktop"
 rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/whisper-smart.service"
+# The brand font is written at runtime by `ui::fonts`, not by install.sh, so
+# it has to be cleaned up explicitly or it outlives the app.
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/fonts/WhisperSmart-Archivo-Variable.ttf"
 systemctl --user daemon-reload 2>/dev/null || true
 
 if (( PURGE )); then

@@ -38,13 +38,26 @@ sudo usermod -aG input "$USER"   # then log out and back in
 ## Install
 
 ```bash
-cd linux
+git clone https://github.com/itisrmk/whisper-smart
+cd whisper-smart/linux
 bash packaging/install.sh            # installs into ~/.local, no root needed
 whisper-smart --check                # reports anything still missing
 systemctl --user enable --now whisper-smart
 ```
 
-For a system package, `packaging/PKGBUILD` builds one with `makepkg`.
+To remove it again:
+
+```bash
+bash packaging/uninstall.sh          # keeps settings and downloaded models
+bash packaging/uninstall.sh --purge  # removes those too
+```
+
+Tagged releases also carry a prebuilt tarball (`whisper-smart-X.Y.Z-linux-x86_64.tar.gz`)
+containing the same installer. It is built on Arch, so it suits Arch and
+close relatives; elsewhere, build from source as above.
+
+AUR packaging lives in `packaging/aur/` and is ready to publish — see the note
+there about registration being temporarily closed upstream.
 
 ## Usage
 

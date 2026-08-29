@@ -5,10 +5,19 @@ Two packages, sharing an identical build:
 | Package | Source | Use it when |
 |---|---|---|
 | `whisper-smart-git` | tip of `main` | Now — needs no release infrastructure |
-| `whisper-smart` | `linux-vX.Y.Z` release tarball | Once a Linux release is tagged |
+| `whisper-smart` | `vX.Y.Z` source tarball | Once a release is tagged |
 
 `whisper-smart-git` is the one that has actually been built and tested with
-`makepkg`. The stable package differs only in `source` and `pkgver`.
+`makepkg`. The stable package differs only in `source` and `pkgver`; it uses
+the source tarball GitHub generates for a `vX.Y.Z` tag, which the release
+workflow creates for every release.
+
+Until either is published, the supported install is the source one:
+
+```bash
+git clone https://github.com/itisrmk/whisper-smart
+cd whisper-smart/linux && bash packaging/install.sh
+```
 
 ## Why `options=('!lto')`
 
@@ -24,6 +33,12 @@ Disabling makepkg's LTO fixes it. Rust-level LTO is untouched — the release
 profile in `linux/Cargo.toml` still sets `lto = "thin"`.
 
 ## Publishing
+
+> **Blocked as of 2026-08-29.** AUR account registration is temporarily paused
+> ("New account registration is temporarily closed", HTTP 503) while the Arch
+> team deals with a wave of automated signups. It is not specific to us. Watch
+> `aur-general` or the Arch news feed; the packaging below is ready to push the
+> moment registration reopens.
 
 Needs an [AUR account](https://aur.archlinux.org/register) with an SSH public
 key registered under *My Account → SSH Public Key*.

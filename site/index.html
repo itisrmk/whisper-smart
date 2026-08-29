@@ -498,12 +498,12 @@
       <div>
         <p class="muted-78" style="margin:0 0 22px;max-width:62ch;font:400 16px/1.65 var(--font-body)">The same app, rebuilt natively for the Linux desktop &mdash; same hold-to-talk flow, same on-device transcription, same interface. Install it from the AUR:</p>
 
-        <div class="cmd" style="max-width:520px">
-          <span class="cmd-prompt">$</span><span id="aur-cmd">yay -S whisper-smart-git</span>
-          <button type="button" onclick="navigator.clipboard.writeText('yay -S whisper-smart-git');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1600)">Copy</button>
+        <div class="cmd" style="max-width:640px">
+          <span class="cmd-prompt">$</span><span id="linux-cmd">git clone https://github.com/itisrmk/whisper-smart &amp;&amp; cd whisper-smart/linux &amp;&amp; bash packaging/install.sh</span>
+          <button type="button" onclick="navigator.clipboard.writeText('git clone https://github.com/itisrmk/whisper-smart \u0026\u0026 cd whisper-smart/linux \u0026\u0026 bash packaging/install.sh');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1600)">Copy</button>
         </div>
 
-        <p class="muted-62" style="margin:14px 0 28px;font:500 13.5px var(--font-body)">Arch, Manjaro, EndeavourOS&nbsp;·&nbsp;builds from source&nbsp;·&nbsp;~4&nbsp;MB installed</p>
+        <p class="muted-62" style="margin:14px 0 28px;font:500 13.5px var(--font-body)">Installs into <code style="font:600 12.5px ui-monospace,monospace">~/.local</code>, no root needed&nbsp;·&nbsp;~4&nbsp;MB installed&nbsp;·&nbsp;an AUR package is on the way</p>
 
         <div class="grid-3" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--color-divider);border:2px solid var(--color-divider)">
           <div style="background:var(--color-bg);padding:22px 20px"><div class="muted-62" style="font:700 11px var(--font-heading);letter-spacing:.08em;text-transform:uppercase">Speech engine</div><div style="margin-top:8px;font:800 18px var(--font-heading)">whisper.cpp</div><div style="margin-top:6px;font:400 13px/1.5 var(--font-body);color:color-mix(in srgb,var(--color-text) 72%,transparent)">Runs on your GPU with CUDA, or your CPU. faster-whisper and Parakeet also supported.</div></div>

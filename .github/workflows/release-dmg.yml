@@ -48,6 +48,8 @@ concurrency:
 jobs:
   release:
     runs-on: macos-latest
+    outputs:
+      version: ${{ steps.params.outputs.version }}
     timeout-minutes: 45
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -362,3 +364,47 @@ jobs:
           files: |
             .build/release/Whisper-Smart-mac.dmg
             appcast.xml
+
+  # Linux artifacts for the same tag. Runs after `release` so the tag and the
+  # GitHub Release already exist; this job only adds assets to them.
+  #
+  # It builds inside an Arch container rather than on the runner's Ubuntu.
+  # The binary links against GTK 4 and gtk4-layer-shell dynamically, so it is
+  # tied to the versions it was built against, and Arch is both the primary
+  # target and the distro the AUR package serves. Everyone else has the source
+  # tarball and `packaging/install.sh`.
+  release-linux:
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install build dependencies
+        # Runs before checkout because the container has no git, which
+        # actions/checkout needs in order to do a real clone.
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git rust pkgconf \
+            gtk4 gtk4-layer-shell alsa-lib libpulse
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - name: Test
+        working-directory: linux
+        run: cargo test --release --locked
+
+      - name: Build tarball
+        working-directory: linux
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: bash packaging/make-tarball.sh
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.release.outputs.version }}
+          files: |
+            linux/dist/*.tar.gz
+            linux/dist/*.tar.gz.sha256

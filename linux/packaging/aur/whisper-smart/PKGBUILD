@@ -1,9 +1,10 @@
 # Maintainer: Rahul Kashyap <rahulmkashyap@gmail.com>
 #
-# Stable counterpart to `whisper-smart-git`. It builds from a tagged release
-# tarball rather than the tip of main, so it needs a `linux-vX.Y.Z` tag to
-# exist on GitHub first. The build and package steps are identical to the -git
-# package, which is built and tested; only the source and version differ.
+# Stable counterpart to `whisper-smart-git`. It builds from the source tarball
+# GitHub generates for a `vX.Y.Z` tag, which the release workflow already
+# creates for every release. The build and package steps are identical to the
+# -git package, which has been built and tested; only the source and version
+# differ. Bump pkgver, run `updpkgsums`, regenerate .SRCINFO, and push.
 
 pkgname=whisper-smart
 _pkgname=whisper-smart
@@ -41,13 +42,12 @@ options=('!lto')
 
 provides=("$_pkgname")
 conflicts=("$_pkgname-git")
-source=("$_pkgname-$pkgver.tar.gz::$url/archive/refs/tags/linux-v$pkgver.tar.gz")
-# Replace with the real digest after tagging:
-#   updpkgsums          (from pacman-contrib)
+source=("$_pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# Fill in with `updpkgsums` (pacman-contrib) once the tag exists.
 sha256sums=('SKIP')
 
 prepare() {
-    cd "$srcdir/$_pkgname-linux-v$pkgver/linux"
+    cd "$srcdir/$_pkgname-$pkgver/linux"
     # Vendor dependencies up front so build() and check() can run offline,
     # which is what --frozen below enforces.
     export RUSTUP_TOOLCHAIN=stable
@@ -55,21 +55,21 @@ prepare() {
 }
 
 build() {
-    cd "$srcdir/$_pkgname-linux-v$pkgver/linux"
+    cd "$srcdir/$_pkgname-$pkgver/linux"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     cargo build --frozen --release
 }
 
 check() {
-    cd "$srcdir/$_pkgname-linux-v$pkgver/linux"
+    cd "$srcdir/$_pkgname-$pkgver/linux"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     cargo test --frozen --release
 }
 
 package() {
-    cd "$srcdir/$_pkgname-linux-v$pkgver/linux"
+    cd "$srcdir/$_pkgname-$pkgver/linux"
 
     install -Dm755 "target/release/whisper-smart" "$pkgdir/usr/bin/whisper-smart"
 
