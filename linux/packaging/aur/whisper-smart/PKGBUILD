@@ -1,0 +1,95 @@
+# Maintainer: Rahul Kashyap <rahulmkashyap@gmail.com>
+#
+# Stable counterpart to `whisper-smart-git`. It builds from a tagged release
+# tarball rather than the tip of main, so it needs a `linux-vX.Y.Z` tag to
+# exist on GitHub first. The build and package steps are identical to the -git
+# package, which is built and tested; only the source and version differ.
+
+pkgname=whisper-smart
+_pkgname=whisper-smart
+pkgver=0.4.2
+pkgrel=1
+pkgdesc="Hold-to-talk dictation for the Linux desktop (GTK4)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/itisrmk/whisper-smart"
+license=('MIT')
+
+# gtk4-layer-shell is what puts the recording overlay above other windows on
+# wlroots compositors. Without it the overlay is skipped and dictation still
+# works, but it is small and the app is much better with it.
+depends=('gtk4' 'gtk4-layer-shell' 'alsa-lib' 'libpulse' 'hicolor-icon-theme')
+makedepends=('cargo' 'pkgconf')
+
+# Text insertion and the speech engine are deliberately optional: the app
+# detects what is missing and prints the exact command to fix it, so a user can
+# install only the pieces their setup needs.
+optdepends=(
+    'wtype: type transcripts directly (recommended, Wayland)'
+    'wl-clipboard: clipboard paste fallback (Wayland)'
+    'xdotool: text insertion on X11 sessions'
+    'whisper-cpp: default local speech engine'
+    'ggml-cpu: compute backend whisper-cpp needs to load a model'
+    'ggml-cuda: CUDA acceleration for whisper-cpp on NVIDIA GPUs'
+    'uv: provisions the Python runtime for faster-whisper and Parakeet'
+)
+
+# makepkg enables link-time optimisation for C by default, which leaves the
+# assembly objects `ring` builds (via the rustls stack behind ureq) without
+# their symbols at link time: "undefined symbol: ring_core_..._x25519_sc_reduce".
+# Rust-level LTO is still on via the release profile in Cargo.toml.
+options=('!lto')
+
+provides=("$_pkgname")
+conflicts=("$_pkgname-git")
+source=("$_pkgname-$pkgver.tar.gz::$url/archive/refs/tags/linux-v$pkgver.tar.gz")
+# Replace with the real digest after tagging:
+#   updpkgsums          (from pacman-contrib)
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$srcdir/$_pkgname-linux-v$pkgver/linux"
+    # Vendor dependencies up front so build() and check() can run offline,
+    # which is what --frozen below enforces.
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$srcdir/$_pkgname-linux-v$pkgver/linux"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release
+}
+
+check() {
+    cd "$srcdir/$_pkgname-linux-v$pkgver/linux"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo test --frozen --release
+}
+
+package() {
+    cd "$srcdir/$_pkgname-linux-v$pkgver/linux"
+
+    install -Dm755 "target/release/whisper-smart" "$pkgdir/usr/bin/whisper-smart"
+
+    # The speech-to-text sidecar for the faster-whisper and Parakeet engines.
+    # `stt::runtime::daemon_script_path` looks here first for a packaged install.
+    install -Dm644 "python/stt_daemon.py" \
+        "$pkgdir/usr/lib/whisper-smart/stt_daemon.py"
+
+    install -Dm644 "packaging/whisper-smart.desktop" \
+        "$pkgdir/usr/share/applications/whisper-smart.desktop"
+    install -Dm644 "packaging/whisper-smart.service" \
+        "$pkgdir/usr/lib/systemd/user/whisper-smart.service"
+
+    # Shipping the brand font system-wide means the app skips writing a copy
+    # into ~/.local/share/fonts on first run.
+    install -Dm644 "resources/Archivo-Variable.ttf" \
+        "$pkgdir/usr/share/fonts/TTF/Archivo-Variable.ttf"
+
+    install -Dm644 "resources/whisper-smart-logo.png" \
+        "$pkgdir/usr/share/icons/hicolor/512x512/apps/whisper-smart.png"
+
+    install -Dm644 "README.md" "$pkgdir/usr/share/doc/$_pkgname/README.md"
+}
