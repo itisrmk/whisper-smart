@@ -82,6 +82,23 @@ swift build
 bash scripts/package_dmg.sh
 ```
 
+## 07 — Linux
+
+A Linux port lives in [`linux/`](linux/). It is a separate Rust + GTK4 program
+rather than a cross-compile, because SwiftUI and AppKit have no Linux
+counterpart and MLX is Apple Silicon only — but the dictation behaviour, hotkey
+semantics, and settings model carry over.
+
+```bash
+cd linux
+bash packaging/install.sh
+whisper-smart --check
+```
+
+Local speech runs on whisper.cpp, faster-whisper, or Parakeet via ONNX Runtime.
+See [linux/README.md](linux/README.md) for the full setup, including the
+`input` group membership the global hotkey needs on Wayland.
+
 ## License
 
 See [LICENSE](LICENSE) for details.

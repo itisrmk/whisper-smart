@@ -133,6 +133,38 @@ Settings changes are communicated to AppDelegate via `NotificationCenter`:
 - **Speech detection threshold**: Audio level ≥ 0.08 counts as speech. If no speech detected during recording, transcription is skipped entirely.
 - **Bundle ID is immutable**: `build_release_app.sh` refuses to build if `BUNDLE_ID` differs from `com.whispersmart.desktop` — changing it resets macOS TCC permission grants.
 
+## Linux Port (`linux/`)
+
+A separate Rust + GTK4 implementation for Linux desktops, not a cross-compile —
+SwiftUI/AppKit have no Linux counterpart and MLX is Apple Silicon only. It
+mirrors this app's architecture and behaviour; see `linux/README.md` for the
+full mapping.
+
+```bash
+cd linux
+cargo build --release
+bash scripts/run_qa_smoke.sh       # fmt + clippy + tests + sidecar syntax
+./target/release/whisper-smart --check
+```
+
+Key correspondences:
+
+| macOS | Linux |
+|-------|-------|
+| `app/Core/DictationStateMachine.swift` | `linux/src/core/state_machine.rs` |
+| `app/Core/HotkeyMonitor.swift` (CGEvent tap) | `linux/src/platform/hotkey.rs` (evdev) |
+| `app/Core/ClipboardInjector.swift` (AX + ⌘V) | `linux/src/platform/injector.rs` (wtype + paste) |
+| `app/Core/AudioCaptureService.swift` (AVAudioEngine) | `linux/src/platform/audio.rs` (cpal) |
+| `app/Core/MLXModelCatalog.swift` | `linux/src/core/model_catalog.rs` |
+| `app/Core/MLXSTTProvider.swift` | `linux/src/stt/daemon.rs` + `linux/python/stt_daemon.py` |
+| `app/App/AppDelegate.swift` | `linux/src/app.rs` |
+| `app/UI/SettingsView.swift` | `linux/src/ui/settings.rs` |
+| `UserDefaults` | `~/.config/whisper-smart/config.toml` |
+
+Two behavioural differences are deliberate: there is no microphone-permission
+state (PipeWire needs no TCC-style prompt), and an unusable local provider never
+falls back to the cloud unless the user explicitly enabled it *and* saved a key.
+
 ## File Organization
 
 - `app/App/` — Entry point, AppDelegate, UpdateManager

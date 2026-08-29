@@ -1,0 +1,14 @@
+# Optional Hyprland rules for Whisper Smart.
+# Append to ~/.config/hypr/hyprland.conf, or source this file from it.
+
+# The recording overlay is a layer surface, so it needs no window rule. The
+# settings window is an ordinary toplevel and is nicer floating than tiled.
+windowrulev2 = float, class:^(com\.whispersmart\.desktop)$
+windowrulev2 = size 820 620, class:^(com\.whispersmart\.desktop)$
+windowrulev2 = center, class:^(com\.whispersmart\.desktop)$
+
+# Whisper Smart reads /dev/input directly, so it does not need a Hyprland
+# keybind. These are only useful if you would rather drive it from the
+# compositor -- for instance if you are not in the `input` group.
+#
+# bind  = SUPER, D, exec, whisper-smart --check

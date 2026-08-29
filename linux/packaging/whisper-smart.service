@@ -1,0 +1,26 @@
+[Unit]
+Description=Whisper Smart dictation
+Documentation=https://github.com/rahulmk/whisper-smart
+# The tray icon and the recording overlay both need a graphical session.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/whisper-smart
+# A missing dependency is the user's to fix, not something to restart into a
+# loop over; a crash is worth retrying.
+Restart=on-failure
+RestartSec=5
+# The whole point of the app is reading input devices and driving the
+# compositor, so it is not a candidate for aggressive sandboxing. These are the
+# hardening options that do not break it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+Environment=RUST_LOG=whisper_smart=info
+
+[Install]
+WantedBy=graphical-session.target
