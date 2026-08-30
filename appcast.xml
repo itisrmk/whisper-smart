@@ -6,6 +6,22 @@
     <description>Latest releases of Whisper Smart</description>
     <language>en</language>
     <item>
+      <title>Version 0.5.0</title>
+      <description>The first release that ships macOS and Linux from one tag.
+**Linux dictation no longer submits a half-finished transcript.** Speaking for more than a few seconds into a chat box or search field used to drop characters and then submit the field partway through — `wtype`'s stdin mode re-uploads its keymap every 100 characters, and the characters that arrive during the swap are either lost or read as a bare Return. The transcript is now typed through a path that uploads the keymap once, before the first keystroke, and multi-line transcripts go through the clipboard instead of pressing Return.
+**Releases are unified.** Every tag from here on carries the macOS DMG, the Sparkle appcast, the Linux tarball and its checksum, all built from the same commit — the tag is only created once both platform builds pass.
+### Changes
+- fix(release): flatten the macOS artifact so publish can find the DMG
+- feat(release): one tag ships macOS and Linux together
+- fix(linux): stop wtype dropping characters and submitting mid-transcript
+- feat(release): publish Linux artifacts on the same tag as the DMG
+- feat(linux): add AUR packaging and a Linux section on the site
+- feat(linux): add GTK4 desktop port</description>
+      <pubDate>Sun, 30 Aug 2026 23:39:23 +0000</pubDate>
+      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.5.0/Whisper-Smart-mac.dmg" sparkle:shortVersionString="0.5.0" sparkle:version="202608302329" sparkle:edSignature="disReB23WdcB7Qmosy91AGk0gWt6zo3UFeAe8EkY34D8bMNKqQFXklFLSJ3Y9Za5+dDks9N0w4s4/jc44ml6DQ==" length="2666873" type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
+    <item>
       <title>Version 0.4.2</title>
       <description>Gate onboarding engine step on local model download (#22)
 Release channel: **beta**
@@ -244,18 +260,6 @@ New in this release:
 - Added smoke coverage for completion transitions and unsupported-source handling</description>
       <pubDate>Sat, 14 Feb 2026 18:57:23 -0700</pubDate>
       <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.5/Whisper-Smart-0.2.5.dmg" sparkle:shortVersionString="0.2.5" sparkle:version="202602141857" length="4477116" type="application/octet-stream"/>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-    </item>
-    <item>
-      <title>Version 0.2.4</title>
-      <description>v0.2.4 - Canary-Qwen STT option + tokenizer validation fix
-New in this release:
-- Removed Qwen TTS preview path from Provider settings
-- Added one-click STT source option for NVIDIA Canary-Qwen-2.5B (experimental)
-- Fixed tokenizer false-fail for valid Parakeet vocab sizes
-- Kept one-click UX and setup messaging improvements</description>
-      <pubDate>Sat, 14 Feb 2026 17:24:25 -0700</pubDate>
-      <enclosure url="https://github.com/itisrmk/whisper-smart/releases/download/v0.2.4/Whisper-Smart-0.2.4.dmg" sparkle:shortVersionString="0.2.4" sparkle:version="202602141724" length="4473305" type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
   </channel>
