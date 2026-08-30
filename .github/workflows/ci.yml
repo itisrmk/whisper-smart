@@ -1,0 +1,70 @@
+# Both platforms, every PR — the same two builds the release runs, so a green
+# PR means both halves of a release can be cut from it.
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift Version
+        run: swift --version
+
+      - name: Verify Appcast
+        run: bash scripts/verify_appcast.sh appcast.xml
+
+      - name: Typecheck
+        run: bash scripts/typecheck.sh
+
+      - name: QA Smoke
+        run: bash scripts/run_qa_smoke.sh
+
+      - name: Visual Regression
+        run: bash scripts/run_visual_regression.sh
+
+      - name: Build Release
+        run: swift build -c release
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Arch, matching the release build: the GTK 4 and gtk4-layer-shell versions
+    # the binary links against are the ones the shipped artifact links against.
+    container: archlinux:base-devel
+    steps:
+      - name: Install build dependencies
+        # Before checkout: the container has no git, which actions/checkout
+        # needs in order to do a real clone.
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git rust pkgconf python shellcheck \
+            gtk4 gtk4-layer-shell alsa-lib libpulse
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust Version
+        run: rustc --version
+
+      - name: QA Smoke
+        working-directory: linux
+        run: bash scripts/run_qa_smoke.sh
+
+      - name: Build Release
+        working-directory: linux
+        run: cargo build --release --locked
+
+      - name: Package Tarball
+        working-directory: linux
+        run: SKIP_BUILD=1 bash packaging/make-tarball.sh

@@ -4,7 +4,7 @@ pkgver=0.4.2
 pkgrel=1
 pkgdesc="Hold-to-talk dictation for the Linux desktop"
 arch=('x86_64' 'aarch64')
-url="https://github.com/rahulmk/whisper-smart"
+url="https://github.com/itisrmk/whisper-smart"
 license=('MIT')
 # gtk4-layer-shell is what puts the recording overlay above other windows on
 # wlroots compositors; without it the overlay is skipped but dictation works.

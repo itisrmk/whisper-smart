@@ -1,6 +1,6 @@
 [Unit]
 Description=Whisper Smart dictation
-Documentation=https://github.com/rahulmk/whisper-smart
+Documentation=https://github.com/itisrmk/whisper-smart
 # The tray icon and the recording overlay both need a graphical session.
 After=graphical-session.target
 PartOf=graphical-session.target

@@ -1,10 +1,20 @@
-name: Release DMG
+# One tag, both platforms.
+#
+# A release is a single `vX.Y.Z` tag that carries the macOS DMG and the Linux
+# tarball, cut from the same commit. The two builds run in parallel and both
+# must pass before anything is published: the tag, the appcast commit and the
+# GitHub Release are all created by the final `publish` job, so a failed build
+# on either platform leaves no half-finished release behind.
+#
+#   params ──┬── macos (signed, notarized DMG + appcast entry) ──┬── publish
+#            └── linux (tested, versioned tarball) ──────────────┘
+name: Release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version number without v prefix (e.g. 0.2.18)"
+        description: "Version number without v prefix (e.g. 0.5.0)"
         required: true
         type: string
       channel:
@@ -21,7 +31,7 @@ on:
         default: false
         type: boolean
       notes:
-        description: "Release notes"
+        description: "Release summary (prepended to the generated changelog)"
         required: false
         type: string
   # Auto-release: every merged PR into main cuts a beta release with an
@@ -42,21 +52,32 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-dmg
+  group: release
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: macos-latest
-    outputs:
-      version: ${{ steps.params.outputs.version }}
-    timeout-minutes: 45
+  # Everything the platform builds need to agree on, resolved once so the two
+  # of them cannot drift onto different versions.
+  params:
+    runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
        !contains(github.event.pull_request.labels.*.name, 'skip-release'))
-
+    outputs:
+      version: ${{ steps.params.outputs.version }}
+      channel: ${{ steps.params.outputs.channel }}
+      summary: ${{ steps.params.outputs.summary }}
+      previous_tag: ${{ steps.params.outputs.previous_tag }}
+      ref: ${{ steps.params.outputs.ref }}
     steps:
+      - name: Enforce Release Checklist Confirmation
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.checklist_confirmed }}
+        run: |
+          echo "Checklist confirmation is required before tagging a release."
+          echo "See docs/RELEASE.md."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -78,12 +99,13 @@ jobs:
           BUMP_MAJOR: ${{ contains(github.event.pull_request.labels.*.name, 'release:major') }}
         run: |
           set -euo pipefail
+          git fetch --tags --force
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
             CHANNEL="$INPUT_CHANNEL"
-            NOTES="$INPUT_NOTES"
+            SUMMARY="$INPUT_NOTES"
+            REF="${GITHUB_REF}"
           else
-            git fetch --tags --force
             LATEST="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
             LATEST="${LATEST#v}"
             IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST:-0.0.0}"
@@ -96,7 +118,8 @@ jobs:
             fi
             VERSION="${MAJOR}.${MINOR}.${PATCH}"
             CHANNEL="beta"
-            NOTES="${PR_TITLE} (#${PR_NUMBER})"
+            SUMMARY="${PR_TITLE} (#${PR_NUMBER})"
+            REF="main"
             # Auto-bumped versions must never overwrite an existing release.
             # (Manual dispatch stays lenient: a pre-pushed tag is reused.)
             if git ls-remote --tags origin "v${VERSION}" | grep -q "v${VERSION}"; then
@@ -108,26 +131,34 @@ jobs:
             echo "Refusing to release with malformed version: '$VERSION'"
             exit 1
           fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+          PREVIOUS_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^v${VERSION}$" | head -n 1 || true)"
           {
-            echo "notes<<NOTES_EOF"
-            printf '%s\n' "$NOTES"
-            echo "NOTES_EOF"
+            echo "version=${VERSION}"
+            echo "channel=${CHANNEL}"
+            echo "previous_tag=${PREVIOUS_TAG}"
+            echo "ref=${REF}"
+            echo "summary<<SUMMARY_EOF"
+            printf '%s\n' "$SUMMARY"
+            echo "SUMMARY_EOF"
           } >> "$GITHUB_OUTPUT"
-          echo "Releasing v${VERSION} (${CHANNEL}) [trigger: ${EVENT_NAME}]"
+          echo "Releasing v${VERSION} (${CHANNEL}) from ${REF} [trigger: ${EVENT_NAME}]"
+
+  macos:
+    needs: params
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.params.outputs.ref }}
+          fetch-depth: 0
 
       - name: Release Gate
         env:
-          VERSION: ${{ steps.params.outputs.version }}
+          VERSION: ${{ needs.params.outputs.version }}
           ALLOW_ADHOC_SIGNING: 1
         run: bash scripts/release_gate.sh
-
-      - name: Enforce Release Checklist Confirmation
-        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.checklist_confirmed }}
-        run: |
-          echo "Checklist confirmation is required before tagging a release."
-          exit 1
 
       - name: Validate Signing Certificate Secrets
         env:
@@ -144,7 +175,7 @@ jobs:
           done
 
       - name: Validate Production Notarization Secrets
-        if: ${{ steps.params.outputs.channel == 'production' }}
+        if: ${{ needs.params.outputs.channel == 'production' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -168,8 +199,8 @@ jobs:
       - name: Build Signed DMG
         id: build
         env:
-          VERSION: ${{ steps.params.outputs.version }}
-          CHANNEL: ${{ steps.params.outputs.channel }}
+          VERSION: ${{ needs.params.outputs.version }}
+          CHANNEL: ${{ needs.params.outputs.channel }}
         run: |
           set -euo pipefail
           IDENTITIES="$(security find-identity -v -p codesigning | grep -v 'CSSMERR' || true)"
@@ -229,46 +260,15 @@ jobs:
           xcrun stapler validate "$DMG_PATH"
           spctl --assess --type open --context context:primary-signature -v "$DMG_PATH"
 
-      - name: Resolve Previous Tag
-        id: previous_tag
-        env:
-          VERSION: ${{ steps.params.outputs.version }}
-        run: |
-          set -euo pipefail
-          git fetch --tags --force
-          CURRENT_TAG="v${VERSION}"
-          PREVIOUS_TAG="$(git tag --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n 1 || true)"
-          echo "value=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Compose Release Notes
-        id: release_notes
-        env:
-          VERSION: ${{ steps.params.outputs.version }}
-          INPUT_NOTES: ${{ steps.params.outputs.notes }}
-          PREVIOUS_TAG: ${{ steps.previous_tag.outputs.value }}
-          REPOSITORY: ${{ github.repository }}
-          CHANNEL: ${{ steps.params.outputs.channel }}
-        run: |
-          set -euo pipefail
-          NOTES_FILE="$(mktemp)"
-          if [[ -n "${INPUT_NOTES}" ]]; then
-            printf "%s\n\n" "${INPUT_NOTES}" >> "$NOTES_FILE"
-          else
-            printf "Automated DMG release for v%s.\n\n" "${VERSION}" >> "$NOTES_FILE"
-          fi
-          printf "Release channel: **%s**\n\n" "${CHANNEL}" >> "$NOTES_FILE"
-          printf "Release artifact: \`.build/release/Whisper-Smart-mac.dmg\`\n\n" >> "$NOTES_FILE"
-          if [[ -n "${PREVIOUS_TAG}" ]]; then
-            printf "Rollback reference: https://github.com/%s/releases/tag/%s\n" "${REPOSITORY}" "${PREVIOUS_TAG}" >> "$NOTES_FILE"
-          else
-            printf "Rollback reference: none (first tagged release).\n" >> "$NOTES_FILE"
-          fi
-          echo "path=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
-
+      # Sparkle shows this in the updater window, so it gets the summary and
+      # the changelog without the download table — it is already downloading
+      # the DMG those links point at.
       - name: Update Appcast
         env:
-          VERSION: ${{ steps.params.outputs.version }}
-          NOTES_FILE: ${{ steps.release_notes.outputs.path }}
+          VERSION: ${{ needs.params.outputs.version }}
+          CHANNEL: ${{ needs.params.outputs.channel }}
+          SUMMARY: ${{ needs.params.outputs.summary }}
+          PREVIOUS_TAG: ${{ needs.params.outputs.previous_tag }}
           REPOSITORY: ${{ github.repository }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
@@ -290,6 +290,15 @@ jobs:
             echo "App short version ($SHORT_VERSION) does not match requested release version ($VERSION)"
             exit 1
           fi
+
+          NOTES_FILE="$(mktemp)"
+          bash scripts/compose_release_notes.sh \
+            --version "$VERSION" \
+            --channel "$CHANNEL" \
+            --previous-tag "$PREVIOUS_TAG" \
+            --notes "$SUMMARY" \
+            --repository "$REPOSITORY" \
+            --format appcast > "$NOTES_FILE"
 
           DMG_LENGTH="$(stat -f%z "$DMG_PATH")"
           DMG_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION}/Whisper-Smart-mac.dmg"
@@ -322,60 +331,25 @@ jobs:
       - name: Verify Appcast
         run: bash scripts/verify_appcast.sh appcast.xml
 
-      - name: Commit + Push Appcast
-        env:
-          VERSION: ${{ steps.params.outputs.version }}
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- appcast.xml; then
-            echo "No appcast change to commit."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add appcast.xml
-          git commit -m "chore(release): update appcast for v${VERSION}"
-          # Keep legacy Sparkle clients (old SUFeedURL -> master) receiving updates.
-          git push origin HEAD:main HEAD:master
-
-      - name: Create and Push Tag
-        env:
-          VERSION: ${{ steps.params.outputs.version }}
-        run: |
-          set -euo pipefail
-          TAG="v${VERSION}"
-          if git rev-parse "${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists locally."
-          else
-            git tag "${TAG}"
-          fi
-          if git ls-remote --tags origin "${TAG}" | grep -q "${TAG}"; then
-            echo "Tag ${TAG} already exists on origin."
-          else
-            git push origin "${TAG}"
-          fi
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      # The DMG and the appcast travel to `publish`, which owns every push.
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ steps.params.outputs.version }}
-          name: v${{ steps.params.outputs.version }}
-          body_path: ${{ steps.release_notes.outputs.path }}
-          files: |
+          name: macos-release
+          path: |
             .build/release/Whisper-Smart-mac.dmg
             appcast.xml
+          if-no-files-found: error
+          retention-days: 7
 
-  # Linux artifacts for the same tag. Runs after `release` so the tag and the
-  # GitHub Release already exist; this job only adds assets to them.
-  #
-  # It builds inside an Arch container rather than on the runner's Ubuntu.
-  # The binary links against GTK 4 and gtk4-layer-shell dynamically, so it is
-  # tied to the versions it was built against, and Arch is both the primary
-  # target and the distro the AUR package serves. Everyone else has the source
-  # tarball and `packaging/install.sh`.
-  release-linux:
-    needs: release
+  linux:
+    needs: params
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Built on Arch rather than the runner's Ubuntu: the binary links GTK 4 and
+    # gtk4-layer-shell dynamically, so it is tied to the versions it was built
+    # against, and Arch is both the primary target and the distro the AUR
+    # package serves. Everyone else builds from source via packaging/install.sh.
     container: archlinux:base-devel
     steps:
       - name: Install build dependencies
@@ -383,28 +357,161 @@ jobs:
         # actions/checkout needs in order to do a real clone.
         run: |
           pacman -Syu --noconfirm --needed \
-            git rust pkgconf \
+            git rust pkgconf python \
             gtk4 gtk4-layer-shell alsa-lib libpulse
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: v${{ needs.release.outputs.version }}
+          ref: ${{ needs.params.outputs.ref }}
+          fetch-depth: 0
 
-      - name: Test
+      - name: Stamp Version
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+        run: bash linux/packaging/set-version.sh "$VERSION"
+
+      - name: QA Smoke
         working-directory: linux
-        run: cargo test --release --locked
+        run: bash scripts/run_qa_smoke.sh
 
-      - name: Build tarball
+      - name: Build Tarball
         working-directory: linux
         env:
-          VERSION: ${{ needs.release.outputs.version }}
+          VERSION: ${{ needs.params.outputs.version }}
         run: bash packaging/make-tarball.sh
 
-      - name: Attach to the release
-        uses: softprops/action-gh-release@v2
+      - name: Verify Version Stamp
+        working-directory: linux
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+        run: |
+          set -euo pipefail
+          REPORTED="$(./target/release/whisper-smart --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+          if [[ "$REPORTED" != "$VERSION" ]]; then
+            echo "Built binary reports $REPORTED but the release is $VERSION"
+            exit 1
+          fi
+          echo "Linux binary reports $REPORTED"
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ needs.release.outputs.version }}
-          files: |
+          name: linux-release
+          path: |
             linux/dist/*.tar.gz
             linux/dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # Nothing is pushed until both platforms have built. This job owns the
+  # appcast commit, the version bump, the tag and the release itself.
+  publish:
+    needs: [params, macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.params.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage Release Commit
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+        run: |
+          set -euo pipefail
+          cp artifacts/macos-release/appcast.xml appcast.xml
+          # Same stamp the Linux build used, so the committed manifest matches
+          # the binary that shipped.
+          bash linux/packaging/set-version.sh "$VERSION"
+
+      - name: Compose Release Notes
+        id: notes
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+          CHANNEL: ${{ needs.params.outputs.channel }}
+          SUMMARY: ${{ needs.params.outputs.summary }}
+          PREVIOUS_TAG: ${{ needs.params.outputs.previous_tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          bash scripts/compose_release_notes.sh \
+            --version "$VERSION" \
+            --channel "$CHANNEL" \
+            --previous-tag "$PREVIOUS_TAG" \
+            --notes "$SUMMARY" \
+            --repository "$REPOSITORY" > "$NOTES_FILE"
+          echo "path=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+          cat "$NOTES_FILE"
+
+      - name: Commit Release Bookkeeping
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add appcast.xml linux/Cargo.toml linux/Cargo.lock linux/packaging/PKGBUILD linux/packaging/aur/whisper-smart/PKGBUILD
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "chore(release): appcast and version for v${VERSION}"
+            git pull --rebase origin main
+            # Keep legacy Sparkle clients (old SUFeedURL -> master) updating.
+            git push origin HEAD:main HEAD:master
+          fi
+
+      - name: Create and Push Tag
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          if git ls-remote --tags origin "${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists on origin."
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.params.outputs.version }}
+          name: v${{ needs.params.outputs.version }}
+          body_path: ${{ steps.notes.outputs.path }}
+          files: |
+            artifacts/macos-release/Whisper-Smart-mac.dmg
+            artifacts/macos-release/appcast.xml
+            artifacts/linux-release/*.tar.gz
+            artifacts/linux-release/*.tar.gz.sha256
+
+      # The AUR stable package builds from the tag tarball, so its checksum can
+      # only be computed once the tag exists. Doing it here keeps the packaging
+      # in the repo release-ready instead of leaving a manual `updpkgsums`.
+      - name: Sync AUR Checksum
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PKGBUILD="linux/packaging/aur/whisper-smart/PKGBUILD"
+          URL="https://github.com/${REPOSITORY}/archive/refs/tags/v${VERSION}.tar.gz"
+          curl -fsSL --retry 3 --retry-delay 5 -o "${RUNNER_TEMP}/src.tar.gz" "$URL"
+          SUM="$(sha256sum "${RUNNER_TEMP}/src.tar.gz" | cut -d' ' -f1)"
+          sed -i -E "s/^sha256sums=\(.*\)$/sha256sums=('${SUM}')/" "$PKGBUILD"
+          if git diff --quiet -- "$PKGBUILD"; then
+            echo "AUR checksum already current."
+            exit 0
+          fi
+          git add "$PKGBUILD"
+          git commit -m "chore(release): sync AUR checksum for v${VERSION}"
+          git pull --rebase origin main
+          git push origin HEAD:main
