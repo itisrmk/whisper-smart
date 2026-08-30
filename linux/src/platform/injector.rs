@@ -26,6 +26,10 @@ use crate::platform::compositor;
 
 /// Longer paste delay for terminals, whose PTY handles paste asynchronously.
 const TERMINAL_PASTE_DELAY: Duration = Duration::from_millis(80);
+/// Upper bound on a transcript handed to `wtype` as a single argument. The
+/// kernel caps one argv entry at 128 KiB (`MAX_ARG_STRLEN`); anything near
+/// that is pasted instead.
+const MAX_TYPED_BYTES: usize = 16 * 1024;
 /// Terminals may read the clipboard well after the paste key is delivered.
 const TERMINAL_RESTORE_DELAY: Duration = Duration::from_millis(1_500);
 
@@ -73,13 +77,18 @@ fn perform_injection(text: &str, settings: &InjectionSettings) {
 
     match settings.mode {
         InjectionMode::TypeOnly => {
+            // The user ruled the clipboard out, so a newline here is typed as
+            // the Return key it asks for, submit risk and all.
             if !type_text(text) {
                 tracing::error!("typing failed and type-only mode forbids the paste fallback");
             }
         }
         InjectionMode::PasteOnly => paste_text(text, settings, is_terminal),
         InjectionMode::Smart => {
-            if type_text(text) {
+            if !is_safe_to_type(text) {
+                tracing::info!("transcript is not safe to type; pasting instead");
+                paste_text(text, settings, is_terminal);
+            } else if type_text(text) {
                 tracing::info!("text injected by typing");
             } else {
                 tracing::info!("typing unavailable; falling back to paste");
@@ -89,41 +98,57 @@ fn perform_injection(text: &str, settings: &InjectionSettings) {
     }
 }
 
+/// Whether `text` can be typed keystroke by keystroke without surprises.
+///
+/// There is no keystroke that means "newline" — `wtype` types one as the
+/// Return key, which in a chat box or a search field submits the form instead
+/// of inserting a line break. The macOS build never has this problem: both of
+/// its strategies (AX `AXValue` and Command-V) insert a newline as text.
+/// Pasting is the closest Linux equivalent, so multi-line transcripts take
+/// that route.
+fn is_safe_to_type(text: &str) -> bool {
+    !text.contains(['\n', '\r']) && text.len() <= MAX_TYPED_BYTES
+}
+
 // ---------------------------------------------------------------------------
 // Strategy 1: type the text
 // ---------------------------------------------------------------------------
 
 /// Types `text` via `wtype`. Returns false when wtype is missing or fails, so
 /// the caller can fall back to pasting.
+///
+/// The transcript goes in argv, never on stdin, and that matters. `wtype -`
+/// types stdin in 100-character batches, and because it assigns keycodes to
+/// characters as it first meets them, it uploads a *new, larger* keymap
+/// between batches and starts sending key events immediately. Clients apply a
+/// keymap asynchronously, so every character first seen after the 100th
+/// arrives while the client still holds the previous keymap: it carries no
+/// keysym and is silently dropped, and the one that lands on wire keycode 28 —
+/// `KEY_ENTER` — is read as a bare Return by clients that map hardware codes
+/// directly (Chromium and Electron do), submitting the field halfway through
+/// the transcript. Passing the text as an argument takes wtype's other path,
+/// which resolves every keysym up front and uploads the keymap exactly once,
+/// before the first keystroke.
 fn type_text(text: &str) -> bool {
-    // `-` makes wtype read from stdin, which sidesteps argv length limits and
-    // any shell quoting concerns for transcripts containing quotes or dashes.
-    let child = Command::new("wtype")
-        .arg("-")
-        .stdin(Stdio::piped())
+    if text.len() > MAX_TYPED_BYTES {
+        tracing::warn!(
+            "transcript is {} bytes, too long to pass to wtype as an argument",
+            text.len()
+        );
+        return false;
+    }
+
+    // `--` ends option parsing, so a transcript starting with a dash is typed
+    // rather than read as a flag. Command::arg hands the text to execve
+    // verbatim — no shell — so quotes and dashes inside it need no escaping.
+    let output = Command::new("wtype")
+        .arg("--")
+        .arg(text)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .spawn();
+        .output();
 
-    let mut child = match child {
-        Ok(child) => child,
-        Err(err) => {
-            tracing::warn!("wtype unavailable ({err}); install the `wtype` package");
-            return false;
-        }
-    };
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        if let Err(err) = stdin.write_all(text.as_bytes()) {
-            tracing::warn!("could not write to wtype: {err}");
-            let _ = child.kill();
-            return false;
-        }
-    }
-    // Dropping stdin signals EOF; without this wtype waits forever.
-    drop(child.stdin.take());
-
-    match child.wait_with_output() {
+    match output {
         Ok(output) if output.status.success() => true,
         Ok(output) => {
             tracing::warn!(
@@ -134,7 +159,7 @@ fn type_text(text: &str) -> bool {
             false
         }
         Err(err) => {
-            tracing::warn!("wtype failed: {err}");
+            tracing::warn!("wtype unavailable ({err}); install the `wtype` package");
             false
         }
     }
@@ -417,6 +442,40 @@ mod tests {
     fn which_finds_a_binary_that_exists_and_misses_one_that_does_not() {
         assert!(which("sh"), "sh should be on PATH");
         assert!(!which("definitely-not-a-real-binary-xyzzy"));
+    }
+
+    #[test]
+    fn a_newline_is_never_typed_because_wtype_sends_it_as_return() {
+        // Typing a newline presses Return, which submits a chat box or a
+        // search field instead of inserting a line break. Those transcripts
+        // must go through the clipboard.
+        assert!(!is_safe_to_type("first line\nsecond line"));
+        assert!(!is_safe_to_type("paragraph\n\nbreak"));
+        assert!(!is_safe_to_type("carriage\rreturn"));
+        assert!(is_safe_to_type(
+            "one single line, dashes - and 'quotes' included"
+        ));
+    }
+
+    #[test]
+    fn a_transcript_too_long_for_argv_is_pasted_instead() {
+        let long = "a".repeat(MAX_TYPED_BYTES + 1);
+        assert!(!is_safe_to_type(&long));
+        assert!(is_safe_to_type(&"a".repeat(MAX_TYPED_BYTES)));
+    }
+
+    #[test]
+    fn a_transcript_longer_than_one_wtype_stdin_batch_is_still_typeable() {
+        // The bug this guards: `wtype -` typed stdin in 100-character batches,
+        // re-uploading its keymap between them, so characters first seen after
+        // the 100th were dropped and one of them arrived as Return. Length
+        // alone must not push a plain transcript onto the paste path — the
+        // argv call site is what makes it safe.
+        let long_line = "I want to optimize the amount of memory it takes to run \
+            the application. This optimization is that I want to do specifically \
+            on Linux because I think it's using Rust as the main runtime.";
+        assert!(long_line.len() > 100);
+        assert!(is_safe_to_type(long_line));
     }
 
     #[test]
