@@ -69,7 +69,7 @@ jobs:
       channel: ${{ steps.params.outputs.channel }}
       summary: ${{ steps.params.outputs.summary }}
       previous_tag: ${{ steps.params.outputs.previous_tag }}
-      ref: ${{ steps.params.outputs.ref }}
+      sha: ${{ steps.params.outputs.sha }}
     steps:
       - name: Enforce Release Checklist Confirmation
         if: ${{ github.event_name == 'workflow_dispatch' && !inputs.checklist_confirmed }}
@@ -132,16 +132,20 @@ jobs:
             exit 1
           fi
           PREVIOUS_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^v${VERSION}$" | head -n 1 || true)"
+          # Every job downstream pins to this exact commit rather than to a
+          # branch name. A merge landing on main mid-run would otherwise give
+          # the two platform builds — and the tag — different source.
+          SHA="$(git rev-parse HEAD)"
           {
             echo "version=${VERSION}"
             echo "channel=${CHANNEL}"
             echo "previous_tag=${PREVIOUS_TAG}"
-            echo "ref=${REF}"
+            echo "sha=${SHA}"
             echo "summary<<SUMMARY_EOF"
             printf '%s\n' "$SUMMARY"
             echo "SUMMARY_EOF"
           } >> "$GITHUB_OUTPUT"
-          echo "Releasing v${VERSION} (${CHANNEL}) from ${REF} [trigger: ${EVENT_NAME}]"
+          echo "Releasing v${VERSION} (${CHANNEL}) from ${REF} @ ${SHA} [trigger: ${EVENT_NAME}]"
 
   macos:
     needs: params
@@ -151,7 +155,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.params.outputs.ref }}
+          ref: ${{ needs.params.outputs.sha }}
           fetch-depth: 0
 
       - name: Release Gate
@@ -371,7 +375,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.params.outputs.ref }}
+          ref: ${{ needs.params.outputs.sha }}
           fetch-depth: 0
 
       - name: Stamp Version
@@ -421,7 +425,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.params.outputs.ref }}
+          ref: ${{ needs.params.outputs.sha }}
           fetch-depth: 0
 
       - name: Download Artifacts
@@ -471,11 +475,11 @@ jobs:
             echo "Nothing to commit."
           else
             git commit -m "chore(release): appcast and version for v${VERSION}"
-            git pull --rebase origin main
-            # Keep legacy Sparkle clients (old SUFeedURL -> master) updating.
-            git push origin HEAD:main HEAD:master
           fi
 
+      # The tag goes on the commit that was actually built, before main is
+      # touched. If main moved during the build, the release still describes
+      # its own artifacts rather than someone else's merge.
       - name: Create and Push Tag
         env:
           VERSION: ${{ needs.params.outputs.version }}
@@ -488,6 +492,28 @@ jobs:
             git tag "${TAG}"
             git push origin "${TAG}"
           fi
+
+      - name: Push Release Bookkeeping to main
+        env:
+          BUILT_SHA: ${{ needs.params.outputs.sha }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(git rev-parse HEAD)"
+          if [[ "$COMMIT" == "$BUILT_SHA" ]]; then
+            echo "No bookkeeping commit was needed; leaving main alone."
+            exit 0
+          fi
+          # Fast-forward is the normal case: main is still where the build
+          # started. Keep legacy Sparkle clients (old SUFeedURL -> master)
+          # updating by pushing both branches.
+          if git push origin "HEAD:main" "HEAD:master"; then
+            exit 0
+          fi
+          echo "main moved during the build; replaying the release commit on top of it."
+          git fetch origin main
+          git checkout -B release-bookkeeping origin/main
+          git cherry-pick "$COMMIT"
+          git push origin HEAD:main HEAD:master
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -521,5 +547,6 @@ jobs:
           fi
           git add "$PKGBUILD"
           git commit -m "chore(release): sync AUR checksum for v${VERSION}"
-          git pull --rebase origin main
+          git fetch origin main
+          git rebase origin/main
           git push origin HEAD:main

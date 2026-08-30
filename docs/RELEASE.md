@@ -9,11 +9,20 @@ params ──┬── macos   release gate → signed + notarized DMG → appca
          └── linux   QA smoke → versioned tarball → version check ──────────┘
 ```
 
-`params` resolves the version, channel and changelog range once, so the two
-builds cannot drift apart. They run in parallel and **both must pass** before
-`publish` does anything: the appcast commit, the version bump, the tag and the
-GitHub Release are all created in that last job. A failed build on either
-platform leaves no tag, no release, and no half-updated appcast behind.
+`params` resolves the version, channel, changelog range **and commit SHA**
+once. Every later job checks out that SHA rather than a branch name, so a merge
+landing on `main` mid-run cannot give the two platform builds different source,
+or tag artifacts as containing work that was not in them.
+
+They run in parallel and **both must pass** before `publish` does anything: the
+appcast commit, the version bump, the tag and the GitHub Release are all
+created in that last job. A failed build on either platform leaves no tag, no
+release, and no half-updated appcast behind.
+
+`publish` tags the commit it built, pushes the tag, and only then updates
+`main`. If `main` moved during the build, the release bookkeeping is replayed
+on top of it with a cherry-pick — the tag keeps describing its own artifacts
+either way.
 
 ## Cutting a release
 
