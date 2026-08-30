@@ -8,7 +8,7 @@
 
 pkgname=whisper-smart
 _pkgname=whisper-smart
-pkgver=0.5.0
+pkgver=0.5.1
 pkgrel=1
 pkgdesc="Hold-to-talk dictation for the Linux desktop (GTK4)"
 arch=('x86_64' 'aarch64')
