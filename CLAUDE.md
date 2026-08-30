@@ -25,15 +25,23 @@ Smoke tests use London School mocking (MockHotkeyMonitor, MockAudioCapture, Mock
 
 ## Release
 
+One tag ships both platforms: `vX.Y.Z` carries the macOS DMG and the Linux tarball, built from the same commit. `.github/workflows/release.yml` runs `params` → (`macos` ‖ `linux`) → `publish`; **both platform builds must pass** before the appcast commit, the version bump, the tag, or the release exist. Full detail in `docs/RELEASE.md`.
+
+It runs two ways:
+- **Automatic**: every merged PR into `main` cuts a beta release with an auto-bumped patch version. PR labels `release:minor` / `release:major` bump differently; the `skip-release` label opts out; docs/site/CI-only PRs never trigger.
+- **Manual**: `gh workflow run release.yml -f version=X.Y.Z -f channel=beta -f checklist_confirmed=true -f notes="..."` for explicit versions or production releases.
+
+The version is resolved once and propagated: macOS via the `VERSION` env, Linux via `linux/packaging/set-version.sh` (Cargo manifest, lockfile, both PKGBUILDs). Never bump those by hand. Release notes for both the GitHub Release and the Sparkle appcast come from `scripts/compose_release_notes.sh`.
+
+Local artifacts (testing only — ad-hoc signed, never published):
+
 ```bash
-VERSION=X.Y.Z ALLOW_ADHOC_SIGNING=1 bash scripts/package_dmg.sh   # Build app bundle + DMG
+VERSION=X.Y.Z ALLOW_ADHOC_SIGNING=1 bash scripts/package_dmg.sh          # macOS DMG
+cd linux && VERSION=X.Y.Z bash packaging/make-tarball.sh                  # Linux tarball
+bash scripts/compose_release_notes.sh --version X.Y.Z                     # Preview notes
 ```
 
-Full release flow: build DMG → update `appcast.xml` (add new `<item>` at top) → commit → `git tag vX.Y.Z` → push tag + main → `gh release create` with DMG + appcast assets.
-
-The CI workflow `.github/workflows/release-dmg.yml` handles all of this with proper code signing. It runs two ways:
-- **Automatic**: every merged PR into `main` cuts a beta release with an auto-bumped patch version. PR labels `release:minor` / `release:major` bump differently; the `skip-release` label opts out; docs/CI-only PRs (`.github/**`, `docs/**`, `*.md`, `appcast.xml`) never trigger.
-- **Manual**: `gh workflow run release-dmg.yml -f version=X.Y.Z -f channel=beta -f checklist_confirmed=true` for explicit versions or production releases.
+`.github/workflows/ci.yml` runs the same two builds (macOS + Linux) on every PR.
 
 ## Architecture
 
