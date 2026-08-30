@@ -194,6 +194,39 @@ window.vf-settings {
     color: @vf_text;
 }
 
+/* Client-side decorations, kept as quiet as the rest of the chrome. */
+.vf-titlebar {
+    background-color: @vf_bg;
+    background-image: none;
+    border-bottom: 1px solid @vf_border;
+    box-shadow: none;
+    min-height: 34px;
+    padding: 0 6px;
+}
+
+.vf-titlebar-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: @vf_muted;
+}
+
+.vf-window-close {
+    background-color: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    color: @vf_muted;
+}
+
+.vf-window-close:hover {
+    background-color: @vf_accent_soft;
+    color: @vf_accent;
+}
+
 /* Page padding tightens as the window narrows. */
 .vf-page { padding: 28px 32px 32px 32px; }
 .vf-medium .vf-page { padding: 24px 24px 28px 24px; }
@@ -202,9 +235,11 @@ window.vf-settings {
 /* Cards give back their generous inner margins too. */
 .vf-narrow .vf-card { padding-bottom: 14px; }
 
-/* Zero corner radius everywhere: VFRadius is 0 across the board. */
+/* Zero corner radius everywhere: VFRadius is 0 across the board. The
+   decoration node is the CSD frame, which GTK rounds by default. */
 .vf-card, .vf-button, .vf-pill, .vf-field, .vf-badge, .vf-segment,
-button, entry, dropdown, dropdown > button, popover contents {
+button, entry, dropdown, dropdown > button, popover contents,
+window.vf-settings, window.vf-settings decoration, .vf-titlebar {
     border-radius: 0;
 }
 
@@ -725,6 +760,15 @@ mod tests {
         for width in [400, 700, 900] {
             assert!(ALL_BREAKPOINT_CLASSES.contains(&breakpoint_for(width).css_class()));
         }
+    }
+
+    #[test]
+    fn the_window_has_a_styled_close_button() {
+        // Tiling compositors draw no chrome of their own, so the settings
+        // window ships its own title bar; if these classes ever lose their
+        // styling the X is still there, but invisible against the header.
+        assert!(STYLESHEET.contains(".vf-titlebar"));
+        assert!(STYLESHEET.contains(".vf-window-close"));
     }
 
     #[test]

@@ -149,6 +149,7 @@ pub fn present(
         .default_height(tokens::size::SETTINGS_HEIGHT)
         .build();
     window.add_css_class("vf-settings");
+    window.set_titlebar(Some(&title_bar()));
 
     let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     root.add_css_class("vf-root");
@@ -181,6 +182,42 @@ pub fn present(
 
     window.present();
     window
+}
+
+/// The window's title bar, and with it the only clickable way to close the
+/// window.
+///
+/// GTK4 always draws its own decorations on Wayland, and a window with no
+/// title bar gets none: under a tiling compositor there is no X anywhere, so
+/// closing the window means knowing the compositor's keybinding. macOS has
+/// never had that problem — the traffic lights come with the window.
+///
+/// The button is ours rather than `show_title_buttons`, whose contents follow
+/// `gtk-decoration-layout`; desktops that blank that setting would leave the
+/// window with no X again. Closing only hides the settings — the app lives in
+/// the tray, and Quit is there.
+fn title_bar() -> gtk::HeaderBar {
+    let bar = gtk::HeaderBar::new();
+    bar.add_css_class("vf-titlebar");
+    bar.set_show_title_buttons(false);
+
+    let title = gtk::Label::new(Some("Whisper Smart"));
+    title.add_css_class("vf-titlebar-title");
+    bar.set_title_widget(Some(&title));
+
+    let close = gtk::Button::from_icon_name("window-close-symbolic");
+    close.add_css_class("vf-window-close");
+    close.set_tooltip_text(Some("Close (Whisper Smart keeps running in the tray)"));
+    close.update_property(&[gtk::accessible::Property::Label("Close window")]);
+    // Reaching the window through the widget tree rather than capturing it
+    // keeps the button from holding the window alive after it is closed.
+    close.connect_clicked(|button| {
+        if let Some(window) = button.root().and_downcast::<gtk::Window>() {
+            window.close();
+        }
+    });
+    bar.pack_end(&close);
+    bar
 }
 
 /// Keeps the layout within whatever width the compositor hands us.
