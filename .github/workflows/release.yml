@@ -332,13 +332,21 @@ jobs:
         run: bash scripts/verify_appcast.sh appcast.xml
 
       # The DMG and the appcast travel to `publish`, which owns every push.
+      # Staged into one directory first: upload-artifact roots an artifact at
+      # the common ancestor of its paths, so uploading the DMG straight from
+      # .build/release would bury it under that path on the way back down.
+      - name: Stage macOS Artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          cp ".build/release/Whisper-Smart-mac.dmg" release-artifacts/
+          cp appcast.xml release-artifacts/
+
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-release
-          path: |
-            .build/release/Whisper-Smart-mac.dmg
-            appcast.xml
+          path: release-artifacts/*
           if-no-files-found: error
           retention-days: 7
 
