@@ -1,6 +1,21 @@
 import AVFoundation
 import Foundation
 
+/// Limits shared by every provider that buffers a whole utterance in memory.
+enum STTCaptureLimits {
+    /// Maximum audio a single utterance may hold, as 16 kHz mono samples.
+    /// Ten minutes is far beyond any dictation, and the cap stops a stuck
+    /// hands-free session from growing until the machine swaps. Mirrors
+    /// `MAX_SESSION_SAMPLES` in the Linux port.
+    static let maxSessionSamples = 16_000 * 60 * 10
+
+    /// Sample high-water mark above which a session buffer is released back
+    /// to the allocator instead of being kept for reuse. Below it, keeping
+    /// the capacity avoids re-growing on every dictation; above it, holding
+    /// on would strand megabytes for the life of a menu-bar app.
+    static let bufferReuseCeiling = 16_000 * 30
+}
+
 /// A speech-to-text result delivered by an ``STTProvider``.
 struct STTResult {
     /// The transcribed text for this segment.

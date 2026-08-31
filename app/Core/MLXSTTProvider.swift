@@ -28,11 +28,30 @@ final class MLXSTTProvider: STTProvider {
     /// Budget for a single warm-daemon transcription request.
     private let requestTimeout: TimeInterval = 40
 
+    /// How long a fully idle daemon keeps the model resident before it is
+    /// unloaded. The weights cost gigabytes, which is far too much to hold for
+    /// someone who has stopped dictating. Five minutes is long enough that an
+    /// on-and-off dictation session never reloads, and it matches
+    /// `IDLE_UNLOAD_AFTER` in the Linux port.
+    ///
+    /// The reload is close to free here: `beginSession()` re-warms the daemon
+    /// on `inferenceQueue` while the user is still speaking, so unloading
+    /// costs latency only for an utterance shorter than the model load.
+    private let idleUnloadDelay: TimeInterval = 300
+
     private var sessionActive = false
     private var inferenceInFlight = false
-    private var capturedSamples: [Float] = []
+    /// Captured audio, held as int16 rather than float32: the daemon is fed
+    /// int16 PCM anyway, so converting at the tap halves what a recording
+    /// costs while it is resident.
+    private var capturedSamples: [Int16] = []
+    /// Set once the session buffer has hit ``STTCaptureLimits/maxSessionSamples``,
+    /// so the cap is logged once rather than on every buffer.
+    private var captureCapped = false
     /// Samples already streamed to the daemon this session (guarded by `samplesLock`).
     private var streamedSampleCount = 0
+    /// Pending idle-unload, cancelled whenever a new session starts.
+    private var idleUnloadWork: DispatchWorkItem?
     /// Bumped by `cancelSession()`; results from an older generation are dropped.
     private var generation = 0
     /// The resident runner daemon, so sessions reuse the loaded model.
@@ -46,13 +65,17 @@ final class MLXSTTProvider: STTProvider {
         self.model = model
         self.displayName = "\(model.displayName) (MLX)"
         logger.info("MLXSTTProvider initialized: \(model.id, privacy: .public)")
-        prewarmDaemonIfPossible()
+        // Deliberately no prewarm here: loading weights at init costs
+        // gigabytes from app launch even for a user who never dictates.
+        // `beginSession()` warms the daemon on first use instead.
     }
 
     deinit {
         stateLock.lock()
         let daemon = daemon
         self.daemon = nil
+        idleUnloadWork?.cancel()
+        idleUnloadWork = nil
         stateLock.unlock()
         daemon?.terminate()
     }
@@ -70,8 +93,9 @@ final class MLXSTTProvider: STTProvider {
         guard frameCount > 0 else { return }
 
         let chunk = UnsafeBufferPointer(start: channelData[0], count: frameCount)
+        let converted = AudioWAVEncoding.int16Samples(from: chunk)
         samplesLock.lock()
-        capturedSamples.append(contentsOf: chunk)
+        appendCappedLocked(converted)
         samplesLock.unlock()
 
         // Forward new audio to an open streaming session. The buffer above
@@ -98,7 +122,25 @@ final class MLXSTTProvider: STTProvider {
         samplesLock.unlock()
 
         guard !slice.isEmpty else { return }
-        daemon.sendStreamAudio(pcmBase64: AudioWAVEncoding.int16PCMData(samples: slice).base64EncodedString())
+        daemon.sendStreamAudio(pcmBase64: AudioWAVEncoding.base64PCM(slice))
+    }
+
+    /// Appends to the session buffer, stopping at the capture cap. Caller
+    /// holds `samplesLock`.
+    private func appendCappedLocked(_ samples: [Int16]) {
+        let room = STTCaptureLimits.maxSessionSamples - capturedSamples.count
+        guard room > 0 else {
+            if !captureCapped {
+                captureCapped = true
+                logger.warning("MLX capture hit the session cap; dropping further audio")
+            }
+            return
+        }
+        if samples.count <= room {
+            capturedSamples.append(contentsOf: samples)
+        } else {
+            capturedSamples.append(contentsOf: samples[..<room])
+        }
     }
 
     func beginSession() throws {
@@ -124,9 +166,10 @@ final class MLXSTTProvider: STTProvider {
             )
         }
 
+        cancelIdleUnload()
+
         samplesLock.lock()
-        capturedSamples.removeAll(keepingCapacity: true)
-        streamedSampleCount = 0
+        resetCaptureBufferLocked()
         samplesLock.unlock()
 
         updateSessionActive(true)
@@ -195,6 +238,7 @@ final class MLXSTTProvider: STTProvider {
                     return
                 }
                 self.updateInferenceInFlight(false)
+                self.scheduleIdleUnload()
                 switch result {
                 case .success(let text):
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -232,17 +276,17 @@ final class MLXSTTProvider: STTProvider {
         }
 
         samplesLock.lock()
-        capturedSamples.removeAll(keepingCapacity: true)
-        streamedSampleCount = 0
+        resetCaptureBufferLocked()
         samplesLock.unlock()
 
         if let daemonToKill {
             logger.info("Cancelling MLX session — terminating in-flight runner daemon")
             daemonToKill.terminate()
-            prewarmDaemonIfPossible()
         } else {
             logger.info("Cancelling MLX session (no inference in flight)")
         }
+
+        scheduleIdleUnload()
     }
 
     // MARK: - Inference
@@ -251,7 +295,7 @@ final class MLXSTTProvider: STTProvider {
     /// session when one is open (most audio already processed), otherwise
     /// sends the whole utterance as one batch request. Streaming failures
     /// fall back to batch — the full sample buffer is retained for that.
-    private func finishTranscription(samples: [Float], alreadyStreamed: Int, model: MLXModel, generation gen: Int) throws -> String {
+    private func finishTranscription(samples: [Int16], alreadyStreamed: Int, model: MLXModel, generation gen: Int) throws -> String {
         guard gen == currentGeneration else {
             throw STTError.providerError(message: "Transcription was cancelled.")
         }
@@ -261,8 +305,7 @@ final class MLXSTTProvider: STTProvider {
                 // Push any tail audio the flush tasks hadn't sent when the
                 // buffer was snapshotted (later flush tasks no-op).
                 if alreadyStreamed < samples.count {
-                    let tail = Array(samples[alreadyStreamed...])
-                    streaming.sendStreamAudio(pcmBase64: AudioWAVEncoding.int16PCMData(samples: tail).base64EncodedString())
+                    streaming.sendStreamAudio(pcmBase64: AudioWAVEncoding.base64PCM(samples[alreadyStreamed...]))
                 }
                 return try streaming.endStream(timeout: requestTimeout)
             } catch {
@@ -274,22 +317,23 @@ final class MLXSTTProvider: STTProvider {
         return try runBatchInference(samples: samples, generation: gen)
     }
 
-    private func runBatchInference(samples: [Float], generation gen: Int) throws -> String {
+    private func runBatchInference(samples: [Int16], generation gen: Int) throws -> String {
         let daemon = try ensureDaemonReady()
 
         guard gen == currentGeneration else {
             throw STTError.providerError(message: "Transcription was cancelled.")
         }
 
-        let pcm = AudioWAVEncoding.int16PCMData(samples: samples).base64EncodedString()
+        let pcm = AudioWAVEncoding.base64PCM(samples)
         do {
             return try daemon.transcribe(pcmBase64: pcm, timeout: requestTimeout)
         } catch {
             // Any request failure (timeout, crash, protocol error) discards
-            // the daemon so the next session starts from a clean process, and
-            // a background respawn keeps the next dictation off the cold path.
+            // the daemon so the next session starts from a clean process. It
+            // is not respawned here: `beginSession()` warms one on next use,
+            // and reloading the weights now would hold gigabytes for a user
+            // who may be done dictating.
             discardDaemon(daemon)
-            prewarmDaemonIfPossible()
             throw error
         }
     }
@@ -329,21 +373,42 @@ final class MLXSTTProvider: STTProvider {
         return daemon
     }
 
-    /// Starts the daemon in the background when the model + runtime are
-    /// already installed, so the first transcription doesn't pay model load.
-    private func prewarmDaemonIfPossible() {
-        guard MLXModelInstaller.shared.isInstalled(model),
-              MLXRuntimeBootstrapManager.shared.hasInstalledRuntimeArtifacts() else {
-            return
-        }
-        inferenceQueue.async { [weak self] in
+    /// Tears the resident daemon down after a stretch of inactivity so the
+    /// model weights stop occupying memory between dictations. Any new
+    /// session cancels this first, and re-warms on the way in.
+    private func scheduleIdleUnload() {
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            do {
-                _ = try self.ensureDaemonReady()
-            } catch {
-                logger.warning("MLX daemon prewarm failed: \(error.localizedDescription, privacy: .public)")
-            }
+            // A session that started while this was queued keeps the daemon.
+            guard !self.currentSessionActive, !self.currentInferenceInFlight else { return }
+
+            self.stateLock.lock()
+            let idle = self.daemon
+            let streaming = self.streamingDaemon
+            self.daemon = nil
+            self.streamingDaemon = nil
+            self.idleUnloadWork = nil
+            self.stateLock.unlock()
+
+            guard idle != nil || streaming != nil else { return }
+            logger.info("Unloading idle MLX daemon to release memory")
+            streaming?.terminate()
+            if let idle, idle !== streaming { idle.terminate() }
         }
+
+        stateLock.lock()
+        idleUnloadWork?.cancel()
+        idleUnloadWork = work
+        stateLock.unlock()
+
+        inferenceQueue.asyncAfter(deadline: .now() + idleUnloadDelay, execute: work)
+    }
+
+    private func cancelIdleUnload() {
+        stateLock.lock()
+        idleUnloadWork?.cancel()
+        idleUnloadWork = nil
+        stateLock.unlock()
     }
 
     private var currentDaemon: MLXInferenceDaemon? {
@@ -389,13 +454,33 @@ final class MLXSTTProvider: STTProvider {
 
     /// Returns (samples, count already streamed to the daemon) and resets
     /// the buffer so late flush tasks no-op.
-    private func snapshotAndClearCapturedSamples() -> ([Float], Int) {
+    private func snapshotAndClearCapturedSamples() -> ([Int16], Int) {
         samplesLock.lock(); defer { samplesLock.unlock() }
         let snapshot = capturedSamples
         let streamed = min(streamedSampleCount, snapshot.count)
-        capturedSamples.removeAll(keepingCapacity: true)
+        // Assigning a fresh array hands sole ownership of the storage to
+        // `snapshot`. `removeAll(keepingCapacity:)` would instead see shared
+        // storage, copy the whole recording just to empty the copy, and then
+        // strand that capacity for the life of the app.
+        capturedSamples = []
+        captureCapped = false
         streamedSampleCount = 0
         return (snapshot, streamed)
+    }
+
+    /// Empties the session buffer, handing its storage back to the allocator
+    /// once a recording has grown past the reuse ceiling. Keeping capacity for
+    /// short dictations avoids re-growing every time; keeping it for long ones
+    /// would strand megabytes for the life of a menu-bar app.
+    /// Caller holds `samplesLock`.
+    private func resetCaptureBufferLocked() {
+        if capturedSamples.capacity > STTCaptureLimits.bufferReuseCeiling {
+            capturedSamples = []
+        } else {
+            capturedSamples.removeAll(keepingCapacity: true)
+        }
+        captureCapped = false
+        streamedSampleCount = 0
     }
 
     private var currentStreamingDaemon: MLXInferenceDaemon? {

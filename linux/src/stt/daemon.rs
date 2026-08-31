@@ -14,8 +14,6 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use base64::Engine as _;
-
 use crate::core::model_catalog::{LocalModel, ModelEngine};
 use crate::core::settings::{ComputeDevice, Settings};
 use crate::stt::runtime;
@@ -401,18 +399,41 @@ impl Drop for DaemonTranscriber {
 
 /// Encodes PCM as base64 int16 little-endian, matching `decode_pcm` in the
 /// sidecar. Base64 over stdio avoids a temp file per utterance.
+///
+/// Encoding streams through a small fixed buffer rather than materialising the
+/// whole little-endian copy first: at ten minutes of audio that intermediate
+/// `Vec` was a 19 MB spike held alongside both the samples and the base64
+/// output, for no benefit.
 fn encode_pcm(pcm: &[i16]) -> String {
-    let mut bytes = Vec::with_capacity(pcm.len() * 2);
-    for sample in pcm {
-        bytes.extend_from_slice(&sample.to_le_bytes());
+    use base64::write::EncoderStringWriter;
+    use std::io::Write;
+
+    if pcm.is_empty() {
+        return String::new();
     }
-    base64::engine::general_purpose::STANDARD.encode(bytes)
+
+    let mut writer = EncoderStringWriter::new(&base64::engine::general_purpose::STANDARD);
+    // 4 KiB of samples per pass: large enough to keep the write overhead
+    // negligible, small enough to stay on the stack.
+    let mut scratch = [0u8; 4096];
+    for block in pcm.chunks(scratch.len() / 2) {
+        for (slot, sample) in block.iter().enumerate() {
+            scratch[slot * 2..slot * 2 + 2].copy_from_slice(&sample.to_le_bytes());
+        }
+        writer
+            .write_all(&scratch[..block.len() * 2])
+            .expect("writing to an in-memory base64 encoder cannot fail");
+    }
+    writer.into_inner()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::model_catalog;
+    // Only the round-trip tests decode; the encoder streams and does not need
+    // the trait in scope.
+    use base64::Engine as _;
 
     #[test]
     fn engines_map_to_the_sidecars_argument_names() {

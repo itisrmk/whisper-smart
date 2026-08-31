@@ -11,7 +11,11 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
     private let samplesLock = NSLock()
     private var sessionActive = false
     private var requestInFlight = false
-    private var capturedSamples: [Float] = []
+    /// Captured audio as int16: the WAV body is int16 anyway, so converting
+    /// at the tap halves what a recording costs while it is resident.
+    private var capturedSamples: [Int16] = []
+    /// Set once the buffer has hit the capture cap, so it is logged once.
+    private var captureCapped = false
     /// Bumped by `cancelSession()`; responses from an older session are dropped.
     private var generation = 0
 
@@ -22,8 +26,9 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
         guard frameCount > 0 else { return }
 
         let chunk = UnsafeBufferPointer(start: channelData[0], count: frameCount)
+        let converted = AudioWAVEncoding.int16Samples(from: chunk)
         samplesLock.lock()
-        capturedSamples.append(contentsOf: chunk)
+        appendCappedLocked(converted)
         samplesLock.unlock()
     }
 
@@ -53,7 +58,7 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
         }
 
         samplesLock.lock()
-        capturedSamples.removeAll(keepingCapacity: true)
+        resetCaptureBufferLocked()
         samplesLock.unlock()
         updateSessionActive(true)
     }
@@ -66,7 +71,7 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
         stateLock.unlock()
 
         samplesLock.lock()
-        capturedSamples.removeAll(keepingCapacity: true)
+        resetCaptureBufferLocked()
         samplesLock.unlock()
     }
 
@@ -103,7 +108,7 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
         }
     }
 
-    private func transcribe(samples: [Float]) async -> Result<String, STTError> {
+    private func transcribe(samples: [Int16]) async -> Result<String, STTError> {
         do {
             let apiKey = DictationProviderPolicy.openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !apiKey.isEmpty else {
@@ -217,11 +222,44 @@ final class OpenAIWhisperAPISTTProvider: STTProvider {
         stateLock.lock(); requestInFlight = value; stateLock.unlock()
     }
 
-    private func snapshotAndClearSamples() -> [Float] {
+    private func snapshotAndClearSamples() -> [Int16] {
         samplesLock.lock(); defer { samplesLock.unlock() }
         let snapshot = capturedSamples
-        capturedSamples.removeAll(keepingCapacity: true)
+        // Assigning a fresh array hands sole ownership to `snapshot`;
+        // `removeAll(keepingCapacity:)` would copy the whole recording just
+        // to empty the copy, then strand that capacity indefinitely.
+        capturedSamples = []
+        captureCapped = false
         return snapshot
+    }
+
+    /// Appends to the session buffer, stopping at the capture cap. Caller
+    /// holds `samplesLock`.
+    private func appendCappedLocked(_ samples: [Int16]) {
+        let room = STTCaptureLimits.maxSessionSamples - capturedSamples.count
+        guard room > 0 else {
+            if !captureCapped {
+                captureCapped = true
+                NSLog("Cloud capture hit the session cap; dropping further audio")
+            }
+            return
+        }
+        if samples.count <= room {
+            capturedSamples.append(contentsOf: samples)
+        } else {
+            capturedSamples.append(contentsOf: samples[..<room])
+        }
+    }
+
+    /// Empties the session buffer, releasing storage once a recording has
+    /// grown past the reuse ceiling. Caller holds `samplesLock`.
+    private func resetCaptureBufferLocked() {
+        if capturedSamples.capacity > STTCaptureLimits.bufferReuseCeiling {
+            capturedSamples = []
+        } else {
+            capturedSamples.removeAll(keepingCapacity: true)
+        }
+        captureCapped = false
     }
 }
 
