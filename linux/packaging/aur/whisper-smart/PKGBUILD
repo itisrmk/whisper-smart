@@ -44,7 +44,7 @@ provides=("$_pkgname")
 conflicts=("$_pkgname-git")
 source=("$_pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 # Fill in with `updpkgsums` (pacman-contrib) once the tag exists.
-sha256sums=('9713a07c811f4c8ab788a507337cd5c595a41e15400b58e4fa3b9db4a4a8ad55')
+sha256sums=('430a86914c7560efc4c03d4e12490f9e0d1088fc9e19c80eaa0ca3ca831346b7')
 
 prepare() {
     cd "$srcdir/$_pkgname-$pkgver/linux"
