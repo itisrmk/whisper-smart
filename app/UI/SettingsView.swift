@@ -1251,7 +1251,7 @@ private struct DictionaryStyleSettingsTab: View {
 
     private func refreshVocabularySuggestions() {
         vocabularySuggestions = DictionarySuggestionEngine.suggestions(
-            fromHistoryTexts: TranscriptLogStore.shared.entries.map(\.text)
+            fromHistoryTexts: TranscriptLogStore.shared.historyTexts()
         )
     }
 
@@ -2718,6 +2718,15 @@ private struct TranscriptHistoryTab: View {
                     }
                 }
             }
+        }
+        // History and metrics are only resident while this tab is on screen.
+        .onAppear {
+            store.beginObserving()
+            metricsStore.beginObserving()
+        }
+        .onDisappear {
+            store.endObserving()
+            metricsStore.endObserving()
         }
     }
 

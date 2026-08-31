@@ -11,13 +11,13 @@
 //! deliberate trade: this provider optimises for *always working*, and the
 //! daemon-backed providers optimise for speed.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 use crate::core::model_catalog::{LocalModel, ModelSource};
 use crate::core::paths;
-use crate::core::settings::Settings;
+use crate::core::settings::{ComputeDevice, Settings};
 use crate::stt::wav::{self, ScratchWav};
 use crate::stt::Transcriber;
 
@@ -27,6 +27,7 @@ pub struct WhisperCppTranscriber {
     model_name: String,
     language: String,
     threads: usize,
+    device: ComputeDevice,
 }
 
 impl WhisperCppTranscriber {
@@ -55,6 +56,7 @@ impl WhisperCppTranscriber {
             model_path,
             model_name: model.display_name.to_string(),
             language: settings.provider.language.trim().to_string(),
+            device: settings.provider.compute_device,
             // Leave headroom so a long transcription does not starve the
             // desktop; whisper.cpp scales poorly past physical cores anyway.
             threads: std::thread::available_parallelism()
@@ -62,6 +64,47 @@ impl WhisperCppTranscriber {
                 .unwrap_or(4),
         })
     }
+}
+
+/// The `whisper-cli` arguments for one utterance. Split out from the spawn so
+/// the flag policy is testable without a multi-gigabyte model on disk.
+fn cli_args(
+    model_path: &Path,
+    wav: &Path,
+    threads: usize,
+    language: &str,
+    device: ComputeDevice,
+) -> Vec<String> {
+    let mut args = vec![
+        "-m".to_string(),
+        model_path.to_string_lossy().into_owned(),
+        "-f".to_string(),
+        wav.to_string_lossy().into_owned(),
+        // -nt strips timestamps, -np suppresses the banner and progress, so
+        // stdout carries the transcript and nothing else.
+        "-nt".to_string(),
+        "-np".to_string(),
+        "-t".to_string(),
+        threads.to_string(),
+    ];
+
+    // `compute_device` previously never reached whisper-cli, so a user who
+    // picked "CPU only" still silently got GPU inference. Honour it now. Note
+    // the memory direction is counter-intuitive on a CUDA build: keeping the
+    // GPU costs far less host RAM than forcing CPU, because the CPU backend
+    // repacks the weights.
+    if device == ComputeDevice::Cpu {
+        args.push("-ng".to_string());
+    }
+
+    args.push("-l".to_string());
+    args.push(if language.is_empty() {
+        "auto".to_string()
+    } else {
+        language.to_string()
+    });
+
+    args
 }
 
 /// Where a direct-download model's file lives.
@@ -93,22 +136,13 @@ impl Transcriber for WhisperCppTranscriber {
             .map_err(|e| format!("Could not write the audio for transcription: {e}"))?;
 
         let mut command = Command::new(&self.binary);
-        command
-            .arg("-m")
-            .arg(&self.model_path)
-            .arg("-f")
-            .arg(scratch.path())
-            // -nt strips timestamps, -np suppresses the banner and progress, so
-            // stdout carries the transcript and nothing else.
-            .args(["-nt", "-np"])
-            .arg("-t")
-            .arg(self.threads.to_string());
-
-        if self.language.is_empty() {
-            command.args(["-l", "auto"]);
-        } else {
-            command.args(["-l", &self.language]);
-        }
+        command.args(cli_args(
+            &self.model_path,
+            scratch.path(),
+            self.threads,
+            &self.language,
+            self.device,
+        ));
 
         tracing::debug!(
             "running whisper-cli on {:.1}s of audio",
@@ -209,6 +243,43 @@ fn clean_output(stdout: &str) -> String {
 mod tests {
     use super::*;
     use crate::core::model_catalog;
+
+    fn args_for(device: ComputeDevice, language: &str) -> Vec<String> {
+        cli_args(
+            Path::new("/models/ggml-base.bin"),
+            Path::new("/tmp/session.wav"),
+            4,
+            language,
+            device,
+        )
+    }
+
+    #[test]
+    fn cpu_only_passes_no_gpu_so_the_setting_is_not_silently_ignored() {
+        assert!(args_for(ComputeDevice::Cpu, "").contains(&"-ng".to_string()));
+    }
+
+    #[test]
+    fn auto_and_cuda_leave_the_gpu_enabled() {
+        // On a CUDA build the GPU path also uses dramatically less host RAM,
+        // so defaulting away from it would cost memory as well as speed.
+        assert!(!args_for(ComputeDevice::Auto, "").contains(&"-ng".to_string()));
+        assert!(!args_for(ComputeDevice::Cuda, "").contains(&"-ng".to_string()));
+    }
+
+    #[test]
+    fn an_empty_language_asks_whisper_to_autodetect() {
+        let args = args_for(ComputeDevice::Auto, "");
+        let idx = args.iter().position(|a| a == "-l").expect("-l is passed");
+        assert_eq!(args[idx + 1], "auto");
+    }
+
+    #[test]
+    fn an_explicit_language_is_forwarded_verbatim() {
+        let args = args_for(ComputeDevice::Auto, "de");
+        let idx = args.iter().position(|a| a == "-l").expect("-l is passed");
+        assert_eq!(args[idx + 1], "de");
+    }
 
     #[test]
     fn segment_lines_are_joined_into_one_transcript() {

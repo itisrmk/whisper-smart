@@ -42,6 +42,14 @@ final class DictationSessionMetricsStore: ObservableObject {
     @Published private(set) var sessions: [DictationSessionMetric] = []
 
     private let maxEntries = 1000
+    /// Metrics load on demand and are dropped again once nothing displays
+    /// them, so a session where History is never opened does not carry 1000
+    /// decoded records for its whole life.
+    private var isLoaded = false
+    private var viewers = 0
+    /// Visual-regression mode never loads, so releasing must never re-arm a
+    /// later load that would pull in the developer's real data.
+    private let snapshotMode: Bool
     private let fileURL: URL
     /// Persistence runs off the main thread so a save scheduled right after
     /// dictation cannot delay the pending paste timer.
@@ -58,10 +66,32 @@ final class DictationSessionMetricsStore: ObservableObject {
         self.fileURL = dir.appendingPathComponent("dictation-sessions.json")
 
         // Visual-regression snapshots must render deterministic empty state,
-        // never the developer's real session metrics.
-        if ProcessInfo.processInfo.environment["VISPERFLOW_UI_SNAPSHOT"] != "1" {
-            load()
-        }
+        // never the developer's real session metrics, so they never load at all.
+        self.snapshotMode = ProcessInfo.processInfo.environment["VISPERFLOW_UI_SNAPSHOT"] == "1"
+    }
+
+    /// Loads metrics if they are not already resident. Main thread only.
+    func ensureLoaded() {
+        guard !snapshotMode, !isLoaded else { return }
+        isLoaded = true
+        load()
+    }
+
+    /// Called by the History UI while it is on screen.
+    func beginObserving() {
+        viewers += 1
+        ensureLoaded()
+    }
+
+    func endObserving() {
+        viewers = max(0, viewers - 1)
+        releaseIfUnobserved()
+    }
+
+    private func releaseIfUnobserved() {
+        guard !snapshotMode, viewers == 0, isLoaded else { return }
+        sessions = []
+        isLoaded = false
     }
 
     func append(
@@ -84,14 +114,21 @@ final class DictationSessionMetricsStore: ObservableObject {
         )
 
         DispatchQueue.main.async {
+            // Must be resident before appending: saving a partially-loaded
+            // array would rewrite the file with only the new metric.
+            self.ensureLoaded()
             self.sessions.insert(metric, at: 0)
             if self.sessions.count > self.maxEntries {
                 self.sessions = Array(self.sessions.prefix(self.maxEntries))
             }
             self.save()
+            self.releaseIfUnobserved()
         }
     }
 
+    /// Summarises what is currently resident. Deliberately does *not* load:
+    /// this is read from a view body, and loading there would publish a change
+    /// mid-render. The History tab's `beginObserving()` loads it on appear.
     func summary(last count: Int = 100) -> DictationSessionMetricsSummary {
         let window = Array(sessions.prefix(max(1, count)))
         let success = window.filter { $0.status == "inserted" }.count

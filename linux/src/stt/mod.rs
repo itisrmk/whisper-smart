@@ -21,7 +21,7 @@ pub mod whisper_cpp;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
 
@@ -32,6 +32,21 @@ use crate::platform::audio::PcmSink;
 /// Ten minutes is far beyond any dictation, and the cap stops a stuck
 /// hands-free session from growing until the machine swaps.
 const MAX_SESSION_SAMPLES: usize = 16_000 * 60 * 10;
+
+/// Sample capacity above which a session buffer is handed back to the
+/// allocator instead of being kept for reuse. Below it, retaining the
+/// allocation avoids re-growing on every dictation; above it, holding on
+/// would strand megabytes for the life of a tray app.
+const BUFFER_REUSE_CEILING: usize = 16_000 * 30;
+
+/// How long the worker sits idle before unloading the model.
+///
+/// A resident model costs gigabytes of RAM — and, on a CUDA build, VRAM that
+/// no other process can use. Holding that for someone who has stopped
+/// dictating is the single most expensive thing this app can do, so an idle
+/// stretch releases it and the next utterance pays a reload. Five minutes is
+/// long enough that continuous dictation never reloads.
+const IDLE_UNLOAD_AFTER: Duration = Duration::from_secs(300);
 
 /// Anything that can turn one utterance's PCM into text.
 ///
@@ -208,6 +223,10 @@ fn run_worker(
     let mut buffer: Vec<i16> = Vec::new();
     let mut recording = false;
     let mut audio_open = true;
+    // Tracks whether the model is currently resident, so the idle sweep logs
+    // and calls `shutdown` once rather than on every timeout tick.
+    let mut model_loaded = true;
+    let mut last_activity = Instant::now();
 
     loop {
         // Control messages take strict priority over audio. A `select!` here
@@ -216,6 +235,8 @@ fn run_worker(
         // dropped for arriving outside a session — losing the leading word.
         match control.try_recv() {
             Ok(message) => {
+                last_activity = Instant::now();
+                model_loaded = true;
                 match handle_control(
                     message,
                     &mut transcriber,
@@ -242,6 +263,8 @@ fn run_worker(
             // (a final `End`, or `Shutdown`), so block on that channel alone.
             match control.recv() {
                 Ok(message) => {
+                    last_activity = Instant::now();
+                    model_loaded = true;
                     match handle_control(
                         message,
                         &mut transcriber,
@@ -310,6 +333,7 @@ fn run_worker(
                 }
 
                 if recording {
+                    last_activity = Instant::now();
                     if let Some(chunk) = held {
                         push_capped(&mut buffer, chunk);
                     }
@@ -317,6 +341,21 @@ fn run_worker(
             }
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => audio_open = false,
+        }
+
+        // Idle sweep: release the model once nothing has happened for a
+        // while. Only safe between utterances, never mid-recording, and the
+        // next `transcribe` transparently reloads.
+        if should_unload_idle(model_loaded, recording, last_activity.elapsed()) {
+            tracing::info!(
+                "unloading the speech model after {}s idle to release memory",
+                IDLE_UNLOAD_AFTER.as_secs()
+            );
+            transcriber.shutdown();
+            model_loaded = false;
+            // The buffer is empty between utterances; drop any capacity a
+            // long recording left behind rather than holding it while idle.
+            buffer = Vec::new();
         }
     }
 }
@@ -339,7 +378,7 @@ fn handle_control(
 ) -> ControlOutcome {
     match message {
         Control::Begin => {
-            buffer.clear();
+            reset_buffer(buffer);
             *recording = true;
         }
         Control::End => {
@@ -384,7 +423,7 @@ fn handle_control(
         }
         Control::Cancel => {
             *recording = false;
-            buffer.clear();
+            reset_buffer(buffer);
             while pcm.try_recv().is_ok() {}
         }
         Control::Shutdown => {
@@ -393,6 +432,26 @@ fn handle_control(
         }
     }
     ControlOutcome::Continue
+}
+
+/// Whether the idle sweep should unload the model now.
+///
+/// Split out from the worker loop so the policy can be tested without waiting
+/// out a real five-minute idle stretch.
+fn should_unload_idle(model_loaded: bool, recording: bool, idle_for: Duration) -> bool {
+    model_loaded && !recording && idle_for >= IDLE_UNLOAD_AFTER
+}
+
+/// Empties the session buffer, releasing its allocation once a recording has
+/// grown past [`BUFFER_REUSE_CEILING`]. `Vec::clear` alone would keep the
+/// high-water capacity — up to 19 MB after a capped session — for the life of
+/// the process.
+fn reset_buffer(buffer: &mut Vec<i16>) {
+    if buffer.capacity() > BUFFER_REUSE_CEILING {
+        *buffer = Vec::new();
+    } else {
+        buffer.clear();
+    }
 }
 
 fn push_capped(buffer: &mut Vec<i16>, chunk: Vec<i16>) {
@@ -607,6 +666,64 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("a final result");
         assert_eq!(seen.load(Ordering::SeqCst), 128);
+    }
+
+    #[test]
+    fn an_idle_worker_unloads_the_model_to_release_memory() {
+        assert!(should_unload_idle(true, false, IDLE_UNLOAD_AFTER));
+        assert!(should_unload_idle(
+            true,
+            false,
+            IDLE_UNLOAD_AFTER + Duration::from_secs(1)
+        ));
+    }
+
+    #[test]
+    fn a_recording_worker_never_unloads_mid_utterance() {
+        // Unloading here would tear the model out from under audio that is
+        // still arriving.
+        assert!(!should_unload_idle(true, true, IDLE_UNLOAD_AFTER * 10));
+    }
+
+    #[test]
+    fn an_already_unloaded_model_is_not_unloaded_again() {
+        assert!(!should_unload_idle(false, false, IDLE_UNLOAD_AFTER * 10));
+    }
+
+    #[test]
+    fn a_recently_used_model_stays_loaded() {
+        // Continuous dictation must never pay a reload.
+        assert!(!should_unload_idle(
+            true,
+            false,
+            IDLE_UNLOAD_AFTER - Duration::from_secs(1)
+        ));
+        assert!(!should_unload_idle(true, false, Duration::ZERO));
+    }
+
+    #[test]
+    fn a_long_recordings_buffer_is_handed_back_rather_than_kept() {
+        let mut buffer: Vec<i16> = Vec::with_capacity(BUFFER_REUSE_CEILING * 2);
+        buffer.extend_from_slice(&[1i16; 16]);
+        reset_buffer(&mut buffer);
+        assert!(buffer.is_empty());
+        assert_eq!(
+            buffer.capacity(),
+            0,
+            "a long session's allocation must not outlive it"
+        );
+    }
+
+    #[test]
+    fn a_short_recordings_buffer_keeps_its_capacity_for_reuse() {
+        let mut buffer: Vec<i16> = Vec::with_capacity(1_024);
+        buffer.extend_from_slice(&[1i16; 16]);
+        reset_buffer(&mut buffer);
+        assert!(buffer.is_empty());
+        assert!(
+            buffer.capacity() >= 1_024,
+            "ordinary dictations should not re-grow the buffer every time"
+        );
     }
 
     #[test]
