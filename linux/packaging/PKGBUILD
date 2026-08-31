@@ -1,6 +1,6 @@
 # Maintainer: Rahul Kashyap <rahulmkashyap@gmail.com>
 pkgname=whisper-smart
-pkgver=0.5.1
+pkgver=0.5.2
 pkgrel=1
 pkgdesc="Hold-to-talk dictation for the Linux desktop"
 arch=('x86_64' 'aarch64')
