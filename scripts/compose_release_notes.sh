@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Composes the release notes for one version, for both platforms.
+# Composes the release notes for one version, for every platform.
 #
-# A release is a single tag carrying a macOS DMG and a Linux tarball, so the
-# notes are written once here and reused everywhere: the GitHub Release body,
-# the Sparkle appcast entry, and a local dry run before tagging anything.
+# A release is a single tag carrying a macOS DMG, a Linux tarball, and a
+# Windows zip, so the notes are written once here and reused everywhere: the
+# GitHub Release body, the Sparkle appcast entry, and a local dry run before
+# tagging anything.
 #
 #   bash scripts/compose_release_notes.sh --version 0.5.0 --channel beta
 #
@@ -82,6 +83,7 @@ if [[ "$FORMAT" == "appcast" ]]; then
 fi
 
 LINUX_TARBALL="whisper-smart-${VERSION}-linux-x86_64.tar.gz"
+WINDOWS_ZIP="whisper-smart-${VERSION}-windows-x86_64.zip"
 DOWNLOAD_BASE="https://github.com/${REPOSITORY}/releases/download/${TAG}"
 
 cat <<EOF
@@ -91,6 +93,7 @@ cat <<EOF
 |---|---|---|
 | macOS 14+ | [Whisper-Smart-mac.dmg](${DOWNLOAD_BASE}/Whisper-Smart-mac.dmg) | Open the DMG, drag the app to Applications |
 | Linux (x86_64) | [${LINUX_TARBALL}](${DOWNLOAD_BASE}/${LINUX_TARBALL}) | \`tar xzf ${LINUX_TARBALL} && ./whisper-smart-${VERSION}-linux-x86_64/install.sh\` |
+| Windows 10/11 (x86_64) | [${WINDOWS_ZIP}](${DOWNLOAD_BASE}/${WINDOWS_ZIP}) | Unzip anywhere and run \`whisper-smart.exe\` |
 
 Existing macOS installs update themselves through Sparkle. On Arch, \`whisper-smart\`
 from the AUR tracks this tag.

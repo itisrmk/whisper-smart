@@ -1,5 +1,5 @@
-# Both platforms, every PR — the same two builds the release runs, so a green
-# PR means both halves of a release can be cut from it.
+# Every platform, every PR — the same builds the release runs, so a green
+# PR means all three parts of a release can be cut from it.
 name: CI
 
 on:
@@ -68,3 +68,41 @@ jobs:
       - name: Package Tarball
         working-directory: linux
         run: SKIP_BUILD=1 bash packaging/make-tarball.sh
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust Version
+        run: rustc --version
+
+      - name: QA Smoke
+        working-directory: windows
+        run: bash scripts/run_qa_smoke.sh
+
+      - name: Build Release
+        working-directory: windows
+        run: cargo build --release --locked
+
+      - name: Package Zip
+        working-directory: windows
+        run: SKIP_BUILD=1 bash packaging/make-zip.sh
+
+      # Uploaded so a PR build can be downloaded and tested on a real Windows
+      # machine before anything is merged or released.
+      - name: Upload Windows Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: |
+            windows/dist/*.zip
+            windows/dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
