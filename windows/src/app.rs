@@ -63,6 +63,12 @@ pub fn run() -> i32 {
         return 0;
     }
 
+    tracing::info!(
+        "whisper-smart v{} ({}) starting",
+        env!("CARGO_PKG_VERSION"),
+        crate::build_tag()
+    );
+
     let store = SettingsStore::load();
     let waker = Waker::new();
     let (bus, events_rx) = EventBus::new(waker.clone());
@@ -559,6 +565,68 @@ impl App {
     }
 }
 
+/// Development harness: the settings UI alone, rendered as an ordinary
+/// window with no tray, hotkey, overlay, or helper viewport. This is what
+/// makes layout work reviewable on a non-Windows host, where the full
+/// multi-viewport app depends on compositor behaviour it does not control.
+/// `WHISPER_SMART_TAB` picks the page.
+pub fn run_ui_preview() -> i32 {
+    ensure_directories();
+    init_logging();
+
+    let store = SettingsStore::load();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("Whisper Smart")
+            .with_inner_size([tokens::size::SETTINGS_WIDTH, tokens::size::SETTINGS_HEIGHT])
+            .with_icon(app_icon()),
+        ..Default::default()
+    };
+
+    let result = eframe::run_native(
+        "Whisper Smart (UI preview)",
+        options,
+        Box::new(move |cc| {
+            crate::ui::fonts::install(&cc.egui_ctx);
+            tokens::apply_style(&cc.egui_ctx);
+            let (ui_tx, ui_rx) = crossbeam_channel::unbounded::<UiCommand>();
+            let mut settings_ui = SettingsUi::new(ui_tx, &store);
+            if let Some(tab) = std::env::var("WHISPER_SMART_TAB")
+                .ok()
+                .and_then(|key| Tab::from_key(&key))
+            {
+                settings_ui.tab = tab;
+            }
+            Ok(Box::new(UiPreview {
+                settings_ui,
+                store,
+                ui_rx,
+            }))
+        }),
+    );
+    match result {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("could not start the UI preview: {err}");
+            1
+        }
+    }
+}
+
+struct UiPreview {
+    settings_ui: SettingsUi,
+    store: SettingsStore,
+    ui_rx: Receiver<UiCommand>,
+}
+
+impl eframe::App for UiPreview {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Commands have no app behind them here; drain so senders never block.
+        while self.ui_rx.try_recv().is_ok() {}
+        self.settings_ui.show(ctx, &self.store);
+    }
+}
+
 /// Stable id for the settings viewport, so focus commands can target it.
 fn settings_viewport_id() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("whisper-smart-settings")
@@ -578,7 +646,12 @@ impl eframe::App for App {
             self.start_tray();
             // First frame: open Settings so launching the exe visibly does
             // something. Closing it leaves the app running in the tray.
-            self.open_settings(ctx, Tab::General);
+            // `WHISPER_SMART_TAB` picks the page, for development screenshots.
+            let tab = std::env::var("WHISPER_SMART_TAB")
+                .ok()
+                .and_then(|key| Tab::from_key(&key))
+                .unwrap_or(Tab::General);
+            self.open_settings(ctx, tab);
         }
 
         // A close request on the root helper has no window the user can see

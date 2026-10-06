@@ -20,3 +20,15 @@ pub mod core;
 pub mod platform;
 pub mod stt;
 pub mod ui;
+
+/// Short build identifier: the commit this binary was built from (CI exports
+/// `GITHUB_SHA` at compile time), or "dev" for local builds. Shown in the
+/// settings footer and `--version` so "which build is this?" never has to be
+/// guessed again.
+pub fn build_tag() -> &'static str {
+    match option_env!("GITHUB_SHA") {
+        Some(sha) if sha.len() >= 7 => &sha[..7],
+        Some(sha) => sha,
+        None => "dev",
+    }
+}

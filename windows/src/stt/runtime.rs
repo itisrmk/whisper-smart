@@ -56,8 +56,17 @@ const WHISPER_CPP_ZIP_SHA256: &str =
 /// fails with a message in seconds instead of sitting at "Downloading…"
 /// forever; the body itself has no deadline, because a 1.6 GB model on a
 /// slow line is legitimate.
-fn http_agent() -> ureq::Agent {
+pub(crate) fn http_agent() -> ureq::Agent {
     ureq::Agent::config_builder()
+        // The provider must be stated: with default features off, ureq still
+        // *defaults* to Rustls and panics at request time when only the
+        // native-tls feature is compiled in. This was invisible to every
+        // test and shipped as downloads that sat at "Downloading…" forever.
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::NativeTls)
+                .build(),
+        )
         .timeout_resolve(Some(Duration::from_secs(10)))
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_recv_response(Some(Duration::from_secs(30)))
@@ -72,8 +81,40 @@ pub enum Progress {
     Step(String),
     /// Fractional progress in 0..=1 for the current step, when known.
     Fraction(f32),
+    /// A byte transfer with enough detail to tell "slow network" from
+    /// "stalled" at a glance.
+    Transfer {
+        /// 0..=1 when the total size is known.
+        fraction: Option<f32>,
+        written_bytes: u64,
+        total_bytes: Option<u64>,
+        bytes_per_second: u64,
+    },
     Done,
     Failed(String),
+}
+
+impl Progress {
+    /// One-line form of a [`Progress::Transfer`], shared by the UI status
+    /// line and the CLI.
+    pub fn transfer_label(
+        fraction: Option<f32>,
+        written_bytes: u64,
+        total_bytes: Option<u64>,
+        bytes_per_second: u64,
+    ) -> String {
+        let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+        let rate = format!("{:.1} MB/s", mb(bytes_per_second));
+        match (fraction, total_bytes) {
+            (Some(fraction), Some(total)) => format!(
+                "{}% · {:.0} / {:.0} MB · {rate}",
+                (fraction * 100.0).round() as u32,
+                mb(written_bytes),
+                mb(total),
+            ),
+            _ => format!("{:.0} MB · {rate}", mb(written_bytes)),
+        }
+    }
 }
 
 /// Callback invoked as an install proceeds.
@@ -634,7 +675,9 @@ fn stream_download(url: &str, destination: &Path, progress: &ProgressSink) -> Re
 
     let mut buffer = vec![0u8; 1 << 20];
     let mut written: u64 = 0;
-    let mut last_reported = 0.0f32;
+    let started = std::time::Instant::now();
+    let mut last_report = std::time::Instant::now();
+    let mut last_report_bytes: u64 = 0;
 
     loop {
         let read = std::io::Read::read(&mut reader, &mut buffer)
@@ -646,24 +689,28 @@ fn stream_download(url: &str, destination: &Path, progress: &ProgressSink) -> Re
             .map_err(|e| format!("Could not write the file: {e}"))?;
         written += read as u64;
 
-        if total > 0 {
-            let fraction = (written as f32 / total as f32).min(1.0);
-            // Throttle: a 1.6 GB download would otherwise emit thousands of
-            // updates and swamp the UI thread.
-            if fraction - last_reported >= 0.01 {
-                last_reported = fraction;
-                progress(Progress::Fraction(fraction));
-            }
-        } else {
-            // No Content-Length (chunked transfer): still show movement, in
-            // 5 MB steps, so a long download never looks hung.
-            let megabytes = written / (5 << 20);
-            if megabytes as f32 > last_reported {
-                last_reported = megabytes as f32;
-                progress(Progress::Step(format!("Downloading… {} MB", written >> 20)));
-            }
+        // Throttled to ~1 Hz: enough to read speed and progress off the
+        // status line, cheap enough to never matter.
+        let elapsed = last_report.elapsed();
+        if elapsed >= Duration::from_secs(1) {
+            let rate = ((written - last_report_bytes) as f64 / elapsed.as_secs_f64()) as u64;
+            last_report = std::time::Instant::now();
+            last_report_bytes = written;
+            progress(Progress::Transfer {
+                fraction: (total > 0).then(|| (written as f32 / total as f32).min(1.0)),
+                written_bytes: written,
+                total_bytes: (total > 0).then_some(total),
+                bytes_per_second: rate,
+            });
         }
     }
+
+    tracing::info!(
+        "downloaded {} MB in {:.0}s ({:.1} MB/s) from {url}",
+        written >> 20,
+        started.elapsed().as_secs_f64(),
+        (written as f64 / (1024.0 * 1024.0)) / started.elapsed().as_secs_f64().max(0.001),
+    );
 
     file.sync_all()
         .map_err(|e| format!("Could not finish writing the file: {e}"))?;
@@ -910,6 +957,23 @@ mod tests {
         assert!(WHISPER_CPP_ZIP_SHA256
             .chars()
             .all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn the_http_agent_can_actually_speak_https() {
+        // Regression test for the bug that shipped as "downloads sit at
+        // Downloading… forever": with default features off, ureq still
+        // defaulted its TLS *provider* to Rustls and panicked on the first
+        // HTTPS request. Any response — including an HTTP error — proves the
+        // TLS stack is wired; only a transport/config failure (or the old
+        // panic) fails this.
+        if std::env::var_os("CI").is_none() && std::env::var_os("WS_NET_TESTS").is_none() {
+            return; // needs network; runs in CI and on demand
+        }
+        match http_agent().get("https://github.com/").call() {
+            Ok(_) | Err(ureq::Error::StatusCode(_)) => {}
+            Err(err) => panic!("HTTPS request failed at the transport level: {err}"),
+        }
     }
 
     #[test]

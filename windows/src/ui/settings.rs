@@ -67,6 +67,19 @@ impl Tab {
         ]
     }
 
+    /// Parses a tab name, for the `WHISPER_SMART_TAB` developer override.
+    pub fn from_key(key: &str) -> Option<Tab> {
+        match key.trim().to_ascii_lowercase().as_str() {
+            "general" => Some(Tab::General),
+            "hotkey" => Some(Tab::Hotkey),
+            "dictionary" => Some(Tab::Dictionary),
+            "provider" => Some(Tab::Provider),
+            "history" => Some(Tab::History),
+            "setup" => Some(Tab::Setup),
+            _ => None,
+        }
+    }
+
     fn label(self) -> &'static str {
         match self {
             Tab::General => "General",
@@ -228,6 +241,22 @@ impl Task {
                 Progress::Fraction(fraction) => {
                     self.status = format!("Downloading… {}%", (fraction * 100.0).round() as u32);
                 }
+                Progress::Transfer {
+                    fraction,
+                    written_bytes,
+                    total_bytes,
+                    bytes_per_second,
+                } => {
+                    self.status = format!(
+                        "Downloading… {}",
+                        Progress::transfer_label(
+                            fraction,
+                            written_bytes,
+                            total_bytes,
+                            bytes_per_second
+                        )
+                    );
+                }
                 Progress::Done => {
                     self.status = "Done.".to_string();
                     self.running = false;
@@ -264,7 +293,19 @@ impl Task {
                     }
                     report_ctx.request_repaint();
                 });
-                let result = work(&sink);
+                // A panic in the work (a bug, not a user error) must still
+                // end the task visibly; an eternal "Downloading…" is the
+                // least debuggable failure an app can show.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&sink)))
+                    .unwrap_or_else(|panic| {
+                        let message = panic
+                            .downcast_ref::<&str>()
+                            .map(|s| (*s).to_string())
+                            .or_else(|| panic.downcast_ref::<String>().cloned())
+                            .unwrap_or_else(|| "the task crashed".to_string());
+                        tracing::error!("background task panicked: {message}");
+                        Err(format!("Internal error: {message}"))
+                    });
                 if let Ok(mut queue) = slot.lock() {
                     match result {
                         Ok(()) => queue.push(Progress::Done),
@@ -384,8 +425,9 @@ impl SettingsUi {
                         .show(ui, |ui| {
                             ui.label(
                                 RichText::new(format!(
-                                    "Windows native · v{}",
-                                    env!("CARGO_PKG_VERSION")
+                                    "Windows native · v{} · {}",
+                                    env!("CARGO_PKG_VERSION"),
+                                    crate::build_tag(),
                                 ))
                                 .color(tokens::MUTED)
                                 .size(11.0),
@@ -931,43 +973,55 @@ impl SettingsUi {
                     .inner_margin(egui::Margin::symmetric(16, 14))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        // The right edge is claimed first so the text column
-                        // wraps inside what remains instead of pushing the
-                        // selection control off-screen.
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if selected {
-                                ui.label(RichText::new("●").color(tokens::ACCENT).size(14.0));
-                            } else if widgets::ghost_button(ui, "Select").clicked() {
-                                clicked_select = true;
-                            }
+                        ui.horizontal(|ui| {
+                            widgets::badge(ui, tier.badge(), selected);
                             ui.add_space(tokens::spacing::SM);
-
-                            ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                            // Explicit width for the text column, leaving the
+                            // selection control its corner on the right.
+                            let text_width = (ui.available_width() - 90.0).max(120.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(text_width);
                                 ui.horizontal(|ui| {
-                                    widgets::badge(ui, tier.badge(), selected);
-                                    ui.add_space(tokens::spacing::SM);
-                                    ui.vertical(|ui| {
-                                        ui.label(
-                                            RichText::new(tier.title())
-                                                .color(tokens::TEXT)
-                                                .size(13.0)
-                                                .strong(),
-                                        );
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(tier.description())
-                                                    .color(tokens::MUTED)
-                                                    .size(12.0),
-                                            )
-                                            .wrap(),
-                                        );
-                                    });
+                                    ui.label(
+                                        RichText::new(tier.title())
+                                            .color(tokens::TEXT)
+                                            .size(13.0)
+                                            .strong(),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(tier.description())
+                                                .color(tokens::MUTED)
+                                                .size(12.0),
+                                        )
+                                        .truncate(),
+                                    );
                                 });
                                 widgets::status_line(ui, &status);
                                 if offer_download && widgets::button(ui, "Download").clicked() {
                                     clicked_download = true;
                                 }
                             });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if selected {
+                                        // Drawn, not a glyph: the bundled
+                                        // fonts have no reliable "●".
+                                        let (dot, _) = ui.allocate_exact_size(
+                                            egui::vec2(14.0, 14.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        ui.painter().circle_filled(
+                                            dot.center(),
+                                            5.0,
+                                            tokens::ACCENT,
+                                        );
+                                    } else if widgets::ghost_button(ui, "Select").clicked() {
+                                        clicked_select = true;
+                                    }
+                                },
+                            );
                         });
                     });
                 ui.add_space(tokens::spacing::XS);
@@ -1446,20 +1500,25 @@ impl SettingsUi {
             }
             for entry in &entries {
                 ui.horizontal_top(|ui| {
+                    let text_width = (ui.available_width() - 90.0).max(120.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(text_width);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&entry.text).color(tokens::TEXT).size(12.0),
+                            )
+                            .wrap(),
+                        );
+                        ui.label(
+                            RichText::new(&entry.provider)
+                                .color(tokens::MUTED)
+                                .size(10.0),
+                        );
+                    });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
                         if widgets::ghost_button(ui, "Insert").clicked() {
                             self.notify(UiCommand::Reinject(entry.text.clone()));
                         }
-                        ui.vertical(|ui| {
-                            ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                                ui.label(RichText::new(&entry.text).color(tokens::TEXT).size(12.0));
-                                ui.label(
-                                    RichText::new(&entry.provider)
-                                        .color(tokens::MUTED)
-                                        .size(10.0),
-                                );
-                            });
-                        });
                     });
                 });
                 widgets::separator(ui);

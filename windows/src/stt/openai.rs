@@ -76,6 +76,11 @@ impl Transcriber for OpenAiTranscriber {
         // Bounded end to end: a hung connection must surface here rather
         // than wedging the worker past the state machine's own timeout.
         let agent: ureq::Agent = ureq::Agent::config_builder()
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .provider(ureq::tls::TlsProvider::NativeTls)
+                    .build(),
+            )
             .timeout_global(Some(Duration::from_secs(90)))
             .build()
             .into();

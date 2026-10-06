@@ -23,7 +23,11 @@ fn main() {
 
     match args.first().map(String::as_str) {
         Some("--version" | "-V") => {
-            println!("whisper-smart {}", env!("CARGO_PKG_VERSION"));
+            println!(
+                "whisper-smart {} ({})",
+                env!("CARGO_PKG_VERSION"),
+                whisper_smart::build_tag()
+            );
         }
         Some("--check") => std::process::exit(run_checks()),
         Some("--download-model") => {
@@ -39,6 +43,7 @@ fn main() {
         Some("--list-models") => list_models(),
         Some("--list-devices") => list_devices(),
         Some("--mic-test") => std::process::exit(mic_test(args.get(1).map(String::as_str))),
+        Some("--ui-preview") => std::process::exit(app::run_ui_preview()),
         Some("--help" | "-h") => print_help(),
         Some(other) => {
             eprintln!("Unknown argument: {other}\n");
@@ -290,6 +295,20 @@ fn download_model(id: Option<&str>) -> i32 {
                 "\r  [{}{}] {percent:>3}%",
                 "#".repeat(filled),
                 " ".repeat(40 - filled)
+            );
+        }
+        Progress::Transfer {
+            fraction,
+            written_bytes,
+            total_bytes,
+            bytes_per_second,
+        } => {
+            let filled = (fraction.unwrap_or(0.0) * 40.0).round() as usize;
+            eprint!(
+                "\r  [{}{}] {}",
+                "#".repeat(filled),
+                " ".repeat(40 - filled),
+                Progress::transfer_label(fraction, written_bytes, total_bytes, bytes_per_second),
             );
         }
         Progress::Done => eprintln!(),

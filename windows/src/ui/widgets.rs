@@ -49,28 +49,30 @@ pub fn separator(ui: &mut Ui) {
 }
 
 /// A settings row: flush-left title and description, control on the right.
+///
+/// Laid out with plain nesting and an explicit text-column width. (A
+/// right-to-left layout with a nested directional child looks tidier on
+/// paper, but egui hands the nested child a sliver-shaped rect — the text
+/// renders one letter per line.)
 pub fn row(ui: &mut Ui, title: &str, description: Option<&str>, control: impl FnOnce(&mut Ui)) {
+    /// Room reserved for the trailing control (the widest is a 220px
+    /// dropdown plus breathing space).
+    const CONTROL_WIDTH: f32 = 250.0;
+
     ui.add_space(tokens::spacing::MD);
     ui.horizontal(|ui| {
-        // The control claims the right edge first so the text column wraps
-        // inside what remains rather than pushing the control off-screen.
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            control(ui);
-            ui.add_space(tokens::spacing::LG);
-            ui.vertical(|ui| {
-                ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                    ui.label(RichText::new(title).color(tokens::TEXT).size(13.0).strong());
-                    if let Some(description) = description {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(description).color(tokens::MUTED).size(12.0),
-                            )
-                            .wrap(),
-                        );
-                    }
-                });
-            });
+        let text_width = (ui.available_width() - CONTROL_WIDTH).max(120.0);
+        ui.vertical(|ui| {
+            ui.set_width(text_width);
+            ui.label(RichText::new(title).color(tokens::TEXT).size(13.0).strong());
+            if let Some(description) = description {
+                ui.add(
+                    egui::Label::new(RichText::new(description).color(tokens::MUTED).size(12.0))
+                        .wrap(),
+                );
+            }
         });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
     });
     ui.add_space(tokens::spacing::MD);
 }
@@ -114,29 +116,35 @@ pub fn ghost_button(ui: &mut Ui, label: &str) -> egui::Response {
 }
 
 /// The small uppercase tag on the left of a choice row, e.g. `LGT`.
+///
+/// Painted at a fixed size rather than laid out: a justified layout here
+/// expands to whatever space the row offers, shoving the row's actual
+/// content off the right edge of the window.
 pub fn badge(ui: &mut Ui, text: &str, selected: bool) {
-    let color = if selected {
-        tokens::ACCENT
-    } else {
-        tokens::MUTED
-    };
-    egui::Frame::new()
-        .fill(tokens::CHROME)
-        .stroke(Stroke::new(
-            1.0_f32,
-            if selected {
-                tokens::ACCENT
-            } else {
-                tokens::border2()
-            },
-        ))
-        .inner_margin(egui::Margin::symmetric(8, 12))
-        .show(ui, |ui| {
-            ui.set_min_width(34.0);
-            ui.centered_and_justified(|ui| {
-                ui.label(RichText::new(text).color(color).size(10.0).strong());
-            });
-        });
+    let size = Vec2::new(44.0, 38.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let (color, stroke) = if selected {
+            (tokens::ACCENT, tokens::ACCENT)
+        } else {
+            (tokens::MUTED, tokens::border2())
+        };
+        painter.rect_filled(rect, 0.0, tokens::CHROME);
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0_f32, stroke),
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            egui::FontId::proportional(10.0),
+            color,
+        );
+    }
 }
 
 /// Rectangular toggle with a hard accent fill, matching the Mac switches.
