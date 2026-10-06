@@ -20,6 +20,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use crate::core::model_catalog::{LocalModel, ModelEngine, ModelSource};
 use crate::core::paths;
@@ -50,6 +51,19 @@ const WHISPER_CPP_ZIP_URL: &str =
     "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip";
 const WHISPER_CPP_ZIP_SHA256: &str =
     "49dcc16de826f20bd53d44f947a1ae49dfa81f86cad67a64d80820cb192d674a";
+
+/// HTTP client for downloads. Connection setup is bounded so a dead network
+/// fails with a message in seconds instead of sitting at "Downloading…"
+/// forever; the body itself has no deadline, because a 1.6 GB model on a
+/// slow line is legitimate.
+fn http_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_resolve(Some(Duration::from_secs(10)))
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .build()
+        .into()
+}
 
 /// Progress reported during a long-running install.
 #[derive(Debug, Clone, PartialEq)]
@@ -272,6 +286,20 @@ pub fn packages_for(engine: ModelEngine, device: ComputeDevice) -> Vec<String> {
     packages
 }
 
+/// What the install actually provisions for.
+///
+/// "Auto" at *inference* time means "probe and fall back", which is free. At
+/// *install* time it decides whether a gigabyte of NVIDIA CUDA wheels is
+/// downloaded — paying that on a machine with no NVIDIA GPU turns a
+/// two-minute install into a very long one for nothing, so Auto resolves
+/// against the actual hardware here.
+fn effective_install_device(requested: ComputeDevice, cuda_present: bool) -> ComputeDevice {
+    match requested {
+        ComputeDevice::Auto if !cuda_present => ComputeDevice::Cpu,
+        other => other,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Python runtime installation
 // ---------------------------------------------------------------------------
@@ -288,6 +316,8 @@ pub fn install(
     if engine == ModelEngine::WhisperCpp {
         return Err("whisper.cpp needs no Python runtime.".to_string());
     }
+
+    let device = effective_install_device(device, crate::platform::diagnostics::cuda_available());
 
     let venv = paths::python_runtime_dir();
     std::fs::create_dir_all(venv.parent().unwrap_or(&venv))
@@ -322,7 +352,11 @@ pub fn install(
         return Ok(());
     }
 
-    progress(Progress::Step("Installing the speech engine".to_string()));
+    progress(Progress::Step(
+        "Installing the speech engine — a few hundred MB of wheels; this can take \
+         several minutes"
+            .to_string(),
+    ));
 
     let mut command = Command::new(interpreter_path());
     command
@@ -582,7 +616,8 @@ fn download_with_progress(
 }
 
 fn stream_download(url: &str, destination: &Path, progress: &ProgressSink) -> Result<(), String> {
-    let mut response = ureq::get(url)
+    let mut response = http_agent()
+        .get(url)
         .call()
         .map_err(|e| format!("Could not download: {e}"))?;
 
@@ -618,6 +653,14 @@ fn stream_download(url: &str, destination: &Path, progress: &ProgressSink) -> Re
             if fraction - last_reported >= 0.01 {
                 last_reported = fraction;
                 progress(Progress::Fraction(fraction));
+            }
+        } else {
+            // No Content-Length (chunked transfer): still show movement, in
+            // 5 MB steps, so a long download never looks hung.
+            let megabytes = written / (5 << 20);
+            if megabytes as f32 > last_reported {
+                last_reported = megabytes as f32;
+                progress(Progress::Step(format!("Downloading… {} MB", written >> 20)));
             }
         }
     }
@@ -814,6 +857,29 @@ mod tests {
         };
         let message = base.describe();
         assert!(message.contains("uv") || message.contains("3.12"));
+    }
+
+    #[test]
+    fn auto_without_an_nvidia_gpu_installs_cpu_wheels() {
+        // The difference is roughly a gigabyte of CUDA wheels that could
+        // never be used.
+        assert_eq!(
+            effective_install_device(ComputeDevice::Auto, false),
+            ComputeDevice::Cpu
+        );
+        assert_eq!(
+            effective_install_device(ComputeDevice::Auto, true),
+            ComputeDevice::Auto
+        );
+        // An explicit choice is always honoured, either way.
+        assert_eq!(
+            effective_install_device(ComputeDevice::Cuda, false),
+            ComputeDevice::Cuda
+        );
+        assert_eq!(
+            effective_install_device(ComputeDevice::Cpu, true),
+            ComputeDevice::Cpu
+        );
     }
 
     #[test]

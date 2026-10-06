@@ -879,7 +879,42 @@ impl SettingsUi {
 
             for tier in Tier::all() {
                 let selected = tier.matches(&settings);
-                let frame = egui::Frame::new()
+
+                // Everything the row shows is resolved up front, and what the
+                // user clicked is collected into flags acted on after the
+                // frame — the closure then borrows nothing it can fight over.
+                let model = tier.model();
+                let (task_running, task_status) = match &model {
+                    Some(model) => {
+                        let task = self
+                            .downloads
+                            .entry(model.id.to_string())
+                            .or_insert_with(Task::idle);
+                        if task.poll() {
+                            self.notify(UiCommand::ProviderChanged);
+                        }
+                        let task = self.downloads.get(model.id).expect("just inserted");
+                        (task.running, task.status.clone())
+                    }
+                    None => (false, String::new()),
+                };
+                let status = match &model {
+                    Some(model) if task_running => task_status,
+                    Some(model) if diagnostics::is_model_installed(model) => {
+                        format!("Downloaded · {}", model.approx_size_label)
+                    }
+                    Some(model) => format!("Not downloaded · {}", model.approx_size_label),
+                    None if credentials::has_openai_key() => "API key saved".to_string(),
+                    None => "Needs an API key — add one below".to_string(),
+                };
+                let offer_download = model
+                    .as_ref()
+                    .is_some_and(|m| !task_running && !diagnostics::is_model_installed(m));
+
+                let mut clicked_select = false;
+                let mut clicked_download = false;
+
+                egui::Frame::new()
                     .fill(if selected {
                         tokens::active()
                     } else {
@@ -893,103 +928,69 @@ impl SettingsUi {
                             tokens::border()
                         },
                     ))
-                    .inner_margin(egui::Margin::symmetric(16, 14));
-
-                let response = frame
+                    .inner_margin(egui::Margin::symmetric(16, 14))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            widgets::badge(ui, tier.badge(), selected);
+                        // The right edge is claimed first so the text column
+                        // wraps inside what remains instead of pushing the
+                        // selection control off-screen.
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if selected {
+                                ui.label(RichText::new("●").color(tokens::ACCENT).size(14.0));
+                            } else if widgets::ghost_button(ui, "Select").clicked() {
+                                clicked_select = true;
+                            }
                             ui.add_space(tokens::spacing::SM);
-                            ui.vertical(|ui| {
+
+                            ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(tier.title())
-                                            .color(tokens::TEXT)
-                                            .size(13.0)
-                                            .strong(),
-                                    );
-                                    ui.label(
-                                        RichText::new(tier.description())
-                                            .color(tokens::MUTED)
-                                            .size(12.0),
-                                    );
-                                });
-
-                                match tier.model() {
-                                    Some(model) => {
-                                        let task = self
-                                            .downloads
-                                            .entry(model.id.to_string())
-                                            .or_insert_with(Task::idle);
-                                        if task.poll() {
-                                            self.notify(UiCommand::ProviderChanged);
-                                        }
-                                        let task = self
-                                            .downloads
-                                            .get_mut(model.id)
-                                            .expect("just inserted");
-
-                                        if task.running {
-                                            widgets::status_line(ui, &task.status.clone());
-                                        } else if diagnostics::is_model_installed(&model) {
-                                            widgets::status_line(
-                                                ui,
-                                                &format!(
-                                                    "Downloaded · {}",
-                                                    model.approx_size_label
-                                                ),
-                                            );
-                                        } else {
-                                            widgets::status_line(
-                                                ui,
-                                                &format!(
-                                                    "Not downloaded · {}",
-                                                    model.approx_size_label
-                                                ),
-                                            );
-                                            if widgets::button(ui, "Download").clicked() {
-                                                task.start(&ctx, move |sink| {
-                                                    runtime::download_model(&model, sink)
-                                                });
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        widgets::status_line(
-                                            ui,
-                                            if credentials::has_openai_key() {
-                                                "API key saved"
-                                            } else {
-                                                "Needs an API key — add one below"
-                                            },
+                                    widgets::badge(ui, tier.badge(), selected);
+                                    ui.add_space(tokens::spacing::SM);
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            RichText::new(tier.title())
+                                                .color(tokens::TEXT)
+                                                .size(13.0)
+                                                .strong(),
                                         );
-                                    }
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(tier.description())
+                                                    .color(tokens::MUTED)
+                                                    .size(12.0),
+                                            )
+                                            .wrap(),
+                                        );
+                                    });
+                                });
+                                widgets::status_line(ui, &status);
+                                if offer_download && widgets::button(ui, "Download").clicked() {
+                                    clicked_download = true;
                                 }
                             });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if selected {
-                                        ui.label(
-                                            RichText::new("●").color(tokens::ACCENT).size(14.0),
-                                        );
-                                    } else if widgets::ghost_button(ui, "Select").clicked() {
-                                        store.update(|s| {
-                                            s.provider.kind = tier.kind();
-                                            if let Some(model) = tier.model() {
-                                                s.provider.whisper_cpp_model = model.id.to_string();
-                                            }
-                                        });
-                                        self.notify(UiCommand::ProviderChanged);
-                                    }
-                                },
-                            );
                         });
-                    })
-                    .response;
-                let _ = response;
+                    });
                 ui.add_space(tokens::spacing::XS);
+
+                if clicked_select {
+                    store.update(|s| {
+                        s.provider.kind = tier.kind();
+                        if let Some(model) = &model {
+                            s.provider.whisper_cpp_model = model.id.to_string();
+                        }
+                    });
+                    self.notify(UiCommand::ProviderChanged);
+                }
+                if clicked_download {
+                    if let Some(model) = model.clone() {
+                        if let Some(task) = self.downloads.get_mut(model.id) {
+                            let worker_model = model.clone();
+                            task.start(&ctx, move |sink| {
+                                runtime::download_model(&worker_model, sink)
+                            });
+                        }
+                    }
+                }
             }
 
             // Being honest when Advanced has taken the settings somewhere the

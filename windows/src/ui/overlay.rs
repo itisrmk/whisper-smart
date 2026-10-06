@@ -150,11 +150,13 @@ impl Overlay {
             OverlayStyle::None => return,
         };
 
-        // Initial guess from whatever monitor the context reports; corrected
-        // below from inside the overlay's own viewport, whose monitor is the
-        // one that actually matters.
+        // Initial guess: the parent window is parked off-screen and resolves
+        // no monitor, so the primary work area is the dependable source;
+        // corrected below from inside the overlay's own viewport once it is
+        // on an actual monitor.
         let monitor = ctx
             .input(|i| i.viewport().monitor_size)
+            .or_else(|| crate::platform::primary_work_area_points().map(|(w, h)| egui::vec2(w, h)))
             .unwrap_or(egui::vec2(1920.0, 1080.0));
         let x = ((monitor.x - size.x) / 2.0).max(0.0);
         let y = match (top_margin, bottom_margin) {
@@ -206,6 +208,8 @@ impl Overlay {
 /// moves the window when it has drifted — this is a per-frame call.
 fn reposition(ctx: &egui::Context, size: egui::Vec2, top: Option<f32>, bottom: Option<f32>) {
     let (monitor, outer) = ctx.input(|i| (i.viewport().monitor_size, i.viewport().outer_rect));
+    let monitor = monitor
+        .or_else(|| crate::platform::primary_work_area_points().map(|(w, h)| egui::vec2(w, h)));
     let Some(monitor) = monitor else { return };
     if monitor.x <= 1.0 || monitor.y <= 1.0 {
         return;
@@ -241,11 +245,16 @@ fn draw_pill(ui: &mut egui::Ui, state: &State, transcript: &str, bars: &[f64], w
                     ui.add_space(tokens::spacing::SM);
                 }
                 ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(tokens::state_label(state))
-                            .color(tokens::TEXT)
-                            .size(11.0)
-                            .strong(),
+                    // One line, truncated: the pill has a fixed height, and a
+                    // long error message must shorten rather than overflow it.
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(tokens::state_label(state))
+                                .color(tokens::TEXT)
+                                .size(11.0)
+                                .strong(),
+                        )
+                        .truncate(),
                     );
                     if !transcript.is_empty() {
                         let mut preview = transcript.to_string();
@@ -263,7 +272,12 @@ fn draw_pill(ui: &mut egui::Ui, state: &State, transcript: &str, bars: &[f64], w
                                     .trim_start()
                             );
                         }
-                        ui.label(RichText::new(preview).color(tokens::MUTED).size(11.0));
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(preview).color(tokens::MUTED).size(11.0),
+                            )
+                            .truncate(),
+                        );
                     }
                 });
             });

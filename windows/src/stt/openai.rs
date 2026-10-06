@@ -73,7 +73,14 @@ impl Transcriber for OpenAiTranscriber {
             wav::encode_to_bytes(pcm).map_err(|e| format!("Could not encode audio: {e}"))?;
         let body = build_multipart(&audio, &self.model, &self.language);
 
-        let response = ureq::post(&self.endpoint())
+        // Bounded end to end: a hung connection must surface here rather
+        // than wedging the worker past the state machine's own timeout.
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(90)))
+            .build()
+            .into();
+        let response = agent
+            .post(&self.endpoint())
             .header("Authorization", &format!("Bearer {}", self.api_key))
             .header(
                 "Content-Type",

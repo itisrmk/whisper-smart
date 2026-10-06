@@ -61,7 +61,12 @@ pub fn row(ui: &mut Ui, title: &str, description: Option<&str>, control: impl Fn
                 ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
                     ui.label(RichText::new(title).color(tokens::TEXT).size(13.0).strong());
                     if let Some(description) = description {
-                        ui.label(RichText::new(description).color(tokens::MUTED).size(12.0));
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(description).color(tokens::MUTED).size(12.0),
+                            )
+                            .wrap(),
+                        );
                     }
                 });
             });
@@ -70,16 +75,17 @@ pub fn row(ui: &mut Ui, title: &str, description: Option<&str>, control: impl Fn
     ui.add_space(tokens::spacing::MD);
 }
 
-/// Explanatory copy inside a card, above or below the rows.
+/// Explanatory copy inside a card, above or below the rows. Wraps: prose
+/// must fold to the window, never run past its edge.
 pub fn note(ui: &mut Ui, text: &str) {
     ui.add_space(tokens::spacing::SM);
-    ui.label(RichText::new(text).color(tokens::MUTED).size(12.0));
+    ui.add(egui::Label::new(RichText::new(text).color(tokens::MUTED).size(12.0)).wrap());
 }
 
 /// Small status line under a control (download progress, key state).
 pub fn status_line(ui: &mut Ui, text: &str) {
     if !text.is_empty() {
-        ui.label(RichText::new(text).color(tokens::MUTED).size(11.0));
+        ui.add(egui::Label::new(RichText::new(text).color(tokens::MUTED).size(11.0)).wrap());
     }
 }
 
