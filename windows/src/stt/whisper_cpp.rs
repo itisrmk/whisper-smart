@@ -14,8 +14,8 @@
 //! working*, and the daemon-backed providers optimise for speed.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Duration;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::core::model_catalog::{LocalModel, ModelSource};
 use crate::core::paths;
@@ -30,6 +30,8 @@ pub struct WhisperCppTranscriber {
     language: String,
     threads: usize,
     device: ComputeDevice,
+    /// Large models get a longer leash on CPU.
+    large_model: bool,
 }
 
 impl WhisperCppTranscriber {
@@ -61,6 +63,7 @@ impl WhisperCppTranscriber {
             model_name: model.display_name.to_string(),
             language: settings.provider.language.trim().to_string(),
             device: settings.provider.compute_device,
+            large_model: model.prefers_gpu,
             // Leave headroom so a long transcription does not starve the
             // desktop; whisper.cpp scales poorly past physical cores anyway.
             threads: std::thread::available_parallelism()
@@ -116,6 +119,65 @@ pub fn model_file_path(model: &LocalModel) -> Option<PathBuf> {
     }
 }
 
+enum RunFailure {
+    Spawn(std::io::Error),
+    TimedOut,
+}
+
+/// Runs a command to completion with an upper bound, killing it when the
+/// bound is hit. Both pipes are drained on their own threads so a chatty
+/// child can never deadlock against a full pipe while we poll.
+fn run_with_deadline(
+    mut command: Command,
+    deadline: Duration,
+) -> Result<std::process::Output, RunFailure> {
+    use std::io::Read;
+
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(RunFailure::Spawn)?;
+
+    let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
+    let stdout_reader = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buffer);
+        buffer
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buffer);
+        buffer
+    });
+
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if started.elapsed() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(RunFailure::TimedOut);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(err) => {
+                let _ = child.kill();
+                return Err(RunFailure::Spawn(err));
+            }
+        }
+    };
+
+    Ok(std::process::Output {
+        status,
+        stdout: stdout_reader.join().unwrap_or_default(),
+        stderr: stderr_reader.join().unwrap_or_default(),
+    })
+}
+
 impl Transcriber for WhisperCppTranscriber {
     fn name(&self) -> String {
         format!("whisper.cpp · {}", self.model_name)
@@ -123,8 +185,13 @@ impl Transcriber for WhisperCppTranscriber {
 
     fn timeout(&self) -> Duration {
         // A process spawn plus a cold model load on CPU is slow; the state
-        // machine's floor of 10s is not enough for the larger models.
-        Duration::from_secs(120)
+        // machine's floor of 10s is not enough for real models, and the
+        // large ones can legitimately need minutes per utterance on CPU.
+        if self.large_model {
+            Duration::from_secs(300)
+        } else {
+            Duration::from_secs(120)
+        }
     }
 
     fn transcribe(&mut self, pcm: &[i16]) -> Result<String, String> {
@@ -146,14 +213,41 @@ impl Transcriber for WhisperCppTranscriber {
         ));
         crate::platform::hide_console(&mut command);
 
-        tracing::debug!(
-            "running whisper-cli on {:.1}s of audio",
-            wav::duration(pcm).as_secs_f64()
+        tracing::info!(
+            "whisper-cli start: {:.1}s of audio, model {}, {} threads",
+            wav::duration(pcm).as_secs_f64(),
+            self.model_name,
+            self.threads,
         );
 
-        let output = command
-            .output()
-            .map_err(|e| format!("Could not run whisper-cli: {e}"))?;
+        // Killed a little before the state machine's own timeout: a hung
+        // whisper-cli would otherwise outlive the session and block the
+        // worker thread, leaving every following dictation queued behind it —
+        // the app looks dead until the zombie exits.
+        let deadline = self.timeout().saturating_sub(Duration::from_secs(10));
+        let started = Instant::now();
+        let output = run_with_deadline(command, deadline).map_err(|err| match err {
+            RunFailure::Spawn(e) => format!("Could not run whisper-cli: {e}"),
+            RunFailure::TimedOut => {
+                tracing::error!(
+                    "whisper-cli killed after {:.0}s (model {})",
+                    deadline.as_secs_f64(),
+                    self.model_name
+                );
+                format!(
+                    "{} took longer than {:.0} minutes on this machine. Pick a smaller \
+                     model (Balanced) in Settings → Provider.",
+                    self.model_name,
+                    deadline.as_secs_f64() / 60.0
+                )
+            }
+        })?;
+
+        tracing::info!(
+            "whisper-cli finished in {:.1}s ({})",
+            started.elapsed().as_secs_f64(),
+            output.status,
+        );
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
