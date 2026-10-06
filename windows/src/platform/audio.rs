@@ -27,6 +27,23 @@ const LEVEL_INTERVAL_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize) / 20;
 /// Where captured PCM is delivered. Swapped when the provider changes.
 pub type PcmSink = Arc<Mutex<Option<Sender<Vec<i16>>>>>;
 
+/// Glitches in one stream's lifetime before the capture is declared broken.
+const GLITCH_STORM: u32 = 12;
+
+/// Whether a stream error callback means the capture is over, or just that
+/// the audio glitched and the stream is still delivering.
+fn stream_error_is_fatal(kind: cpal::ErrorKind) -> bool {
+    !matches!(
+        kind,
+        // "A potential audio glitch" (cpal's words) — the stream continues.
+        cpal::ErrorKind::Xrun
+            // The stream was rerouted to another device and keeps running.
+            | cpal::ErrorKind::DeviceChanged
+            // Real-time scheduling refused: higher latency, still capturing.
+            | cpal::ErrorKind::RealtimeDenied
+    )
+}
+
 pub struct AudioCapture {
     /// Events (level, errors) destined for the state machine.
     events: EventBus,
@@ -72,8 +89,24 @@ impl AudioCapturing for AudioCapture {
         let sink = Arc::clone(&self.pcm_sink);
 
         let error_events = self.events.clone();
+        let mut glitches: u32 = 0;
         let error_callback = move |err: cpal::Error| {
-            tracing::error!("audio stream error: {err}");
+            if !stream_error_is_fatal(err.kind()) {
+                // WASAPI reports a data discontinuity as an Xrun through this
+                // callback while the stream keeps running — routine on
+                // Windows (scheduling hiccups, Bluetooth mics), and a tiny
+                // gap in the audio is nothing next to killing the recording.
+                // A storm of them is a genuinely broken capture though, and
+                // silently transcribing garbage would be worse than stopping.
+                glitches += 1;
+                if glitches < GLITCH_STORM {
+                    tracing::warn!("audio glitch #{glitches} (non-fatal): {err}");
+                    return;
+                }
+                tracing::error!("persistent audio glitches; treating the stream as broken");
+            } else {
+                tracing::error!("audio stream error: {err}");
+            }
             let _ = error_events.send(Event::AudioError(format!(
                 "Microphone capture stopped: {err}"
             )));
@@ -326,6 +359,19 @@ pub fn normalized_level(rms: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_glitch_is_not_a_reason_to_stop_the_recording() {
+        // The failure this guards: WASAPI's routine data-discontinuity
+        // report killed every dictation with "Microphone capture stopped:
+        // a buffer underrun or overrun occurred."
+        assert!(!stream_error_is_fatal(cpal::ErrorKind::Xrun));
+        assert!(!stream_error_is_fatal(cpal::ErrorKind::DeviceChanged));
+        assert!(!stream_error_is_fatal(cpal::ErrorKind::RealtimeDenied));
+        // An unplugged device genuinely ends the capture.
+        assert!(stream_error_is_fatal(cpal::ErrorKind::DeviceNotAvailable));
+        assert!(stream_error_is_fatal(cpal::ErrorKind::StreamInvalidated));
+    }
 
     #[test]
     fn silence_reads_as_zero_and_full_scale_reads_as_one() {
