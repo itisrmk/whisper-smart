@@ -15,8 +15,11 @@ share the same speech engines and model catalog.
 
 Download `whisper-smart-X.Y.Z-windows-x86_64.zip` from the
 [releases page](https://github.com/itisrmk/whisper-smart/releases), unzip it
-anywhere, and run `whisper-smart.exe`. The app lives in the notification area
-(system tray); there is no main window until you open Settings from the tray.
+anywhere, and run `whisper-smart.exe`. The Settings window opens; closing it
+keeps the app running in the notification area (system tray), which is where
+it lives — left-click the tray icon to toggle dictation, right-click for the
+menu, including Quit. Only one copy runs at a time; launching the exe again
+just reminds you it is already in the tray.
 
 Windows SmartScreen will warn about an unsigned app on first launch: choose
 *More info → Run anyway*. To start with Windows, put a shortcut to

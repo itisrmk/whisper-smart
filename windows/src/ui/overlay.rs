@@ -150,9 +150,9 @@ impl Overlay {
             OverlayStyle::None => return,
         };
 
-        // Centre horizontally on the monitor; anchor to the chosen edge. The
-        // work area is not exposed, so the bubble's 96px margin doubles as
-        // taskbar clearance — the same figure the macOS panel uses.
+        // Initial guess from whatever monitor the context reports; corrected
+        // below from inside the overlay's own viewport, whose monitor is the
+        // one that actually matters.
         let monitor = ctx
             .input(|i| i.viewport().monitor_size)
             .unwrap_or(egui::vec2(1920.0, 1080.0));
@@ -172,7 +172,12 @@ impl Overlay {
             .with_transparent(true)
             .with_always_on_top()
             .with_taskbar(false)
-            .with_active(false);
+            .with_active(false)
+            // Clicks pass through to whatever is underneath: the user is
+            // dictating into another window, and the pill must never eat a
+            // click aimed at it — the same reason the Linux overlay runs
+            // with keyboard interactivity off.
+            .with_mouse_passthrough(true);
 
         let state = self.state.clone();
         let transcript = self.transcript.clone();
@@ -183,6 +188,7 @@ impl Overlay {
             egui::ViewportId::from_hash_of("whisper-smart-overlay"),
             builder,
             move |ctx, _class| {
+                reposition(ctx, size, top_margin, bottom_margin);
                 egui::CentralPanel::default()
                     .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
                     .show(ctx, |ui| {
@@ -191,6 +197,31 @@ impl Overlay {
             },
         );
         self.visible = true;
+    }
+}
+
+/// Keeps the pill centred on its own monitor: bottom-centre for the bubble,
+/// top-centre for the bar. Runs inside the overlay's viewport, where
+/// `monitor_size` describes the monitor the pill is actually on, and only
+/// moves the window when it has drifted — this is a per-frame call.
+fn reposition(ctx: &egui::Context, size: egui::Vec2, top: Option<f32>, bottom: Option<f32>) {
+    let (monitor, outer) = ctx.input(|i| (i.viewport().monitor_size, i.viewport().outer_rect));
+    let Some(monitor) = monitor else { return };
+    if monitor.x <= 1.0 || monitor.y <= 1.0 {
+        return;
+    }
+
+    let x = ((monitor.x - size.x) / 2.0).max(0.0);
+    let y = match (top, bottom) {
+        (Some(top), _) => top,
+        (_, Some(bottom)) => (monitor.y - size.y - bottom).max(0.0),
+        _ => 0.0,
+    };
+
+    let drifted =
+        outer.is_none_or(|rect| (rect.min.x - x).abs() > 1.0 || (rect.min.y - y).abs() > 1.0);
+    if drifted {
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
     }
 }
 

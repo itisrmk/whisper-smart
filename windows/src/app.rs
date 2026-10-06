@@ -49,20 +49,47 @@ pub fn run() -> i32 {
     ensure_directories();
     init_logging();
 
+    // A second copy would fight the first over the hotkey hook, the tray
+    // slot, and the config file — and with the window living in the tray it
+    // is easy to start one by accident.
+    if !acquire_single_instance() {
+        tracing::warn!("another instance is already running; exiting");
+        // Launched from Explorer there is no console to print into, so the
+        // explanation has to arrive as a toast.
+        notify::error(
+            "Whisper Smart is already running",
+            "Look for its icon in the system tray (notification area).",
+        );
+        return 0;
+    }
+
     let store = SettingsStore::load();
     let waker = Waker::new();
     let (bus, events_rx) = EventBus::new(waker.clone());
 
+    // The root viewport is a permanent 1×1 transparent helper that stays
+    // technically visible but is never seen: parked off-screen, no
+    // decorations, no taskbar entry, click-through, never focused.
+    //
+    // This is deliberate, not an oversight. eframe stops running the update
+    // loop for a window Windows considers hidden or minimized, and stops
+    // processing show/hide viewport commands with it — so a conventional
+    // "hide the main window" tray app deadlocks: tray clicks queue forever
+    // and nothing can ever be shown again (egui#5229). With an always-visible
+    // root, the loop always ticks (still 0 fps when idle), and the settings
+    // window and the recording overlay are child viewports that exist only
+    // while they are open — there is no hide/show state to get wrong.
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Whisper Smart")
-            .with_inner_size([tokens::size::SETTINGS_WIDTH, tokens::size::SETTINGS_HEIGHT])
-            .with_min_inner_size([480.0, 360.0])
-            // The app lives in the tray; the settings window starts hidden
-            // and is shown on demand.
-            .with_visible(false)
+            .with_inner_size([1.0, 1.0])
+            .with_position([-2000.0, -2000.0])
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_taskbar(false)
+            .with_active(false)
+            .with_mouse_passthrough(true)
             .with_icon(app_icon()),
-        centered: true,
         ..Default::default()
     };
 
@@ -122,20 +149,30 @@ fn init_logging() {
 }
 
 /// The window/taskbar icon, decoded from the same PNG every build ships.
-fn app_icon() -> egui::IconData {
-    const LOGO: &[u8] = include_bytes!("../resources/whisper-smart-logo.png");
-    match image::load_from_memory(LOGO) {
-        Ok(decoded) => {
-            let rgba = decoded.to_rgba8();
-            let (width, height) = rgba.dimensions();
-            egui::IconData {
-                rgba: rgba.into_raw(),
-                width,
-                height,
+///
+/// Cached behind an `Arc`: the settings viewport re-declares its builder
+/// every frame, and egui diffs builders by comparing these — a fresh
+/// allocation per frame would both decode a PNG at frame rate and make the
+/// icon look perpetually changed.
+fn app_icon() -> std::sync::Arc<egui::IconData> {
+    static ICON: std::sync::OnceLock<std::sync::Arc<egui::IconData>> = std::sync::OnceLock::new();
+    ICON.get_or_init(|| {
+        const LOGO: &[u8] = include_bytes!("../resources/whisper-smart-logo.png");
+        let data = match image::load_from_memory(LOGO) {
+            Ok(decoded) => {
+                let rgba = decoded.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                egui::IconData {
+                    rgba: rgba.into_raw(),
+                    width,
+                    height,
+                }
             }
-        }
-        Err(_) => egui::IconData::default(),
-    }
+            Err(_) => egui::IconData::default(),
+        };
+        std::sync::Arc::new(data)
+    })
+    .clone()
 }
 
 // The post-processed transcript behind the current success state, captured by
@@ -161,7 +198,9 @@ pub struct App {
 
     overlay: Rc<RefCell<Overlay>>,
     settings_ui: SettingsUi,
-    settings_visible: bool,
+    /// Whether the settings viewport exists this frame. Closing the window
+    /// simply stops declaring it; the app keeps living in the tray.
+    settings_open: bool,
 
     ui_rx: Receiver<UiCommand>,
 
@@ -170,8 +209,8 @@ pub struct App {
     /// Name of the provider currently installed, for the history log.
     provider_name: String,
 
-    /// True once Quit was chosen, so the close request is honoured instead of
-    /// being converted into a hide.
+    /// True once Quit was chosen, so a close request on the root helper is
+    /// honoured rather than ignored.
     quitting: bool,
 }
 
@@ -227,7 +266,7 @@ impl App {
             tray_tx,
             overlay,
             settings_ui,
-            settings_visible: false,
+            settings_open: false,
             ui_rx,
             blocker: None,
             provider_name: String::new(),
@@ -404,6 +443,15 @@ impl App {
                 self.shutdown();
                 self.quitting = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                ctx.request_repaint();
+                // Failsafe: a tray app that cannot be quit is the worst bug
+                // it can have, so if the event loop does not wind down on its
+                // own the process exits regardless.
+                std::thread::spawn(|| {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    tracing::warn!("event loop did not exit after Quit; forcing exit");
+                    std::process::exit(0);
+                });
             }
         }
     }
@@ -438,15 +486,15 @@ impl App {
 
     fn open_settings(&mut self, ctx: &egui::Context, tab: Tab) {
         self.settings_ui.tab = tab;
+        if self.settings_open {
+            // Already open: bring it forward rather than resetting it.
+            ctx.send_viewport_cmd_to(settings_viewport_id(), egui::ViewportCommand::Focus);
+            ctx.request_repaint();
+            return;
+        }
         self.settings_ui.refresh(&self.store);
-        self.settings_visible = true;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-    }
-
-    fn hide_settings(&mut self, ctx: &egui::Context) {
-        self.settings_visible = false;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        self.settings_open = true;
+        ctx.request_repaint();
     }
 
     fn dispatch(&mut self, event: Event) {
@@ -511,9 +559,16 @@ impl App {
     }
 }
 
+/// Stable id for the settings viewport, so focus commands can target it.
+fn settings_viewport_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("whisper-smart-settings")
+}
+
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        tokens::BG.to_normalized_gamma_f32()
+        // The root helper must stay invisible, and the overlay composes its
+        // own translucent pill over this.
+        egui::Rgba::TRANSPARENT.to_array()
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -521,13 +576,16 @@ impl eframe::App for App {
         // it is built on the first frame rather than in `new`.
         if !self.tray_attempted {
             self.start_tray();
+            // First frame: open Settings so launching the exe visibly does
+            // something. Closing it leaves the app running in the tray.
+            self.open_settings(ctx, Tab::General);
         }
 
-        // Closing the settings window hides it — the app lives in the tray —
-        // unless Quit already ran.
+        // A close request on the root helper has no window the user can see
+        // behind it; it only arrives from the system (or Quit), so honour it.
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.hide_settings(ctx);
+            self.shutdown();
+            self.quitting = true;
         }
 
         // Drain in bounded batches so a burst cannot starve the frame.
@@ -550,17 +608,60 @@ impl eframe::App for App {
             self.handle_ui_command(command);
         }
 
-        if self.settings_visible {
-            self.settings_ui.show(ctx, &self.store);
-        } else {
-            // The root viewport still paints while hidden; keep it cheap.
-            egui::CentralPanel::default()
-                .frame(egui::Frame::new().fill(tokens::BG))
-                .show(ctx, |_ui| {});
+        // The root helper paints nothing at all.
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(egui::Color32::TRANSPARENT))
+            .show(ctx, |_ui| {});
+
+        // The settings window exists exactly while it is open. Its close
+        // button simply stops it being declared; the app stays in the tray.
+        if self.settings_open {
+            let builder = egui::ViewportBuilder::default()
+                .with_title("Whisper Smart")
+                .with_inner_size([tokens::size::SETTINGS_WIDTH, tokens::size::SETTINGS_HEIGHT])
+                .with_min_inner_size([480.0, 360.0])
+                .with_icon(app_icon());
+
+            let mut close_requested = false;
+            let settings_ui = &mut self.settings_ui;
+            let store = &self.store;
+            ctx.show_viewport_immediate(settings_viewport_id(), builder, |ctx, _class| {
+                settings_ui.show(ctx, store);
+                if ctx.input(|i| i.viewport().close_requested()) {
+                    close_requested = true;
+                }
+            });
+            if close_requested {
+                self.settings_open = false;
+            }
         }
 
         self.overlay.borrow_mut().show(ctx);
     }
+}
+
+/// Claims the single-instance lock for this session, or reports that another
+/// copy already holds it. The handle is deliberately leaked: the mutex must
+/// live exactly as long as the process.
+#[cfg(windows)]
+fn acquire_single_instance() -> bool {
+    use windows::core::w;
+    use windows::Win32::Foundation::ERROR_ALREADY_EXISTS;
+    use windows::Win32::System::Threading::CreateMutexW;
+
+    unsafe {
+        match CreateMutexW(None, false, w!("Local\\WhisperSmartSingleInstance")) {
+            Ok(_handle) => windows::Win32::Foundation::GetLastError() != ERROR_ALREADY_EXISTS,
+            // Could not even create the mutex: fail open rather than refusing
+            // to start over a bookkeeping primitive.
+            Err(_) => true,
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn acquire_single_instance() -> bool {
+    true
 }
 
 // ---------------------------------------------------------------------------

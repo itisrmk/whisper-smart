@@ -36,8 +36,9 @@ cat > "$STAGE/GETTING-STARTED.txt" <<'NOTES'
 Whisper Smart for Windows
 =========================
 
-1. Run whisper-smart.exe. The app lives in the notification area (system
-   tray) — there is no main window until you open Settings from the tray.
+1. Run whisper-smart.exe. The Settings window opens; closing it keeps the
+   app running in the notification area (system tray). Only one copy runs
+   at a time. Quit from the tray menu.
 2. In Settings -> Provider, press "Install whisper.cpp" and download a model
    (Balanced is a good start).
 3. Hold Right Ctrl, speak, release. The transcript is inserted where your
