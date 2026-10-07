@@ -25,23 +25,24 @@ Smoke tests use London School mocking (MockHotkeyMonitor, MockAudioCapture, Mock
 
 ## Release
 
-One tag ships both platforms: `vX.Y.Z` carries the macOS DMG and the Linux tarball, built from the same commit. `.github/workflows/release.yml` runs `params` → (`macos` ‖ `linux`) → `publish`; **both platform builds must pass** before the appcast commit, the version bump, the tag, or the release exist. Full detail in `docs/RELEASE.md`.
+One tag ships every platform: `vX.Y.Z` carries the macOS DMG, the Linux tarball, and the Windows zip, built from the same commit. `.github/workflows/release.yml` runs `params` → (`macos` ‖ `linux` ‖ `windows`) → `publish`; **all platform builds must pass** before the appcast commit, the version bump, the tag, or the release exist. Full detail in `docs/RELEASE.md`.
 
 It runs two ways:
 - **Automatic**: every merged PR into `main` cuts a beta release with an auto-bumped patch version. PR labels `release:minor` / `release:major` bump differently; the `skip-release` label opts out; docs/site/CI-only PRs never trigger.
 - **Manual**: `gh workflow run release.yml -f version=X.Y.Z -f channel=beta -f checklist_confirmed=true -f notes="..."` for explicit versions or production releases.
 
-The version is resolved once and propagated: macOS via the `VERSION` env, Linux via `linux/packaging/set-version.sh` (Cargo manifest, lockfile, both PKGBUILDs). Never bump those by hand. Release notes for both the GitHub Release and the Sparkle appcast come from `scripts/compose_release_notes.sh`.
+The version is resolved once and propagated: macOS via the `VERSION` env, Linux via `linux/packaging/set-version.sh` (Cargo manifest, lockfile, both PKGBUILDs), Windows via `windows/packaging/set-version.sh`. Never bump those by hand. Release notes for both the GitHub Release and the Sparkle appcast come from `scripts/compose_release_notes.sh`.
 
 Local artifacts (testing only — ad-hoc signed, never published):
 
 ```bash
 VERSION=X.Y.Z ALLOW_ADHOC_SIGNING=1 bash scripts/package_dmg.sh          # macOS DMG
 cd linux && VERSION=X.Y.Z bash packaging/make-tarball.sh                  # Linux tarball
+cd windows && VERSION=X.Y.Z bash packaging/make-zip.sh                    # Windows zip (Git Bash)
 bash scripts/compose_release_notes.sh --version X.Y.Z                     # Preview notes
 ```
 
-`.github/workflows/ci.yml` runs the same two builds (macOS + Linux) on every PR.
+`.github/workflows/ci.yml` runs the same three builds (macOS + Linux + Windows) on every PR; the Windows job also uploads its zip as a workflow artifact so a PR build can be tested on a real machine before merging.
 
 ## Architecture
 
@@ -172,6 +173,36 @@ Key correspondences:
 Two behavioural differences are deliberate: there is no microphone-permission
 state (PipeWire needs no TCC-style prompt), and an unusable local provider never
 falls back to the cloud unless the user explicitly enabled it *and* saved a key.
+
+## Windows Port (`windows/`)
+
+A separate Rust implementation for Windows 10/11, mirroring `linux/` module for
+module — same core, same STT engines and model catalog, same Python sidecar
+protocol. The UI is egui (pure Rust, no system toolkit) carrying the same
+design tokens; the platform layer is Win32: `WH_KEYBOARD_LL` hook for the
+hotkey (left/right modifiers are distinct VK codes), `SendInput` Unicode
+typing + Ctrl+V paste for insertion, WASAPI via cpal for audio. whisper.cpp
+stays the default provider: the app installs the official prebuilt
+`whisper-cli.exe` (pinned by checksum) on request, since Windows has no distro
+package manager. See `windows/README.md` for the full mapping.
+
+```bash
+cd windows
+cargo build --release              # on Windows (MSVC)
+bash scripts/run_qa_smoke.sh       # fmt + clippy + tests + sidecar syntax
+```
+
+The crate also builds and tests on Unix hosts (platform integrations stubbed),
+and the Win32 layer is verified from them with
+`cargo check --target x86_64-pc-windows-msvc`.
+
+| Linux | Windows |
+|-------|---------|
+| `linux/src/platform/hotkey.rs` (evdev) | `windows/src/platform/hotkey.rs` (WH_KEYBOARD_LL) |
+| `linux/src/platform/injector.rs` (wtype + paste) | `windows/src/platform/injector.rs` (SendInput + paste) |
+| `linux/src/platform/compositor.rs` | `windows/src/platform/focus.rs` (foreground process) |
+| `linux/src/ui/*` (GTK4 + layer-shell + ksni) | `windows/src/ui/*` (egui + tray-icon) |
+| `~/.config/whisper-smart/config.toml` | `%APPDATA%\whisper-smart\config.toml` |
 
 ## File Organization
 

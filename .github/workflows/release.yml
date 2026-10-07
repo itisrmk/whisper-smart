@@ -1,13 +1,15 @@
-# One tag, both platforms.
+# One tag, every platform.
 #
-# A release is a single `vX.Y.Z` tag that carries the macOS DMG and the Linux
-# tarball, cut from the same commit. The two builds run in parallel and both
-# must pass before anything is published: the tag, the appcast commit and the
-# GitHub Release are all created by the final `publish` job, so a failed build
-# on either platform leaves no half-finished release behind.
+# A release is a single `vX.Y.Z` tag that carries the macOS DMG, the Linux
+# tarball, and the Windows zip, cut from the same commit. The builds run in
+# parallel and all must pass before anything is published: the tag, the
+# appcast commit and the GitHub Release are all created by the final
+# `publish` job, so a failed build on any platform leaves no half-finished
+# release behind.
 #
 #   params ──┬── macos (signed, notarized DMG + appcast entry) ──┬── publish
-#            └── linux (tested, versioned tarball) ──────────────┘
+#            ├── linux (tested, versioned tarball) ──────────────┤
+#            └── windows (tested, versioned zip) ────────────────┘
 name: Release
 
 on:
@@ -416,10 +418,62 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Nothing is pushed until both platforms have built. This job owns the
+  windows:
+    needs: params
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.params.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Stamp Version
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+        run: bash windows/packaging/set-version.sh "$VERSION"
+
+      - name: QA Smoke
+        working-directory: windows
+        run: bash scripts/run_qa_smoke.sh
+
+      - name: Build Zip
+        working-directory: windows
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+        run: bash packaging/make-zip.sh
+
+      - name: Verify Version Stamp
+        working-directory: windows
+        env:
+          VERSION: ${{ needs.params.outputs.version }}
+        run: |
+          set -euo pipefail
+          REPORTED="$(./target/release/whisper-smart.exe --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+          if [[ "$REPORTED" != "$VERSION" ]]; then
+            echo "Built binary reports $REPORTED but the release is $VERSION"
+            exit 1
+          fi
+          echo "Windows binary reports $REPORTED"
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            windows/dist/*.zip
+            windows/dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # Nothing is pushed until every platform has built. This job owns the
   # appcast commit, the version bump, the tag and the release itself.
   publish:
-    needs: [params, macos, linux]
+    needs: [params, macos, linux, windows]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -439,9 +493,10 @@ jobs:
         run: |
           set -euo pipefail
           cp artifacts/macos-release/appcast.xml appcast.xml
-          # Same stamp the Linux build used, so the committed manifest matches
-          # the binary that shipped.
+          # Same stamps the platform builds used, so the committed manifests
+          # match the binaries that shipped.
           bash linux/packaging/set-version.sh "$VERSION"
+          bash windows/packaging/set-version.sh "$VERSION"
 
       - name: Compose Release Notes
         id: notes
@@ -470,7 +525,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add appcast.xml linux/Cargo.toml linux/Cargo.lock linux/packaging/PKGBUILD linux/packaging/aur/whisper-smart/PKGBUILD
+          git add appcast.xml linux/Cargo.toml linux/Cargo.lock linux/packaging/PKGBUILD linux/packaging/aur/whisper-smart/PKGBUILD windows/Cargo.toml windows/Cargo.lock
           if git diff --cached --quiet; then
             echo "Nothing to commit."
           else
@@ -526,6 +581,8 @@ jobs:
             artifacts/macos-release/appcast.xml
             artifacts/linux-release/*.tar.gz
             artifacts/linux-release/*.tar.gz.sha256
+            artifacts/windows-release/*.zip
+            artifacts/windows-release/*.zip.sha256
 
       # The AUR stable package builds from the tag tarball, so its checksum can
       # only be computed once the tag exists. Doing it here keeps the packaging
