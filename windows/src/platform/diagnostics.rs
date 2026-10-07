@@ -156,12 +156,17 @@ fn check_provider(settings: &Settings) -> Check {
             }
         }
         ProviderKind::WhisperCpp => {
-            if whisper_cli_path().is_none() {
+            let Some(binary) = whisper_cli_path() else {
                 return Check::blocked(
                     "Provider",
                     "whisper.cpp is selected but whisper-cli.exe is not installed.",
                     Some("Open Settings → Provider and press \"Install whisper.cpp\".".to_string()),
                 );
+            };
+            // The binary being on disk is not the same as it being able to
+            // run: a missing VC++ runtime leaves it present but dead.
+            if let Err(err) = crate::stt::whisper_cpp::probe_binary(&binary) {
+                return Check::blocked("Provider", err, None);
             }
             model_check(settings)
         }

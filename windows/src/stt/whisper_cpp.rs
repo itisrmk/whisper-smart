@@ -119,15 +119,56 @@ pub fn model_file_path(model: &LocalModel) -> Option<PathBuf> {
     }
 }
 
-enum RunFailure {
+pub(crate) enum RunFailure {
     Spawn(std::io::Error),
     TimedOut,
+}
+
+/// NT status codes a process exits with when it could not even start.
+/// The official whisper.cpp binaries link the MSVC runtime dynamically, so a
+/// machine without the VC++ Redistributable dies with one of these.
+const STARTUP_FAILURE_CODES: [i32; 3] = [
+    0xC0000135u32 as i32, // STATUS_DLL_NOT_FOUND
+    0xC0000139u32 as i32, // STATUS_ENTRYPOINT_NOT_FOUND
+    0xC0000142u32 as i32, // STATUS_DLL_INIT_FAILED
+];
+
+/// Translates an exit status into a remedy when the process never really ran.
+fn startup_failure(status: &std::process::ExitStatus) -> Option<String> {
+    let code = status.code()?;
+    STARTUP_FAILURE_CODES.contains(&code).then(|| {
+        format!(
+            "whisper-cli.exe cannot start on this machine (exit code {code:#X}): a required \
+             system library is missing. Install the Microsoft Visual C++ Redistributable \
+             (x64) from https://aka.ms/vs/17/release/vc_redist.x64.exe and try again."
+        )
+    })
+}
+
+/// Verifies the binary can actually start — DLLs resolved, process runs.
+/// `-h` prints usage and exits; any exit at all proves the loader is happy.
+pub(crate) fn probe_binary(binary: &Path) -> Result<(), String> {
+    let mut command = Command::new(binary);
+    command.arg("-h");
+    crate::platform::hide_console(&mut command);
+    match run_with_deadline(command, Duration::from_secs(20)) {
+        Ok(output) => match startup_failure(&output.status) {
+            Some(message) => Err(message),
+            None => Ok(()),
+        },
+        Err(RunFailure::Spawn(e)) => Err(format!("whisper-cli.exe could not be started: {e}")),
+        Err(RunFailure::TimedOut) => Err(
+            "whisper-cli.exe did not respond. Antivirus software may be blocking it; check \
+             your security software's quarantine and allow the file."
+                .to_string(),
+        ),
+    }
 }
 
 /// Runs a command to completion with an upper bound, killing it when the
 /// bound is hit. Both pipes are drained on their own threads so a chatty
 /// child can never deadlock against a full pipe while we poll.
-fn run_with_deadline(
+pub(crate) fn run_with_deadline(
     mut command: Command,
     deadline: Duration,
 ) -> Result<std::process::Output, RunFailure> {
@@ -250,6 +291,9 @@ impl Transcriber for WhisperCppTranscriber {
         );
 
         if !output.status.success() {
+            if let Some(message) = startup_failure(&output.status) {
+                return Err(message);
+            }
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("whisper-cli failed: {}", extract_error(&stderr)));
         }

@@ -21,6 +21,25 @@ pub fn hide_console(command: &mut std::process::Command) {
 #[cfg(not(windows))]
 pub fn hide_console(_command: &mut std::process::Command) {}
 
+/// Stops Windows from popping modal error dialogs for this process and its
+/// children. A child like whisper-cli.exe that fails to load a DLL would
+/// otherwise block forever on a "code execution cannot proceed" dialog that
+/// a GUI-subsystem parent never shows anyone — which presents as dictation
+/// stuck at "Transcribing…". With dialogs suppressed, the child exits
+/// immediately with a status code we can translate into a remedy.
+#[cfg(windows)]
+pub fn disable_error_dialogs() {
+    use windows::Win32::System::Diagnostics::Debug::{
+        SetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SEM_NOOPENFILEERRORBOX,
+    };
+    unsafe {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn disable_error_dialogs() {}
+
 /// The primary monitor's work area (the desktop minus the taskbar), in
 /// logical points — the coordinate space egui positions windows in.
 ///

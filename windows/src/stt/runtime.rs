@@ -567,6 +567,12 @@ pub fn install_whisper_cpp(progress: &ProgressSink) -> Result<(), String> {
         ));
     }
 
+    // Prove it can actually start before calling the install done: on a
+    // machine without the VC++ runtime the binary is present but dead, and
+    // the place to say so is here, not mid-dictation.
+    progress(Progress::Step("Verifying whisper-cli".to_string()));
+    crate::stt::whisper_cpp::probe_binary(&paths::whisper_cpp_dir().join(exe("whisper-cli")))?;
+
     let _ = std::fs::write(target.join("VERSION"), WHISPER_CPP_VERSION);
     progress(Progress::Done);
     Ok(())

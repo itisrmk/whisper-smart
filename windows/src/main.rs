@@ -13,6 +13,10 @@ use whisper_smart::platform::diagnostics::{self, CheckStatus};
 use whisper_smart::stt::runtime::{self, Progress};
 
 fn main() {
+    // Children that fail to start must return an exit code, not hang on an
+    // invisible dialog. Inherited by every process this app spawns.
+    whisper_smart::platform::disable_error_dialogs();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     // A GUI-subsystem process has no stdio; borrow the launching terminal's
